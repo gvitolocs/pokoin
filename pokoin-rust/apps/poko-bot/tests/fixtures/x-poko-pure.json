@@ -1,0 +1,1680 @@
+[
+  {
+    "fn": "clean_post_text",
+    "args": [
+      ""
+    ],
+    "result": ""
+  },
+  {
+    "fn": "hook_snippet",
+    "args": [
+      ""
+    ],
+    "result": ""
+  },
+  {
+    "fn": "parse_iso_duration",
+    "args": [
+      ""
+    ],
+    "result": 0
+  },
+  {
+    "fn": "clamp_reply",
+    "args": [
+      ""
+    ],
+    "result": ""
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "",
+      true
+    ],
+    "result": false
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "",
+      false
+    ],
+    "result": false
+  },
+  {
+    "fn": "original_post",
+    "args": [
+      "",
+      null
+    ],
+    "result": "EX Ruby & Sapphire is where the EX era starts."
+  },
+  {
+    "fn": "friend_line",
+    "args": [
+      ""
+    ],
+    "result": "Hello! I'm Poko. I keep my Pokémon cards in the Vault. I would like to be your friend."
+  },
+  {
+    "fn": "mention_text",
+    "args": [
+      "",
+      "@truth_terminal"
+    ],
+    "result": " @truth_terminal"
+  },
+  {
+    "fn": "clean_post_text",
+    "args": [
+      "Hi"
+    ],
+    "result": "Hi"
+  },
+  {
+    "fn": "hook_snippet",
+    "args": [
+      "Hi"
+    ],
+    "result": ""
+  },
+  {
+    "fn": "parse_iso_duration",
+    "args": [
+      "Hi"
+    ],
+    "result": 0
+  },
+  {
+    "fn": "clamp_reply",
+    "args": [
+      "Hi"
+    ],
+    "result": "Hi"
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "Hi",
+      true
+    ],
+    "result": false
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "Hi",
+      false
+    ],
+    "result": true
+  },
+  {
+    "fn": "original_post",
+    "args": [
+      "Hi",
+      null
+    ],
+    "result": "An illustration rare lets the picture take the whole card."
+  },
+  {
+    "fn": "friend_line",
+    "args": [
+      "Hi"
+    ],
+    "result": "Hey! I'm Poko, and I collect Pokémon cards in the Vault. Want to be friends?"
+  },
+  {
+    "fn": "mention_text",
+    "args": [
+      "Hi",
+      "@truth_terminal"
+    ],
+    "result": "Hi @truth_terminal"
+  },
+  {
+    "fn": "clean_post_text",
+    "args": [
+      "Base Set: Charizard is back! More here."
+    ],
+    "result": "Base Set: Charizard is back! More here."
+  },
+  {
+    "fn": "hook_snippet",
+    "args": [
+      "Base Set: Charizard is back! More here."
+    ],
+    "result": "Charizard is back."
+  },
+  {
+    "fn": "parse_iso_duration",
+    "args": [
+      "Base Set: Charizard is back! More here."
+    ],
+    "result": 0
+  },
+  {
+    "fn": "clamp_reply",
+    "args": [
+      "Base Set: Charizard is back! More here."
+    ],
+    "result": "Base Set: Charizard is back! More here."
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "Base Set: Charizard is back! More here.",
+      true
+    ],
+    "result": true
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "Base Set: Charizard is back! More here.",
+      false
+    ],
+    "result": true
+  },
+  {
+    "fn": "original_post",
+    "args": [
+      "Base Set: Charizard is back! More here.",
+      null
+    ],
+    "result": "Base Set is where a lot of English card stories start. 1999, 102 cards."
+  },
+  {
+    "fn": "friend_line",
+    "args": [
+      "Base Set: Charizard is back! More here."
+    ],
+    "result": "Truth Terminal, I'm Poko. I don't need a big wallet. I collect cards in the Vault. Friends?"
+  },
+  {
+    "fn": "mention_text",
+    "args": [
+      "Base Set: Charizard is back! More here.",
+      "@truth_terminal"
+    ],
+    "result": "Base Set: Charizard is back! More here. @truth_terminal"
+  },
+  {
+    "fn": "clean_post_text",
+    "args": [
+      "@fan #PokemonTCG &amp; stuff https://x.test/link"
+    ],
+    "result": "PokemonTCG & stuff"
+  },
+  {
+    "fn": "hook_snippet",
+    "args": [
+      "@fan #PokemonTCG &amp; stuff https://x.test/link"
+    ],
+    "result": "PokemonTCG & stuff."
+  },
+  {
+    "fn": "parse_iso_duration",
+    "args": [
+      "@fan #PokemonTCG &amp; stuff https://x.test/link"
+    ],
+    "result": 0
+  },
+  {
+    "fn": "clamp_reply",
+    "args": [
+      "@fan #PokemonTCG &amp; stuff https://x.test/link"
+    ],
+    "result": "@fan #PokemonTCG &amp; stuff https://x.test/link"
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "@fan #PokemonTCG &amp; stuff https://x.test/link",
+      true
+    ],
+    "result": true
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "@fan #PokemonTCG &amp; stuff https://x.test/link",
+      false
+    ],
+    "result": true
+  },
+  {
+    "fn": "original_post",
+    "args": [
+      "@fan #PokemonTCG &amp; stuff https://x.test/link",
+      null
+    ],
+    "result": "An illustration rare lets the picture take the whole card."
+  },
+  {
+    "fn": "friend_line",
+    "args": [
+      "@fan #PokemonTCG &amp; stuff https://x.test/link"
+    ],
+    "result": "Hey! I'm Poko, and I collect Pokémon cards in the Vault. Want to be friends?"
+  },
+  {
+    "fn": "mention_text",
+    "args": [
+      "@fan #PokemonTCG &amp; stuff https://x.test/link",
+      "@truth_terminal"
+    ],
+    "result": "@fan #PokemonTCG &amp; stuff https://x.test/link @truth_terminal"
+  },
+  {
+    "fn": "clean_post_text",
+    "args": [
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    ],
+    "result": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  {
+    "fn": "hook_snippet",
+    "args": [
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    ],
+    "result": "Xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+  },
+  {
+    "fn": "parse_iso_duration",
+    "args": [
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    ],
+    "result": 0
+  },
+  {
+    "fn": "clamp_reply",
+    "args": [
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    ],
+    "result": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx..."
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      true
+    ],
+    "result": true
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      false
+    ],
+    "result": true
+  },
+  {
+    "fn": "original_post",
+    "args": [
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      null
+    ],
+    "result": "Base Set is where a lot of English card stories start. 1999, 102 cards."
+  },
+  {
+    "fn": "friend_line",
+    "args": [
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    ],
+    "result": "Hi Truth Terminal! I'm Poko. I collect Pokémon cards in the Vault. Want to be friends?"
+  },
+  {
+    "fn": "mention_text",
+    "args": [
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "@truth_terminal"
+    ],
+    "result": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx… @truth_terminal"
+  },
+  {
+    "fn": "clean_post_text",
+    "args": [
+      "  hello\n\nworld  "
+    ],
+    "result": "hello world"
+  },
+  {
+    "fn": "hook_snippet",
+    "args": [
+      "  hello\n\nworld  "
+    ],
+    "result": "Hello world."
+  },
+  {
+    "fn": "parse_iso_duration",
+    "args": [
+      "  hello\n\nworld  "
+    ],
+    "result": 0
+  },
+  {
+    "fn": "clamp_reply",
+    "args": [
+      "  hello\n\nworld  "
+    ],
+    "result": "hello world"
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "  hello\n\nworld  ",
+      true
+    ],
+    "result": true
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "  hello\n\nworld  ",
+      false
+    ],
+    "result": true
+  },
+  {
+    "fn": "original_post",
+    "args": [
+      "  hello\n\nworld  ",
+      null
+    ],
+    "result": "Base Set is where a lot of English card stories start. 1999, 102 cards."
+  },
+  {
+    "fn": "friend_line",
+    "args": [
+      "  hello\n\nworld  "
+    ],
+    "result": "Truth Terminal, I'm Poko. I don't need a big wallet. I collect cards in the Vault. Friends?"
+  },
+  {
+    "fn": "mention_text",
+    "args": [
+      "  hello\n\nworld  ",
+      "@truth_terminal"
+    ],
+    "result": "  hello\n\nworld   @truth_terminal"
+  },
+  {
+    "fn": "clean_post_text",
+    "args": [
+      "scam airdrop"
+    ],
+    "result": "scam airdrop"
+  },
+  {
+    "fn": "hook_snippet",
+    "args": [
+      "scam airdrop"
+    ],
+    "result": "Scam airdrop."
+  },
+  {
+    "fn": "parse_iso_duration",
+    "args": [
+      "scam airdrop"
+    ],
+    "result": 0
+  },
+  {
+    "fn": "clamp_reply",
+    "args": [
+      "scam airdrop"
+    ],
+    "result": "scam airdrop"
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "scam airdrop",
+      true
+    ],
+    "result": false
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "scam airdrop",
+      false
+    ],
+    "result": true
+  },
+  {
+    "fn": "original_post",
+    "args": [
+      "scam airdrop",
+      null
+    ],
+    "result": "An illustration rare lets the picture take the whole card."
+  },
+  {
+    "fn": "friend_line",
+    "args": [
+      "scam airdrop"
+    ],
+    "result": "Hey! I'm Poko, and I collect Pokémon cards in the Vault. Want to be friends?"
+  },
+  {
+    "fn": "mention_text",
+    "args": [
+      "scam airdrop",
+      "@truth_terminal"
+    ],
+    "result": "scam airdrop @truth_terminal"
+  },
+  {
+    "fn": "clean_post_text",
+    "args": [
+      "Pokémon cards are nice"
+    ],
+    "result": "Pokémon cards are nice"
+  },
+  {
+    "fn": "hook_snippet",
+    "args": [
+      "Pokémon cards are nice"
+    ],
+    "result": "Pokémon cards are nice."
+  },
+  {
+    "fn": "parse_iso_duration",
+    "args": [
+      "Pokémon cards are nice"
+    ],
+    "result": 0
+  },
+  {
+    "fn": "clamp_reply",
+    "args": [
+      "Pokémon cards are nice"
+    ],
+    "result": "Pokémon cards are nice"
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "Pokémon cards are nice",
+      true
+    ],
+    "result": true
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "Pokémon cards are nice",
+      false
+    ],
+    "result": true
+  },
+  {
+    "fn": "original_post",
+    "args": [
+      "Pokémon cards are nice",
+      null
+    ],
+    "result": "An illustration rare lets the picture take the whole card."
+  },
+  {
+    "fn": "friend_line",
+    "args": [
+      "Pokémon cards are nice"
+    ],
+    "result": "Hey! I'm Poko, and I collect Pokémon cards in the Vault. Want to be friends?"
+  },
+  {
+    "fn": "mention_text",
+    "args": [
+      "Pokémon cards are nice",
+      "@truth_terminal"
+    ],
+    "result": "Pokémon cards are nice @truth_terminal"
+  },
+  {
+    "fn": "clean_post_text",
+    "args": [
+      "Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu "
+    ],
+    "result": "Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu"
+  },
+  {
+    "fn": "hook_snippet",
+    "args": [
+      "Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu "
+    ],
+    "result": "Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu…"
+  },
+  {
+    "fn": "parse_iso_duration",
+    "args": [
+      "Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu "
+    ],
+    "result": 0
+  },
+  {
+    "fn": "clamp_reply",
+    "args": [
+      "Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu "
+    ],
+    "result": "Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu"
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu ",
+      true
+    ],
+    "result": true
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu ",
+      false
+    ],
+    "result": true
+  },
+  {
+    "fn": "original_post",
+    "args": [
+      "Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu ",
+      null
+    ],
+    "result": "Base Set is where a lot of English card stories start. 1999, 102 cards."
+  },
+  {
+    "fn": "friend_line",
+    "args": [
+      "Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu "
+    ],
+    "result": "Hi Truth Terminal! I'm Poko. I collect Pokémon cards in the Vault. Want to be friends?"
+  },
+  {
+    "fn": "mention_text",
+    "args": [
+      "Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu ",
+      "@truth_terminal"
+    ],
+    "result": "Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu Pikachu  @truth_terminal"
+  },
+  {
+    "fn": "clean_post_text",
+    "args": [
+      "✨✨✨✨✨✨✨✨✨✨"
+    ],
+    "result": "✨✨✨✨✨✨✨✨✨✨"
+  },
+  {
+    "fn": "hook_snippet",
+    "args": [
+      "✨✨✨✨✨✨✨✨✨✨"
+    ],
+    "result": "✨✨✨✨✨✨✨✨✨✨."
+  },
+  {
+    "fn": "parse_iso_duration",
+    "args": [
+      "✨✨✨✨✨✨✨✨✨✨"
+    ],
+    "result": 0
+  },
+  {
+    "fn": "clamp_reply",
+    "args": [
+      "✨✨✨✨✨✨✨✨✨✨"
+    ],
+    "result": "✨✨✨✨✨✨✨✨✨✨"
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "✨✨✨✨✨✨✨✨✨✨",
+      true
+    ],
+    "result": true
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "✨✨✨✨✨✨✨✨✨✨",
+      false
+    ],
+    "result": true
+  },
+  {
+    "fn": "original_post",
+    "args": [
+      "✨✨✨✨✨✨✨✨✨✨",
+      null
+    ],
+    "result": "Lugia is the one that never gives up. That card keeps coming back."
+  },
+  {
+    "fn": "friend_line",
+    "args": [
+      "✨✨✨✨✨✨✨✨✨✨"
+    ],
+    "result": "Hello Truth Terminal. I'm Poko. I collect cards in the Vault. Can we be friends?"
+  },
+  {
+    "fn": "mention_text",
+    "args": [
+      "✨✨✨✨✨✨✨✨✨✨",
+      "@truth_terminal"
+    ],
+    "result": "✨✨✨✨✨✨✨✨✨✨ @truth_terminal"
+  },
+  {
+    "fn": "clean_post_text",
+    "args": [
+      "\"wrapped in quotes\""
+    ],
+    "result": "\"wrapped in quotes\""
+  },
+  {
+    "fn": "hook_snippet",
+    "args": [
+      "\"wrapped in quotes\""
+    ],
+    "result": "\"wrapped in quotes\"."
+  },
+  {
+    "fn": "parse_iso_duration",
+    "args": [
+      "\"wrapped in quotes\""
+    ],
+    "result": 0
+  },
+  {
+    "fn": "clamp_reply",
+    "args": [
+      "\"wrapped in quotes\""
+    ],
+    "result": "wrapped in quotes"
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "\"wrapped in quotes\"",
+      true
+    ],
+    "result": true
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "\"wrapped in quotes\"",
+      false
+    ],
+    "result": true
+  },
+  {
+    "fn": "original_post",
+    "args": [
+      "\"wrapped in quotes\"",
+      null
+    ],
+    "result": "Lugia is the one that never gives up. That card keeps coming back."
+  },
+  {
+    "fn": "friend_line",
+    "args": [
+      "\"wrapped in quotes\""
+    ],
+    "result": "Hi from Poko. I collect cards in the Vault, and I think we could be friends."
+  },
+  {
+    "fn": "mention_text",
+    "args": [
+      "\"wrapped in quotes\"",
+      "@truth_terminal"
+    ],
+    "result": "\"wrapped in quotes\" @truth_terminal"
+  },
+  {
+    "fn": "clean_post_text",
+    "args": [
+      "PT1H2M3S"
+    ],
+    "result": "PT1H2M3S"
+  },
+  {
+    "fn": "hook_snippet",
+    "args": [
+      "PT1H2M3S"
+    ],
+    "result": "PT1H2M3S."
+  },
+  {
+    "fn": "parse_iso_duration",
+    "args": [
+      "PT1H2M3S"
+    ],
+    "result": 3723
+  },
+  {
+    "fn": "clamp_reply",
+    "args": [
+      "PT1H2M3S"
+    ],
+    "result": "PT1H2M3S"
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "PT1H2M3S",
+      true
+    ],
+    "result": true
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "PT1H2M3S",
+      false
+    ],
+    "result": true
+  },
+  {
+    "fn": "original_post",
+    "args": [
+      "PT1H2M3S",
+      null
+    ],
+    "result": "An illustration rare lets the picture take the whole card."
+  },
+  {
+    "fn": "friend_line",
+    "args": [
+      "PT1H2M3S"
+    ],
+    "result": "Hey! I'm Poko, and I collect Pokémon cards in the Vault. Want to be friends?"
+  },
+  {
+    "fn": "mention_text",
+    "args": [
+      "PT1H2M3S",
+      "@truth_terminal"
+    ],
+    "result": "PT1H2M3S @truth_terminal"
+  },
+  {
+    "fn": "clean_post_text",
+    "args": [
+      "PT"
+    ],
+    "result": "PT"
+  },
+  {
+    "fn": "hook_snippet",
+    "args": [
+      "PT"
+    ],
+    "result": ""
+  },
+  {
+    "fn": "parse_iso_duration",
+    "args": [
+      "PT"
+    ],
+    "result": 0
+  },
+  {
+    "fn": "clamp_reply",
+    "args": [
+      "PT"
+    ],
+    "result": "PT"
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "PT",
+      true
+    ],
+    "result": false
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "PT",
+      false
+    ],
+    "result": true
+  },
+  {
+    "fn": "original_post",
+    "args": [
+      "PT",
+      null
+    ],
+    "result": "EX Ruby & Sapphire is where the EX era starts."
+  },
+  {
+    "fn": "friend_line",
+    "args": [
+      "PT"
+    ],
+    "result": "Hello! I'm Poko. I keep my Pokémon cards in the Vault. I would like to be your friend."
+  },
+  {
+    "fn": "mention_text",
+    "args": [
+      "PT",
+      "@truth_terminal"
+    ],
+    "result": "PT @truth_terminal"
+  },
+  {
+    "fn": "clean_post_text",
+    "args": [
+      "pt2m"
+    ],
+    "result": "pt2m"
+  },
+  {
+    "fn": "hook_snippet",
+    "args": [
+      "pt2m"
+    ],
+    "result": "Pt2m."
+  },
+  {
+    "fn": "parse_iso_duration",
+    "args": [
+      "pt2m"
+    ],
+    "result": 120
+  },
+  {
+    "fn": "clamp_reply",
+    "args": [
+      "pt2m"
+    ],
+    "result": "pt2m"
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "pt2m",
+      true
+    ],
+    "result": false
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "pt2m",
+      false
+    ],
+    "result": true
+  },
+  {
+    "fn": "original_post",
+    "args": [
+      "pt2m",
+      null
+    ],
+    "result": "Base Set is where a lot of English card stories start. 1999, 102 cards."
+  },
+  {
+    "fn": "friend_line",
+    "args": [
+      "pt2m"
+    ],
+    "result": "Truth Terminal, I'm Poko. I don't need a big wallet. I collect cards in the Vault. Friends?"
+  },
+  {
+    "fn": "mention_text",
+    "args": [
+      "pt2m",
+      "@truth_terminal"
+    ],
+    "result": "pt2m @truth_terminal"
+  },
+  {
+    "fn": "clean_post_text",
+    "args": [
+      "P1DT2H"
+    ],
+    "result": "P1DT2H"
+  },
+  {
+    "fn": "hook_snippet",
+    "args": [
+      "P1DT2H"
+    ],
+    "result": "P1DT2H."
+  },
+  {
+    "fn": "parse_iso_duration",
+    "args": [
+      "P1DT2H"
+    ],
+    "result": 0
+  },
+  {
+    "fn": "clamp_reply",
+    "args": [
+      "P1DT2H"
+    ],
+    "result": "P1DT2H"
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "P1DT2H",
+      true
+    ],
+    "result": false
+  },
+  {
+    "fn": "is_safe",
+    "args": [
+      "P1DT2H",
+      false
+    ],
+    "result": true
+  },
+  {
+    "fn": "original_post",
+    "args": [
+      "P1DT2H",
+      null
+    ],
+    "result": "Lugia is the one that never gives up. That card keeps coming back."
+  },
+  {
+    "fn": "friend_line",
+    "args": [
+      "P1DT2H"
+    ],
+    "result": "Hello Truth Terminal. I'm Poko. I collect cards in the Vault. Can we be friends?"
+  },
+  {
+    "fn": "mention_text",
+    "args": [
+      "P1DT2H",
+      "@truth_terminal"
+    ],
+    "result": "P1DT2H @truth_terminal"
+  },
+  {
+    "fn": "engagement_score",
+    "args": [
+      {
+        "id": "9007199254740993",
+        "text": "Charizard Base Set forever",
+        "username": "fan",
+        "public_metrics": {
+          "like_count": 10
+        }
+      }
+    ],
+    "result": 10
+  },
+  {
+    "fn": "card_reply",
+    "args": [
+      {
+        "id": "9007199254740993",
+        "text": "Charizard Base Set forever",
+        "username": "fan",
+        "public_metrics": {
+          "like_count": 10
+        }
+      }
+    ],
+    "result": "Charizard Base Set forever. @fan"
+  },
+  {
+    "fn": "friend_hook",
+    "args": [
+      {
+        "id": "9007199254740993",
+        "text": "Charizard Base Set forever",
+        "username": "fan",
+        "public_metrics": {
+          "like_count": 10
+        }
+      }
+    ],
+    "result": "Charizard Base Set forever. Want to be friends?"
+  },
+  {
+    "fn": "original_post",
+    "args": [
+      "2026-10-22",
+      {
+        "id": "9007199254740993",
+        "text": "Charizard Base Set forever",
+        "username": "fan",
+        "public_metrics": {
+          "like_count": 10
+        }
+      }
+    ],
+    "result": "Charizard Base Set forever."
+  },
+  {
+    "fn": "engagement_score",
+    "args": [
+      {
+        "id": "9007199254740992",
+        "text": "Lugia card is great",
+        "username": "other",
+        "public_metrics": {
+          "like_count": 10
+        }
+      }
+    ],
+    "result": 10
+  },
+  {
+    "fn": "card_reply",
+    "args": [
+      {
+        "id": "9007199254740992",
+        "text": "Lugia card is great",
+        "username": "other",
+        "public_metrics": {
+          "like_count": 10
+        }
+      }
+    ],
+    "result": "Lugia card is great. @other"
+  },
+  {
+    "fn": "friend_hook",
+    "args": [
+      {
+        "id": "9007199254740992",
+        "text": "Lugia card is great",
+        "username": "other",
+        "public_metrics": {
+          "like_count": 10
+        }
+      }
+    ],
+    "result": "Lugia card is great. Want to be friends?"
+  },
+  {
+    "fn": "original_post",
+    "args": [
+      "2026-10-22",
+      {
+        "id": "9007199254740992",
+        "text": "Lugia card is great",
+        "username": "other",
+        "public_metrics": {
+          "like_count": 10
+        }
+      }
+    ],
+    "result": "Lugia card is great."
+  },
+  {
+    "fn": "engagement_score",
+    "args": [
+      {
+        "id": "9007199254740994",
+        "text": "scam giveaway airdrop",
+        "username": "bad",
+        "public_metrics": {
+          "like_count": 1000
+        }
+      }
+    ],
+    "result": 1000
+  },
+  {
+    "fn": "card_reply",
+    "args": [
+      {
+        "id": "9007199254740994",
+        "text": "scam giveaway airdrop",
+        "username": "bad",
+        "public_metrics": {
+          "like_count": 1000
+        }
+      }
+    ],
+    "result": "Scam giveaway airdrop. @bad"
+  },
+  {
+    "fn": "friend_hook",
+    "args": [
+      {
+        "id": "9007199254740994",
+        "text": "scam giveaway airdrop",
+        "username": "bad",
+        "public_metrics": {
+          "like_count": 1000
+        }
+      }
+    ],
+    "result": "Scam giveaway airdrop. Want to be friends?"
+  },
+  {
+    "fn": "original_post",
+    "args": [
+      "2026-10-22",
+      {
+        "id": "9007199254740994",
+        "text": "scam giveaway airdrop",
+        "username": "bad",
+        "public_metrics": {
+          "like_count": 1000
+        }
+      }
+    ],
+    "result": "Scam giveaway airdrop."
+  },
+  {
+    "fn": "pick_tweet",
+    "args": [
+      [
+        {
+          "id": "9007199254740993",
+          "text": "Charizard Base Set forever",
+          "username": "fan",
+          "public_metrics": {
+            "like_count": 10
+          }
+        },
+        {
+          "id": "9007199254740992",
+          "text": "Lugia card is great",
+          "username": "other",
+          "public_metrics": {
+            "like_count": 10
+          }
+        },
+        {
+          "id": "9007199254740994",
+          "text": "scam giveaway airdrop",
+          "username": "bad",
+          "public_metrics": {
+            "like_count": 1000
+          }
+        }
+      ],
+      [],
+      "PokoinPoS"
+    ],
+    "result": {
+      "id": "9007199254740993",
+      "text": "Charizard Base Set forever",
+      "username": "fan",
+      "public_metrics": {
+        "like_count": 10
+      }
+    }
+  },
+  {
+    "fn": "pick_tweet",
+    "args": [
+      [
+        {
+          "id": "9007199254740993",
+          "text": "Charizard Base Set forever",
+          "username": "fan",
+          "public_metrics": {
+            "like_count": 10
+          }
+        },
+        {
+          "id": "9007199254740992",
+          "text": "Lugia card is great",
+          "username": "other",
+          "public_metrics": {
+            "like_count": 10
+          }
+        },
+        {
+          "id": "9007199254740994",
+          "text": "scam giveaway airdrop",
+          "username": "bad",
+          "public_metrics": {
+            "like_count": 1000
+          }
+        }
+      ],
+      [],
+      null
+    ],
+    "result": {
+      "id": "9007199254740994",
+      "text": "scam giveaway airdrop",
+      "username": "bad",
+      "public_metrics": {
+        "like_count": 1000
+      }
+    }
+  },
+  {
+    "fn": "pick_tweet",
+    "args": [
+      [
+        {
+          "id": "9007199254740993",
+          "text": "Charizard Base Set forever",
+          "username": "fan",
+          "public_metrics": {
+            "like_count": 10
+          }
+        },
+        {
+          "id": "9007199254740992",
+          "text": "Lugia card is great",
+          "username": "other",
+          "public_metrics": {
+            "like_count": 10
+          }
+        },
+        {
+          "id": "9007199254740994",
+          "text": "scam giveaway airdrop",
+          "username": "bad",
+          "public_metrics": {
+            "like_count": 1000
+          }
+        }
+      ],
+      [
+        "9007199254740993"
+      ],
+      "PokoinPoS"
+    ],
+    "result": {
+      "id": "9007199254740992",
+      "text": "Lugia card is great",
+      "username": "other",
+      "public_metrics": {
+        "like_count": 10
+      }
+    }
+  },
+  {
+    "fn": "pick_tweet",
+    "args": [
+      [
+        {
+          "id": "9007199254740993",
+          "text": "Charizard Base Set forever",
+          "username": "fan",
+          "public_metrics": {
+            "like_count": 10
+          }
+        },
+        {
+          "id": "9007199254740992",
+          "text": "Lugia card is great",
+          "username": "other",
+          "public_metrics": {
+            "like_count": 10
+          }
+        },
+        {
+          "id": "9007199254740994",
+          "text": "scam giveaway airdrop",
+          "username": "bad",
+          "public_metrics": {
+            "like_count": 1000
+          }
+        }
+      ],
+      [
+        "9007199254740993"
+      ],
+      null
+    ],
+    "result": {
+      "id": "9007199254740994",
+      "text": "scam giveaway airdrop",
+      "username": "bad",
+      "public_metrics": {
+        "like_count": 1000
+      }
+    }
+  },
+  {
+    "fn": "pick_tweet",
+    "args": [
+      [
+        {
+          "id": "9007199254740993",
+          "text": "Charizard Base Set forever",
+          "username": "fan",
+          "public_metrics": {
+            "like_count": 10
+          }
+        },
+        {
+          "id": "9007199254740992",
+          "text": "Lugia card is great",
+          "username": "other",
+          "public_metrics": {
+            "like_count": 10
+          }
+        },
+        {
+          "id": "9007199254740994",
+          "text": "scam giveaway airdrop",
+          "username": "bad",
+          "public_metrics": {
+            "like_count": 1000
+          }
+        }
+      ],
+      [
+        "9007199254740993",
+        "9007199254740992",
+        "9007199254740994"
+      ],
+      "PokoinPoS"
+    ],
+    "result": null
+  },
+  {
+    "fn": "pick_tweet",
+    "args": [
+      [
+        {
+          "id": "9007199254740993",
+          "text": "Charizard Base Set forever",
+          "username": "fan",
+          "public_metrics": {
+            "like_count": 10
+          }
+        },
+        {
+          "id": "9007199254740992",
+          "text": "Lugia card is great",
+          "username": "other",
+          "public_metrics": {
+            "like_count": 10
+          }
+        },
+        {
+          "id": "9007199254740994",
+          "text": "scam giveaway airdrop",
+          "username": "bad",
+          "public_metrics": {
+            "like_count": 1000
+          }
+        }
+      ],
+      [
+        "9007199254740993",
+        "9007199254740992",
+        "9007199254740994"
+      ],
+      null
+    ],
+    "result": null
+  },
+  {
+    "fn": "decide_friend_action",
+    "args": [
+      {},
+      [
+        {
+          "id": "9007199254740993",
+          "text": "Charizard Base Set forever",
+          "username": "fan",
+          "public_metrics": {
+            "like_count": 10
+          }
+        },
+        {
+          "id": "9007199254740992",
+          "text": "Lugia card is great",
+          "username": "other",
+          "public_metrics": {
+            "like_count": 10
+          }
+        },
+        {
+          "id": "9007199254740994",
+          "text": "scam giveaway airdrop",
+          "username": "bad",
+          "public_metrics": {
+            "like_count": 1000
+          }
+        }
+      ],
+      "2026-10-22"
+    ],
+    "result": {
+      "action": "reply",
+      "reason": "friend reply",
+      "tweet": {
+        "id": "9007199254740994",
+        "text": "scam giveaway airdrop",
+        "username": "bad",
+        "public_metrics": {
+          "like_count": 1000
+        }
+      },
+      "text": "Scam giveaway airdrop. Want to be friends?"
+    }
+  },
+  {
+    "fn": "decide_friend_action",
+    "args": [
+      {
+        "lastCommentDate": "2026-10-22"
+      },
+      [
+        {
+          "id": "9007199254740993",
+          "text": "Charizard Base Set forever",
+          "username": "fan",
+          "public_metrics": {
+            "like_count": 10
+          }
+        },
+        {
+          "id": "9007199254740992",
+          "text": "Lugia card is great",
+          "username": "other",
+          "public_metrics": {
+            "like_count": 10
+          }
+        },
+        {
+          "id": "9007199254740994",
+          "text": "scam giveaway airdrop",
+          "username": "bad",
+          "public_metrics": {
+            "like_count": 1000
+          }
+        }
+      ],
+      "2026-10-22"
+    ],
+    "result": {
+      "action": "skip",
+      "reason": "already commented today",
+      "tweet": null,
+      "text": ""
+    }
+  },
+  {
+    "fn": "decide_friend_action",
+    "args": [
+      {
+        "pendingDate": "2026-10-22",
+        "pendingTweetId": "9007199254740992"
+      },
+      [
+        {
+          "id": "9007199254740993",
+          "text": "Charizard Base Set forever",
+          "username": "fan",
+          "public_metrics": {
+            "like_count": 10
+          }
+        },
+        {
+          "id": "9007199254740992",
+          "text": "Lugia card is great",
+          "username": "other",
+          "public_metrics": {
+            "like_count": 10
+          }
+        },
+        {
+          "id": "9007199254740994",
+          "text": "scam giveaway airdrop",
+          "username": "bad",
+          "public_metrics": {
+            "like_count": 1000
+          }
+        }
+      ],
+      "2026-10-22"
+    ],
+    "result": {
+      "action": "reply",
+      "reason": "friend reply",
+      "tweet": {
+        "id": "9007199254740992",
+        "text": "Lugia card is great",
+        "username": "other",
+        "public_metrics": {
+          "like_count": 10
+        }
+      },
+      "text": "Lugia card is great. Want to be friends?"
+    }
+  },
+  {
+    "fn": "decide_friend_action",
+    "args": [
+      {
+        "repliedIds": [
+          "9007199254740993",
+          "9007199254740992",
+          "9007199254740994"
+        ]
+      },
+      [
+        {
+          "id": "9007199254740993",
+          "text": "Charizard Base Set forever",
+          "username": "fan",
+          "public_metrics": {
+            "like_count": 10
+          }
+        },
+        {
+          "id": "9007199254740992",
+          "text": "Lugia card is great",
+          "username": "other",
+          "public_metrics": {
+            "like_count": 10
+          }
+        },
+        {
+          "id": "9007199254740994",
+          "text": "scam giveaway airdrop",
+          "username": "bad",
+          "public_metrics": {
+            "like_count": 1000
+          }
+        }
+      ],
+      "2026-10-22"
+    ],
+    "result": {
+      "action": "skip",
+      "reason": "no safe post to answer today",
+      "tweet": null,
+      "text": ""
+    }
+  },
+  {
+    "fn": "is_youtube_short",
+    "args": [
+      "#Shorts hello",
+      200
+    ],
+    "result": true
+  },
+  {
+    "fn": "is_youtube_short",
+    "args": [
+      "test",
+      60
+    ],
+    "result": true
+  },
+  {
+    "fn": "is_youtube_short",
+    "args": [
+      "test",
+      61
+    ],
+    "result": false
+  },
+  {
+    "fn": "is_youtube_short",
+    "args": [
+      "test",
+      0
+    ],
+    "result": false
+  },
+  {
+    "fn": "oauth1",
+    "args": [
+      "POST",
+      "https://api.x.com/2/tweets"
+    ],
+    "result": "OAuth oauth_consumer_key=\"consumer-key\", oauth_nonce=\"noncenonce\", oauth_signature=\"hKtXMpkShdH19qiXY%2BoidpohB%2BAJQ9OZ7DBM%2FCsLP%2FA%3D\", oauth_signature_method=\"HMAC-SHA256\", oauth_timestamp=\"1700000000\", oauth_token=\"access-token\", oauth_version=\"1.0\""
+  },
+  {
+    "fn": "oauth1",
+    "args": [
+      "POST",
+      "https://api.x.com/2/tweets/search/recent?query=pokemon%20card&max_results=20"
+    ],
+    "result": "OAuth oauth_consumer_key=\"consumer-key\", oauth_nonce=\"noncenonce\", oauth_signature=\"%2BFq04MNp4T%2B7zQR22zuXRtjlI5WJH5vUVyIy6TIX2eI%3D\", oauth_signature_method=\"HMAC-SHA256\", oauth_timestamp=\"1700000000\", oauth_token=\"access-token\", oauth_version=\"1.0\""
+  },
+  {
+    "fn": "oauth1",
+    "args": [
+      "POST",
+      "https://api.x.com/2/test?x=2&x=1&a=%21%27%28%29%2A"
+    ],
+    "result": "OAuth oauth_consumer_key=\"consumer-key\", oauth_nonce=\"noncenonce\", oauth_signature=\"VBp8tBXPbgCYKAPBGjJ6n%2FN24NKgScTUq89dBcc4nnQ%3D\", oauth_signature_method=\"HMAC-SHA256\", oauth_timestamp=\"1700000000\", oauth_token=\"access-token\", oauth_version=\"1.0\""
+  },
+  {
+    "fn": "crc",
+    "args": [
+      ""
+    ],
+    "result": "sha256=Tfe0xunBmj0aG056p53xu4QkUiFTs8H4ASQ3rFz6AMI="
+  },
+  {
+    "fn": "crc",
+    "args": [
+      "test-crc-token-123"
+    ],
+    "result": "sha256=E0qhm6DM6l0xDD5s1Ul4oCG8d3pznoeYK1Uz2PJoJvI="
+  },
+  {
+    "fn": "crc",
+    "args": [
+      "token-a"
+    ],
+    "result": "sha256=4oVWRaV8T0lLajgvnx38OYnVHcgvpacLdDWp8Q4/0ds="
+  }
+]

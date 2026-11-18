@@ -1,0 +1,1997 @@
+[
+  {
+    "path": "src/active-task.js",
+    "live_sha256": "6704f6df0d0d5dac3009fb003304005eeeb16dee3cd48ff6e798ffe72af7979a",
+    "local_sha256": "6704f6df0d0d5dac3009fb003304005eeeb16dee3cd48ff6e798ffe72af7979a"
+  },
+  {
+    "path": "src/agentskills-scout.js",
+    "live_sha256": "d1ec1814d9e232d5a10f37135a893f3883f97e1a9b40b2e5de04c492d53bbe77",
+    "local_sha256": null
+  },
+  {
+    "path": "src/alexa-flareon.js",
+    "live_sha256": "21d94051b0c092da9d75522c4491906589a1e8a082853512301eec6771b3b878",
+    "local_sha256": null
+  },
+  {
+    "path": "src/bot-hospital.js",
+    "live_sha256": "478d5e4865bf75161dd7907fafc372be8bb679af5990cb45ef40f37b21242464",
+    "local_sha256": "5afbe182995587267656268a05ea00e03c3173268024a87e6fc2bdf19d566727"
+  },
+  {
+    "path": "src/chat-registry.js",
+    "live_sha256": "99b7b78c02556aa60c64d73bb353f656d0bc5b4595225443a4ad0415f9c6eaa9",
+    "local_sha256": "99b7b78c02556aa60c64d73bb353f656d0bc5b4595225443a4ad0415f9c6eaa9"
+  },
+  {
+    "path": "src/chatgpt-oauth.js",
+    "live_sha256": "a16e6234612b5cb61d0a786f5c6474fa5e4e9db1d90f09344a1e771c7c432da4",
+    "local_sha256": "a16e6234612b5cb61d0a786f5c6474fa5e4e9db1d90f09344a1e771c7c432da4"
+  },
+  {
+    "path": "src/cityhop-knowledge.js",
+    "live_sha256": "dea1faab66b55e41d3c99db320e548cf74a0713eab82379ef4b9a1ab01e41699",
+    "local_sha256": "dea1faab66b55e41d3c99db320e548cf74a0713eab82379ef4b9a1ab01e41699"
+  },
+  {
+    "path": "src/cityhop-mpt-clips.js",
+    "live_sha256": "bde5d9f15c1f1ecb60c9bf04a80e2f678b20c2c575df14fba6cd1a64a6e40021",
+    "local_sha256": "bde5d9f15c1f1ecb60c9bf04a80e2f678b20c2c575df14fba6cd1a64a6e40021"
+  },
+  {
+    "path": "src/cityhop-narration-archive.js",
+    "live_sha256": "8422bc92ccca1fa52044e3382fca201a2d9bcf0deea505aaf5a0010c61029868",
+    "local_sha256": "8422bc92ccca1fa52044e3382fca201a2d9bcf0deea505aaf5a0010c61029868"
+  },
+  {
+    "path": "src/cityhop-place.js",
+    "live_sha256": "406da84085252cca2299225ec8aa5f7c322ae2a7407a17b0677b05169db3e3aa",
+    "local_sha256": "406da84085252cca2299225ec8aa5f7c322ae2a7407a17b0677b05169db3e3aa"
+  },
+  {
+    "path": "src/cityhop-planner-env.js",
+    "live_sha256": "cb2774219a004fe137e5759ef1167d0eade62514a7585e3ee9cbe0949d487cde",
+    "local_sha256": "cb2774219a004fe137e5759ef1167d0eade62514a7585e3ee9cbe0949d487cde"
+  },
+  {
+    "path": "src/cityhop-pregen-store.js",
+    "live_sha256": "916b8e75b83079c4265024dbd846623bbf91141396cb13a87a4c7465abafcb39",
+    "local_sha256": "916b8e75b83079c4265024dbd846623bbf91141396cb13a87a4c7465abafcb39"
+  },
+  {
+    "path": "src/cityhop-pregen.js",
+    "live_sha256": "21aaa9403f7e979b7a2a73b426d790e620c9c652c981d9c771bcfa820bd31c0b",
+    "local_sha256": "21aaa9403f7e979b7a2a73b426d790e620c9c652c981d9c771bcfa820bd31c0b"
+  },
+  {
+    "path": "src/cityhop-queue-api.js",
+    "live_sha256": "b82bc3568702c97de6f20a9aa9c8ca11e503927022bdbdde1bd3d5c75402ce4b",
+    "local_sha256": "b82bc3568702c97de6f20a9aa9c8ca11e503927022bdbdde1bd3d5c75402ce4b"
+  },
+  {
+    "path": "src/cityhop-short-title.js",
+    "live_sha256": "d42f80b0afea5f99b0c4eab11a9eb7a5acab058aabd9d58f410259d75d368f73",
+    "local_sha256": "d42f80b0afea5f99b0c4eab11a9eb7a5acab058aabd9d58f410259d75d368f73"
+  },
+  {
+    "path": "src/cityhop-subscribe-overlay.js",
+    "live_sha256": "e7263e272dd404ae5854aba86a2b5a0cba8bb4b292549e60264adc3b07804eb6",
+    "local_sha256": "e7263e272dd404ae5854aba86a2b5a0cba8bb4b292549e60264adc3b07804eb6"
+  },
+  {
+    "path": "src/cityhop-subtitle.js",
+    "live_sha256": "3bdb27cad62a3ee49f75d0677a694a7f3a44898e9901a89e21313839ac85a7c5",
+    "local_sha256": "3bdb27cad62a3ee49f75d0677a694a7f3a44898e9901a89e21313839ac85a7c5"
+  },
+  {
+    "path": "src/cityhop-telegram.js",
+    "live_sha256": "1e63a25f2838a22c1239815a3d7121d943cca10275502a5919959e587f081479",
+    "local_sha256": "1e63a25f2838a22c1239815a3d7121d943cca10275502a5919959e587f081479"
+  },
+  {
+    "path": "src/cityhop-title-formats.js",
+    "live_sha256": "93f7f446a64f1b399e58acc19d52354681b5b5bc18d9fd02ebd65e743eaa8bb5",
+    "local_sha256": "93f7f446a64f1b399e58acc19d52354681b5b5bc18d9fd02ebd65e743eaa8bb5"
+  },
+  {
+    "path": "src/cityhop-video.js",
+    "live_sha256": "e3d1d91dc82031b5d49e3e8a0c1dac867b13339cee18a7ef8507fe7718297c00",
+    "local_sha256": "e3d1d91dc82031b5d49e3e8a0c1dac867b13339cee18a7ef8507fe7718297c00"
+  },
+  {
+    "path": "src/cityhop-youtube-description.js",
+    "live_sha256": "7313097346454347268cdfffe1e32e7844a9b5a3c3267491ef8785ac6bc57148",
+    "local_sha256": "7313097346454347268cdfffe1e32e7844a9b5a3c3267491ef8785ac6bc57148"
+  },
+  {
+    "path": "src/config.js",
+    "live_sha256": "e2b315e5a8cf9f21c99c242fbbda9a8902d37d6e761233d351e630cd10955492",
+    "local_sha256": "e4c7164af1e692334d8c3b1da0621491e11f76bbb34ec568125e416f6b0b55bd"
+  },
+  {
+    "path": "src/context-policy.js",
+    "live_sha256": "8888196aff51b612dd5a6008ae272f5b093f707ee0f1c8be62345f05d4ed2488",
+    "local_sha256": "cb66c09a442232d8b5e72b8f9afc580fd5fb4986d6f15d956b2fa84be924bd7d"
+  },
+  {
+    "path": "src/cursor-agent.js",
+    "live_sha256": "b8df3c8d6593a1ad943cea95c965f057088de2e33c72b8ecd45f88ca5917eeba",
+    "local_sha256": "b8df3c8d6593a1ad943cea95c965f057088de2e33c72b8ecd45f88ca5917eeba"
+  },
+  {
+    "path": "src/cursor-planner.js",
+    "live_sha256": "9ccafba8d69a5585e9007e1ad1a78d95c30a590ac70f8416e7a95ce93a8a6439",
+    "local_sha256": "9ccafba8d69a5585e9007e1ad1a78d95c30a590ac70f8416e7a95ce93a8a6439"
+  },
+  {
+    "path": "src/discord.js",
+    "live_sha256": "64cabc1b044e3eee3be54d50f9c84d7cc6e88e4648bf5867eaccd995a60b9820",
+    "local_sha256": "15b8d921414f537add9ff76979bf0248923fe3d7ea9efd3260e350ecce9e3ca2"
+  },
+  {
+    "path": "src/dsh-remote-client.js",
+    "live_sha256": "4f3191b642db5ce993c334258c8a306fba9333a6969fff46b06b31e9f08cd8cf",
+    "local_sha256": "d3b34bb952f4ccc7c8a895da0aabf9fc29d60b9338fca1a0d293afbb05f2ab3c"
+  },
+  {
+    "path": "src/fetch-timeout.js",
+    "live_sha256": "9c6ed6dd9ad5a3a62a57f55dc33beeb469d6a3a0fca9ea017ca0b79a3e4123f3",
+    "local_sha256": null
+  },
+  {
+    "path": "src/flareon-capability-hints.js",
+    "live_sha256": "5bf1b44f0322ef974d417c7d1b529d5a55cb4587537d5fcc8e80f266ed95ec64",
+    "local_sha256": null
+  },
+  {
+    "path": "src/flareon-cursor-chat.js",
+    "live_sha256": "b701b29c1fa939438808a379a91bb0aff696da8c42c1edba46ac6f614593664b",
+    "local_sha256": null
+  },
+  {
+    "path": "src/flareon-cursor-nudge.js",
+    "live_sha256": "0cf7b9aa6c4088cc4d20f9f21527e09f632114e2f94efc985429f97e45aeff72",
+    "local_sha256": null
+  },
+  {
+    "path": "src/flareon-image-intent.js",
+    "live_sha256": "c0387341ce58a829df87ea5f8aa9f016b9c8b37be8f8c2202b1846cdfa0adcff",
+    "local_sha256": null
+  },
+  {
+    "path": "src/flareon-intent.js",
+    "live_sha256": "1c94da7ffec128a6bbc5723785ed9004206fd5497bef95231b8dab242896f13c",
+    "local_sha256": null
+  },
+  {
+    "path": "src/flareon-log-inspect.js",
+    "live_sha256": "88030bcbe2c90eafbdab1e6d5e5e07e5c9f3564e1ac2e74afc39358e14eeade6",
+    "local_sha256": null
+  },
+  {
+    "path": "src/flareon-operator-context.js",
+    "live_sha256": "feb5f6c0eba989484014063adf3eec7c78dac77e78f367a94a414c5250c18ea3",
+    "local_sha256": null
+  },
+  {
+    "path": "src/flareon-proactive-checkin.js",
+    "live_sha256": "91adbd0894b0e82d7633f13f0f1818289841a5d4c51337900989fcd5a71d8810",
+    "local_sha256": null
+  },
+  {
+    "path": "src/flareon-recovery-companion.js",
+    "live_sha256": "872da2496c4f7d3e06d328ccd3aa922605ce9e40ff0fb8a1c62319469c575262",
+    "local_sha256": null
+  },
+  {
+    "path": "src/flareon-seed-pokoin-tax-reminders.mjs",
+    "live_sha256": "a91136ddf4ef68e974e693c581bbfc2a9cef2cc27cbf975cea8149d1eab66b4f",
+    "local_sha256": null
+  },
+  {
+    "path": "src/flareon-seed-study-focus-reminders.mjs",
+    "live_sha256": "ceedb41d798ab8783d059ccb9fd1bb10369716dc8bf1cfb7e7cb559177cac1f2",
+    "local_sha256": null
+  },
+  {
+    "path": "src/flareon-telegram-context.js",
+    "live_sha256": "38e3e8cfa868847036c2a689eabce45b1035006ccc365bc452fb0515e66a4e80",
+    "local_sha256": null
+  },
+  {
+    "path": "src/flareon-turn-context.js",
+    "live_sha256": "50c77cb45cf407026020239d2e645b720d2cb758292e8ae9746a8f8f71d56572",
+    "local_sha256": null
+  },
+  {
+    "path": "src/gateway-lock.js",
+    "live_sha256": "2a98d3e58680dcd1da7c347e50a9d09236dc45d536bba5f6ae22c378eada1b58",
+    "local_sha256": "2a98d3e58680dcd1da7c347e50a9d09236dc45d536bba5f6ae22c378eada1b58"
+  },
+  {
+    "path": "src/gemini-openai-bridge.js",
+    "live_sha256": "340636687438cb8dccfa6cfca9908235ccc5796b8944081ab800814d3bc4720f",
+    "local_sha256": "340636687438cb8dccfa6cfca9908235ccc5796b8944081ab800814d3bc4720f"
+  },
+  {
+    "path": "src/gmail-accounts.js",
+    "live_sha256": "55006e91ed7fcde489ef50ef099ba783b4f11eb0f290409941186496d1c2328a",
+    "local_sha256": null
+  },
+  {
+    "path": "src/gmail-knowledge-store.js",
+    "live_sha256": "a69416bfd4f57d8d0814f0498f49f265ea4f719ef5b8a2ea11d441d43d6c0a91",
+    "local_sha256": null
+  },
+  {
+    "path": "src/gmail-learn.js",
+    "live_sha256": "631215b5881c0286ff81f619c72bd15adeb611c9108da0599b8cd5f640ecbe84",
+    "local_sha256": null
+  },
+  {
+    "path": "src/gmail-oauth.js",
+    "live_sha256": "ff60bed38d5771a354decab96a6a2f9a40c434a7d919db224120f41be28935af",
+    "local_sha256": null
+  },
+  {
+    "path": "src/gmail-telegram-auth.js",
+    "live_sha256": "807934dde08cdcd806ad80d5f2ab7ed4825f1b8010229c071e776bca5d6fb4e0",
+    "local_sha256": null
+  },
+  {
+    "path": "src/gmail.js",
+    "live_sha256": "5181999d066e73c204f2f5254a9c5c772f6f135618721b11c2661f00dd3f6ad1",
+    "local_sha256": null
+  },
+  {
+    "path": "src/google-keep.js",
+    "live_sha256": "352f5f339acdd9131e848d3a48d2b118aea48509e6b3361c08d66b737dba98fc",
+    "local_sha256": "352f5f339acdd9131e848d3a48d2b118aea48509e6b3361c08d66b737dba98fc"
+  },
+  {
+    "path": "src/gpu-budget.js",
+    "live_sha256": "a93257ce82711fc3ea7083c661fb02d79b9375a62fbcec9de95b758adc5501c1",
+    "local_sha256": "e172ab24add727b0304e86285efbb8f73098b4375cc4a2f9b3eac2ef0abf80bc"
+  },
+  {
+    "path": "src/graph-delivery.js",
+    "live_sha256": "9ec17e7ecf8cd3f0f6fcabd39e42d180b2975f23c6e367ef49aaa89b92bee4a0",
+    "local_sha256": null
+  },
+  {
+    "path": "src/griffin-youtube-oauth.js",
+    "live_sha256": "ea4b9da1938be02da6b3e2cfb94ef325695f3abb471026b82a254ddaa85a05ed",
+    "local_sha256": "ea4b9da1938be02da6b3e2cfb94ef325695f3abb471026b82a254ddaa85a05ed"
+  },
+  {
+    "path": "src/grocery/api.js",
+    "live_sha256": "2b6e8042af1602a11b9f779c99ba59a6c6a52fc4071137421cf36912220ce3c8",
+    "local_sha256": "2b6e8042af1602a11b9f779c99ba59a6c6a52fc4071137421cf36912220ce3c8"
+  },
+  {
+    "path": "src/grocery/catalog.js",
+    "live_sha256": "f68dc0bade4421babd286243754cc71e6a077fb953da8d4c6f3f119bceff045a",
+    "local_sha256": "f68dc0bade4421babd286243754cc71e6a077fb953da8d4c6f3f119bceff045a"
+  },
+  {
+    "path": "src/grocery/chain-json-adapters.js",
+    "live_sha256": "989e8cca9762d3afdb9bcc7d4965e39952fb7677497b78dcc5acef4d7aae0b9c",
+    "local_sha256": "989e8cca9762d3afdb9bcc7d4965e39952fb7677497b78dcc5acef4d7aae0b9c"
+  },
+  {
+    "path": "src/grocery/index.js",
+    "live_sha256": "3ae94ed501d68c783dc6463e2536353cebd36a2500b66d8d59fef657bdee7eeb",
+    "local_sha256": "b193799d5bd9e38430b4e53b0e9a4854c77deed43f3fbd00b604cde1449234d7"
+  },
+  {
+    "path": "src/grocery/intent.js",
+    "live_sha256": "b9bcaa13f1f35dc52075044c153fa53e79f5a9420869d19a5f6858edcd329acc",
+    "local_sha256": "1fde29e70ac89f7eb75ca3ff6f4bbb438e9f0d59726d2dce8696cf8f3cefc578"
+  },
+  {
+    "path": "src/grocery/nearby.js",
+    "live_sha256": "2adde25d4bb5c0797fed0530ed311ff01836a6985c0d4bd98e11c9185323e779",
+    "local_sha256": "2adde25d4bb5c0797fed0530ed311ff01836a6985c0d4bd98e11c9185323e779"
+  },
+  {
+    "path": "src/grocery/products.js",
+    "live_sha256": "fa2ab7364e5f7d62a1ad916f8f6dd4c5afde028a4149111b8d13a9e8269645cd",
+    "local_sha256": "fa2ab7364e5f7d62a1ad916f8f6dd4c5afde028a4149111b8d13a9e8269645cd"
+  },
+  {
+    "path": "src/grocery/rapidapi-quota.js",
+    "live_sha256": "b2f74cecb7ff15c6c4da55faa21234c191f3446e2685590372dbd3483bbf7c09",
+    "local_sha256": "b2f74cecb7ff15c6c4da55faa21234c191f3446e2685590372dbd3483bbf7c09"
+  },
+  {
+    "path": "src/grocery/receipts.js",
+    "live_sha256": "0de77e0c90f85980f61b9a13d233c00de64a2741a08a420d0eec28c7154cec88",
+    "local_sha256": "0de77e0c90f85980f61b9a13d233c00de64a2741a08a420d0eec28c7154cec88"
+  },
+  {
+    "path": "src/grocery/repository.js",
+    "live_sha256": "a75fe03c2ab2b1c805650ce1a8509288b804704479fb3ec8f5f29ee1e50196d2",
+    "local_sha256": "bfa263645d5bf80b0d60225d38233461836650eae03e161f1fe6e614394cb740"
+  },
+  {
+    "path": "src/grocery/webhook.js",
+    "live_sha256": "2d716810c13c63911a88254caf53186469376902306411e0739e1687fbea91a5",
+    "local_sha256": "2d716810c13c63911a88254caf53186469376902306411e0739e1687fbea91a5"
+  },
+  {
+    "path": "src/guardian-alerts.js",
+    "live_sha256": "6ebf2c710696bf767d14492f5a3062140eb24c9e0a9c40e47680759591515600",
+    "local_sha256": "784f50a18cd04b6e52cfef214c094b63f0e49447c8ed3ac1c2ca701a06a853d3"
+  },
+  {
+    "path": "src/guardian-digest.js",
+    "live_sha256": "2b4ad61c1c72b0266131405173927ebe5cdb421644f340207da6e78af40a8fa4",
+    "local_sha256": "f33799d9b0b49866fe7643ddb1310db9886a3d8425830434f8caa4fcfc1a4343"
+  },
+  {
+    "path": "src/harness-agent.js",
+    "live_sha256": "11dc3e98da954b3834815bd485b5d8daeb206efc0b1576ccbb9a14a712e514d0",
+    "local_sha256": "b11924954dae33bd8140d5d4ddb3db2cbf796202cc69d894f786570e6a6f41e5"
+  },
+  {
+    "path": "src/harness-cursor-bridge.js",
+    "live_sha256": "46d10da1b218bea6671c7be9d9ae73ee9e3a4e0fee5ddc3abf637e279badd1a3",
+    "local_sha256": "d6ce40a73dffad0c2edb0f10dc2565532a2f7b192217e4150f45b97349279453"
+  },
+  {
+    "path": "src/hypemeter-news.js",
+    "live_sha256": "ca0e8619e2dcfbe3d254c3e4ac3e324ed8476cc98afb739179cfc3ba82974d46",
+    "local_sha256": "ca0e8619e2dcfbe3d254c3e4ac3e324ed8476cc98afb739179cfc3ba82974d46"
+  },
+  {
+    "path": "src/image-generation.js",
+    "live_sha256": "e3f7e381b418047244a39bd2072124f2c075a05195ab8135b1f167d56a879841",
+    "local_sha256": "e3f7e381b418047244a39bd2072124f2c075a05195ab8135b1f167d56a879841"
+  },
+  {
+    "path": "src/image-vision.js",
+    "live_sha256": "0dff314a6f5b11ec32a82df55c98a99dd4150f4fe30c4e376aad45063d081332",
+    "local_sha256": "2f6e3c24e9f0650a77bcffc6baef038fcbd00066943ea87e4f3fd38c75571053"
+  },
+  {
+    "path": "src/index.js",
+    "live_sha256": "770b95ca8218d71a1a4cbeb5e54a4b2e4227d9ffad9c7621bf9e44201d43ea61",
+    "local_sha256": "532852b21457b6c4443b37798dc891be90ff785f3e3ae37d0a2c4dd9eb18b497"
+  },
+  {
+    "path": "src/intent-heuristics.js",
+    "live_sha256": "06e746a14b099b4637049d4c0421cb260e4c3e7e5d1c32e0a0986d5635338f3a",
+    "local_sha256": "602ccd13854875ac3092c7c21affe12bf1de19b955b4f5d7dbbf2ea77bc919db"
+  },
+  {
+    "path": "src/intent-router.js",
+    "live_sha256": "8b828b36b25f89b0d5c1a4aba49d672e322f6f8a18a8275b7fdd32687f279de2",
+    "local_sha256": "d729719378a2eae9511b8f544f05ae0253995d8fce5744724df80bb5f7837d27"
+  },
+  {
+    "path": "src/invisible-unicode.js",
+    "live_sha256": "2c91ebe49cdaf292361ecae101ecb727665c4c4b9a6e72683055de7a72e2ae06",
+    "local_sha256": "2c91ebe49cdaf292361ecae101ecb727665c4c4b9a6e72683055de7a72e2ae06"
+  },
+  {
+    "path": "src/llm-proxy-server.js",
+    "live_sha256": "d51d2cadee40c79a5777fada080e76de46da614fa0412f80cc01a43f6abc6586",
+    "local_sha256": "d51d2cadee40c79a5777fada080e76de46da614fa0412f80cc01a43f6abc6586"
+  },
+  {
+    "path": "src/log-redaction.js",
+    "live_sha256": "24b1d83c76dceebe784719a6450c73208ef82bbbbedc1f36f696d51d9acb4326",
+    "local_sha256": "24b1d83c76dceebe784719a6450c73208ef82bbbbedc1f36f696d51d9acb4326"
+  },
+  {
+    "path": "src/memory/honcho.js",
+    "live_sha256": "5fce21b0ba243eaf9868deae7f384705e40377075fe20daebe4dfcda739436ed",
+    "local_sha256": "e24636f60aba49f961cdc030d9bbd78ee68341b2a996e558437d1126dc97597b"
+  },
+  {
+    "path": "src/news-post-proof.js",
+    "live_sha256": "dbd22a2b1e4dbf61c523a43516d597be3e1c1344c26ea8efbdd1c6a2497fa740",
+    "local_sha256": null
+  },
+  {
+    "path": "src/newsroom/angles.js",
+    "live_sha256": "713c2103812f7c1cdafdb84c053c2bce17281fd9a9e716a224d16b9a88a32d15",
+    "local_sha256": "713c2103812f7c1cdafdb84c053c2bce17281fd9a9e716a224d16b9a88a32d15"
+  },
+  {
+    "path": "src/newsroom/article-store.js",
+    "live_sha256": "4522a8b80e4d6cf753fb68affb50c00b4e7b46b272eb11ffcd188b17e097759b",
+    "local_sha256": "4522a8b80e4d6cf753fb68affb50c00b4e7b46b272eb11ffcd188b17e097759b"
+  },
+  {
+    "path": "src/newsroom/cadence.js",
+    "live_sha256": "38b5b9bcadaae1eb0c30c086357a888f2950fd527c8ed7c213eb4b22666ffeab",
+    "local_sha256": "38b5b9bcadaae1eb0c30c086357a888f2950fd527c8ed7c213eb4b22666ffeab"
+  },
+  {
+    "path": "src/newsroom/claims.js",
+    "live_sha256": "ff432ceaa31f4d1d3e3534c02415889a6275251da4b0c03cc94ba9f41ec89f83",
+    "local_sha256": "ff432ceaa31f4d1d3e3534c02415889a6275251da4b0c03cc94ba9f41ec89f83"
+  },
+  {
+    "path": "src/newsroom/claude.js",
+    "live_sha256": "c0d802582604e98dfe4dac3717003b8951143f157226f402513c120540657822",
+    "local_sha256": "c0d802582604e98dfe4dac3717003b8951143f157226f402513c120540657822"
+  },
+  {
+    "path": "src/newsroom/comment-moderation.js",
+    "live_sha256": "0ccd718b45921929b4478420c02444ec97edebb0659d4c1bd5d7311fa8e3b673",
+    "local_sha256": "0ccd718b45921929b4478420c02444ec97edebb0659d4c1bd5d7311fa8e3b673"
+  },
+  {
+    "path": "src/newsroom/enrich.js",
+    "live_sha256": "235bc2cfe42251d6b419d648ed29b71562331ae53e03dcd9407a0fcd6dd0a5e0",
+    "local_sha256": "235bc2cfe42251d6b419d648ed29b71562331ae53e03dcd9407a0fcd6dd0a5e0"
+  },
+  {
+    "path": "src/newsroom/evidence.js",
+    "live_sha256": "734ca2d918e98e6451415fc88c572e00aa1901322c7a2de759db76fb5c74cd40",
+    "local_sha256": "734ca2d918e98e6451415fc88c572e00aa1901322c7a2de759db76fb5c74cd40"
+  },
+  {
+    "path": "src/newsroom/games.js",
+    "live_sha256": "21e5c272e2971d9bb46d8722a2374fe3c1124f72f6487c9979789997ef4c3efb",
+    "local_sha256": "21e5c272e2971d9bb46d8722a2374fe3c1124f72f6487c9979789997ef4c3efb"
+  },
+  {
+    "path": "src/newsroom/images.js",
+    "live_sha256": "0eadf945332f781cf5e1503f0d119edba7685829db6ee107ba743679dba59257",
+    "local_sha256": "0eadf945332f781cf5e1503f0d119edba7685829db6ee107ba743679dba59257"
+  },
+  {
+    "path": "src/newsroom/index.js",
+    "live_sha256": "b59a34e5c9f77a17192fed00e2721cc169454171e30c27a139bf9f19ec4ac832",
+    "local_sha256": "b59a34e5c9f77a17192fed00e2721cc169454171e30c27a139bf9f19ec4ac832"
+  },
+  {
+    "path": "src/newsroom/memory.js",
+    "live_sha256": "c8c393dea20b1d428df79d21396ef6439a849f9bc6111cc10f175995a7b6e1fd",
+    "local_sha256": "c8c393dea20b1d428df79d21396ef6439a849f9bc6111cc10f175995a7b6e1fd"
+  },
+  {
+    "path": "src/newsroom/pipeline.js",
+    "live_sha256": "6cb854761256bab4a31b015f84f0e3bdfc3c7edd371b04a0d847cbe56ee15dfb",
+    "local_sha256": "6cb854761256bab4a31b015f84f0e3bdfc3c7edd371b04a0d847cbe56ee15dfb"
+  },
+  {
+    "path": "src/newsroom/publication.js",
+    "live_sha256": "e3f9f46ed2f7e9e8d29c5f759dc029eb631254bc6a046cad2798b0123651314e",
+    "local_sha256": "e3f9f46ed2f7e9e8d29c5f759dc029eb631254bc6a046cad2798b0123651314e"
+  },
+  {
+    "path": "src/newsroom/reporter.js",
+    "live_sha256": "482ef127e689209249ef512b8b1b3e44ae0de7c010389857a0742b231e417d4b",
+    "local_sha256": "482ef127e689209249ef512b8b1b3e44ae0de7c010389857a0742b231e417d4b"
+  },
+  {
+    "path": "src/newsroom/schema.js",
+    "live_sha256": "71d0d1b2b4267ba9493040e07997739dc84d1a3c2afcd5c6bdadb65cd6d1c87e",
+    "local_sha256": "71d0d1b2b4267ba9493040e07997739dc84d1a3c2afcd5c6bdadb65cd6d1c87e"
+  },
+  {
+    "path": "src/newsroom/source-fetch.js",
+    "live_sha256": "493d1e543e286883f4debf96f7507c10037ccf0cbb0cf6877cbac5777b927d7a",
+    "local_sha256": "493d1e543e286883f4debf96f7507c10037ccf0cbb0cf6877cbac5777b927d7a"
+  },
+  {
+    "path": "src/newsroom/sources.js",
+    "live_sha256": "65bd394395e1028df70976774487a15204e83d1705516ccc622ebf9f8b2ec88e",
+    "local_sha256": "65bd394395e1028df70976774487a15204e83d1705516ccc622ebf9f8b2ec88e"
+  },
+  {
+    "path": "src/newsroom/store.js",
+    "live_sha256": "8702b38b4d5c11ddb19a5531e3e9e166bc439bebae6e8d45a1ce47ef71e44dc5",
+    "local_sha256": "8702b38b4d5c11ddb19a5531e3e9e166bc439bebae6e8d45a1ce47ef71e44dc5"
+  },
+  {
+    "path": "src/newsroom/stories.js",
+    "live_sha256": "08bafe064da6240cc16391018671ff2d5d2a83e27d5c929bb1b8b6d14622f8d5",
+    "local_sha256": "08bafe064da6240cc16391018671ff2d5d2a83e27d5c929bb1b8b6d14622f8d5"
+  },
+  {
+    "path": "src/newsroom/style.js",
+    "live_sha256": "d31b2b6818dd2b62cc9600d17293153c352069fd13ff90d57bb4f6b801f5acfd",
+    "local_sha256": "d31b2b6818dd2b62cc9600d17293153c352069fd13ff90d57bb4f6b801f5acfd"
+  },
+  {
+    "path": "src/newsroom/tcg-feeds.js",
+    "live_sha256": "cc1de8a798a24ed2c7f8f11f717d34eabbed945bb01d47ea2f0dc58eeab7341e",
+    "local_sha256": "cc1de8a798a24ed2c7f8f11f717d34eabbed945bb01d47ea2f0dc58eeab7341e"
+  },
+  {
+    "path": "src/newsroom/templates.js",
+    "live_sha256": "be4b2e75bdf5bacaf641effb056c8b865abc16b877b3d8caea33958be4cfe2b6",
+    "local_sha256": "be4b2e75bdf5bacaf641effb056c8b865abc16b877b3d8caea33958be4cfe2b6"
+  },
+  {
+    "path": "src/newsroom/website.js",
+    "live_sha256": "b1262029e0fc098709fe5fdcd74a666241b487281832e94edddce9294dfa7720",
+    "local_sha256": "b1262029e0fc098709fe5fdcd74a666241b487281832e94edddce9294dfa7720"
+  },
+  {
+    "path": "src/oauth-callback.js",
+    "live_sha256": "254f6012aed6c8b3a9cce5b66e17fe9be900d7ccad89736fce0676fc8fda5001",
+    "local_sha256": "254f6012aed6c8b3a9cce5b66e17fe9be900d7ccad89736fce0676fc8fda5001"
+  },
+  {
+    "path": "src/obscura-web.js",
+    "live_sha256": "e4ae578c2b9f401dcce633709817cc739ffe477e394f5a8260d4be8f401adf8d",
+    "local_sha256": "e4ae578c2b9f401dcce633709817cc739ffe477e394f5a8260d4be8f401adf8d"
+  },
+  {
+    "path": "src/ollama-runtime.js",
+    "live_sha256": "395c4653fd1a3b32d161336f1523a4fce9c832b22bdbc7022b41c3f98c99e566",
+    "local_sha256": "478e2b3db58bdd88984f31054751bc00652d26a077163e6df740d2907a49d5da"
+  },
+  {
+    "path": "src/openai.js",
+    "live_sha256": "1119f13c46211771262fe115de64d55f31e5513d526f498a41d8bf78c663ce81",
+    "local_sha256": "51a9ed9dedb396460b3127dfdd351b695c9214290465640b404e176ea7439c54"
+  },
+  {
+    "path": "src/oracle-monitor.js",
+    "live_sha256": "7ad75055e541a9e5a9d2d8384014a91205fe1265e4bfba8594ebb17bab290527",
+    "local_sha256": "dd2ea53e8531d208cf2f450bc3d0d5bea23c6e488c233b97012a0400d70352a1"
+  },
+  {
+    "path": "src/owner-identity.js",
+    "live_sha256": "8cdfdc82d725f0512187a46f79b1e25a6901896303df782a3715d2bbabf430e6",
+    "local_sha256": "f302e4005eb9a8ea2594345625b00c853b40930ae19c399178772e7c4223ffd1"
+  },
+  {
+    "path": "src/planner-block-store.js",
+    "live_sha256": "d6c03615d6e5740718446c1ba45a289bd3186c5a4d26b0bbc5022bc0eb29432a",
+    "local_sha256": "d6c03615d6e5740718446c1ba45a289bd3186c5a4d26b0bbc5022bc0eb29432a"
+  },
+  {
+    "path": "src/planner-fallback.js",
+    "live_sha256": "b19d93b35b1de4308c9f004a836664d15d7a657c39f6edcb1868718992c108bc",
+    "local_sha256": "e8d190a58a25e87e8294a5f84baf915c45195c7d36d990ef4be842151bf2be8b"
+  },
+  {
+    "path": "src/poko-abuse.js",
+    "live_sha256": "d4861ae5c2135599ea73242db1d719e01811810201b2dbdc364a3cb2a233b850",
+    "local_sha256": "d4861ae5c2135599ea73242db1d719e01811810201b2dbdc364a3cb2a233b850"
+  },
+  {
+    "path": "src/poko-api.js",
+    "live_sha256": "8f3d007892352da2c1c1028191557e7b0187da60d3af61001a2cf05709d8f551",
+    "local_sha256": "a6c244ba5bdff19c1e281792b2de6d095a978048d60d2e6e5dda878a63816f3f"
+  },
+  {
+    "path": "src/poko-card-x.js",
+    "live_sha256": "cc32700b3c4c7dfb18afb5ca3ed8932a8aef1c81a5f18d6f0d617f03a2741f08",
+    "local_sha256": "cc32700b3c4c7dfb18afb5ca3ed8932a8aef1c81a5f18d6f0d617f03a2741f08"
+  },
+  {
+    "path": "src/poko-connect.js",
+    "live_sha256": "efad2c752f29eb28d61960627d2767e5a66e86d438f18f2201a31496ae08f6de",
+    "local_sha256": "efad2c752f29eb28d61960627d2767e5a66e86d438f18f2201a31496ae08f6de"
+  },
+  {
+    "path": "src/poko-discord-context.js",
+    "live_sha256": "bc79079c14e3d073c0c785fd564f862c1c0fe821342de290d445e13852758e30",
+    "local_sha256": "bc79079c14e3d073c0c785fd564f862c1c0fe821342de290d445e13852758e30"
+  },
+  {
+    "path": "src/poko-discord-slash.js",
+    "live_sha256": "d669cfd725448371cd6349f5e9517c4342656d92560d65b3a4db2a98bbd29300",
+    "local_sha256": "d669cfd725448371cd6349f5e9517c4342656d92560d65b3a4db2a98bbd29300"
+  },
+  {
+    "path": "src/poko-isolation.js",
+    "live_sha256": "496d9cf6d36ae4a5afff200bd370ec9c4998ff638e9d2cf42d9b6b04f376dc8b",
+    "local_sha256": "a9c2cfacc8d45d831071b3cbeff9c48f2370f77e1fe82caeab88c3a453ea5991"
+  },
+  {
+    "path": "src/poko-knowledge.js",
+    "live_sha256": "71454dcabfc38ef8a719203989d69d51be538e78753a50b4f14432fa6e32ff9a",
+    "local_sha256": "71454dcabfc38ef8a719203989d69d51be538e78753a50b4f14432fa6e32ff9a"
+  },
+  {
+    "path": "src/poko-lol-analysis.js",
+    "live_sha256": "f08b61749b4a24c1ebcbef1c0ca15d240c90ce9a72ea476cfb6be8e4dd298af1",
+    "local_sha256": "f08b61749b4a24c1ebcbef1c0ca15d240c90ce9a72ea476cfb6be8e4dd298af1"
+  },
+  {
+    "path": "src/poko-lol-matchups.js",
+    "live_sha256": "612430fb7fa114b3515e0cc643ffd4b11626b484e6eca35579cbc021f036a838",
+    "local_sha256": "612430fb7fa114b3515e0cc643ffd4b11626b484e6eca35579cbc021f036a838"
+  },
+  {
+    "path": "src/poko-lolbets.js",
+    "live_sha256": "cb861715feffe098ba9019fd13127b437611985c129ef3162209e140beda66a3",
+    "local_sha256": "cb861715feffe098ba9019fd13127b437611985c129ef3162209e140beda66a3"
+  },
+  {
+    "path": "src/poko-market.js",
+    "live_sha256": "0eba2f317872a2be71af20d014513482e670faceb0ee1f48f14474555852692f",
+    "local_sha256": "0eba2f317872a2be71af20d014513482e670faceb0ee1f48f14474555852692f"
+  },
+  {
+    "path": "src/poko-news-hashtags.js",
+    "live_sha256": "7268c479433010dbef2f122aff661b8c50d4fa351d7f15263a327b08c250d087",
+    "local_sha256": null
+  },
+  {
+    "path": "src/poko-news-scout.js",
+    "live_sha256": "04578ef844b6a0f97115f045cf590f6a8d36d319958449d5cea3cec0c4e1d908",
+    "local_sha256": "8d768e27d9d1377c4b64db770ebdcc529918d22b75fb276cc749ed552827ee97"
+  },
+  {
+    "path": "src/poko-reply-cards.js",
+    "live_sha256": "381b10a0f83183a3597d239348d26412e68c5d52af77409757b29e283c7528eb",
+    "local_sha256": "381b10a0f83183a3597d239348d26412e68c5d52af77409757b29e283c7528eb"
+  },
+  {
+    "path": "src/poko-reply-gate.js",
+    "live_sha256": "6618808c4b81855dc35d296ef7e60ac69e887e31d73ff4a2390d0ea65be7c6ec",
+    "local_sha256": "6618808c4b81855dc35d296ef7e60ac69e887e31d73ff4a2390d0ea65be7c6ec"
+  },
+  {
+    "path": "src/poko-runtime-switch.js",
+    "live_sha256": "e6c9f8b7f6fc131e16d9feb0f8c531c08b659ba0ffd77495fb0d7c7a806c91ca",
+    "local_sha256": "e6c9f8b7f6fc131e16d9feb0f8c531c08b659ba0ffd77495fb0d7c7a806c91ca"
+  },
+  {
+    "path": "src/poko-truth-friend.js",
+    "live_sha256": "79056d51864db36d87392f202d9a735e7a1abedccf566419146e9794ce1b9123",
+    "local_sha256": "79056d51864db36d87392f202d9a735e7a1abedccf566419146e9794ce1b9123"
+  },
+  {
+    "path": "src/poko-x-hook.js",
+    "live_sha256": "26e5e160e53f966ae32171351382de3e02713b3bb51500bbc57c4c6e0b2dfbf9",
+    "local_sha256": "26e5e160e53f966ae32171351382de3e02713b3bb51500bbc57c4c6e0b2dfbf9"
+  },
+  {
+    "path": "src/poko-x-webhook.js",
+    "live_sha256": "9cc9a558baaa9e7ecc04d2b1a17ae31d55ef8916c0feca0e9864e9a72a0bec9c",
+    "local_sha256": "9cc9a558baaa9e7ecc04d2b1a17ae31d55ef8916c0feca0e9864e9a72a0bec9c"
+  },
+  {
+    "path": "src/poko-youtube-oauth.js",
+    "live_sha256": "08b886fc7cf38a9dcff6fc67952231ed57a24a646c1054ad3fd449e6d37d5ce5",
+    "local_sha256": "08b886fc7cf38a9dcff6fc67952231ed57a24a646c1054ad3fd449e6d37d5ce5"
+  },
+  {
+    "path": "src/project-work.js",
+    "live_sha256": "9e5de028663b32b61a6021a0fdf59d0ad74a74c62eb14207939ef10d3da9987d",
+    "local_sha256": "9e5de028663b32b61a6021a0fdf59d0ad74a74c62eb14207939ef10d3da9987d"
+  },
+  {
+    "path": "src/recent-chat-context.js",
+    "live_sha256": "034221a83e1b67a0959479952003983975e74ab9fe6a141835a021b48738f1e9",
+    "local_sha256": "98939bcc0614f14572d5293db58871ae7c43440611afc3b4d52e3c092742a65c"
+  },
+  {
+    "path": "src/reminders.js",
+    "live_sha256": "f5c4e33bc89d3634e4fcaffb049c11143f5a1512da0c031e0c3a16db47b9e971",
+    "local_sha256": "63ed3650030fee24c651ffc2daca12418146363aacae5fd2a0575d57cefaaf69"
+  },
+  {
+    "path": "src/reply-language.js",
+    "live_sha256": "bff8148d5906822615e784a6f48d6c2a0daf68c4b2388b5fcbbb332876f3164f",
+    "local_sha256": "f61ac93e819c540ddd9ee7b83358548e41e07c806de639e6c1c0c3b3f29ccacd"
+  },
+  {
+    "path": "src/runtime-host.js",
+    "live_sha256": "183ca41f88068b79c33a42e99b7c1dbb060b7a9a30fcad8a1abae268bf9c04a8",
+    "local_sha256": "c8cecda48a7c86e2737fa33f4da88bd6e704869596c65fe51abbab08ffe96474"
+  },
+  {
+    "path": "src/semantic-judge.js",
+    "live_sha256": "e1d82a447f90d5dd576edb5b5b317c728e4a19f8fde7123469b00cdb0478e7c9",
+    "local_sha256": "2944338e9592117b445a8611fc0ece89c2834cc5986463e1ded32c4107854407"
+  },
+  {
+    "path": "src/semantic-resolver.js",
+    "live_sha256": "6f4ae3dae9ec33e58be27528d015ca6d8994892f82f8ba613dddfc05aa62d8c4",
+    "local_sha256": "ef08ae3c067ecb826696c6fcf6e5fe2e5f6514a2ba61847c95994c9e4c1a4058"
+  },
+  {
+    "path": "src/social-operations.js",
+    "live_sha256": "e4ca8fd0e6d4424c5b81f5b253af5d4441e7c44e90b62e1ac4a64df312788116",
+    "local_sha256": "e4ca8fd0e6d4424c5b81f5b253af5d4441e7c44e90b62e1ac4a64df312788116"
+  },
+  {
+    "path": "src/spreadsheet-graphs.js",
+    "live_sha256": "0e43b291ea2813e2b1cc6ea387f794feff078c0077f558635b64f2913ceefd8d",
+    "local_sha256": "74f2ed4235119228c933dbf0fe81b0b79d58b460eb175745e479f37f73898f38"
+  },
+  {
+    "path": "src/spreadsheet-updates.js",
+    "live_sha256": "c035dfe6e033e359434d6076d848dd2215261f7eb506ff3e99234c1246fe88ee",
+    "local_sha256": "c035dfe6e033e359434d6076d848dd2215261f7eb506ff3e99234c1246fe88ee"
+  },
+  {
+    "path": "src/status-report.js",
+    "live_sha256": "1dc5e08256f69e17c2dfaf6193db99ce4c0c65dbf0425497a5dbb7c5741c0fac",
+    "local_sha256": "1dc5e08256f69e17c2dfaf6193db99ce4c0c65dbf0425497a5dbb7c5741c0fac"
+  },
+  {
+    "path": "src/study-focus-reminders.js",
+    "live_sha256": "b8275a033a6fa77d82bdf1e9e5b6afe98b47dc6c4d18d26a66a84760d78747b2",
+    "local_sha256": "6786f0712337773f491e913261700beab47f80d3be6d2c4648fb0108d9fb5c5d"
+  },
+  {
+    "path": "src/task-lifecycle.js",
+    "live_sha256": "aac4a3849effe74288d6b458a6873ca47309922250b419e0288bc1c8bb09a534",
+    "local_sha256": null
+  },
+  {
+    "path": "src/telegram.js",
+    "live_sha256": "e731495c4f473eb319dd7c36c270dd9e37b7cf3389ba1ce1231d20389b4e588e",
+    "local_sha256": "55dc606ae152a1bba1aab4c0b81407a894da9dd49971c64b4cd1a3beef50f13f"
+  },
+  {
+    "path": "src/turn-metadata.js",
+    "live_sha256": "73791c2261ab02f392fb82bd73623c6f5bdb79a797d8be8533adb824f1ccf58b",
+    "local_sha256": "588ac2e4065d3991ff727134665c5664750cef192a89f845edc15375bb283c40"
+  },
+  {
+    "path": "src/turn-notifier.js",
+    "live_sha256": "c540aace7a350c59e0dcfab361a993ea49b9f929e6b95a98d1dd2edc3c2b545d",
+    "local_sha256": "c540aace7a350c59e0dcfab361a993ea49b9f929e6b95a98d1dd2edc3c2b545d"
+  },
+  {
+    "path": "src/turn-trace.js",
+    "live_sha256": "9565bb176eff51b223fb14e6ef6d65331516f0453730bc292e4ee1a600e58843",
+    "local_sha256": "862024c4293d77b05fcfd3785951fbc20e3ca40012b744a8dd2e9914e450e87f"
+  },
+  {
+    "path": "src/web-crawl.js",
+    "live_sha256": "c8460ee3e5167903b23a8939a93f4028b65e2e2164c27bcff7ccbfdf633e7601",
+    "local_sha256": "622497e2961955ce894ee3e1c043833b4e975f5281645dc72a41267a95256b1c"
+  },
+  {
+    "path": "src/x-client.js",
+    "live_sha256": "d3ca2963805a7d52a460c19558b1c7eb96048f70a7dbb9c09d371865e118a052",
+    "local_sha256": "d3ca2963805a7d52a460c19558b1c7eb96048f70a7dbb9c09d371865e118a052"
+  },
+  {
+    "path": "src/youtube-oauth.js",
+    "live_sha256": "c3b7fbaa9e07e9caf58dcd8ce4458dd226886a77a2a369382eb967fe67cd72f0",
+    "local_sha256": "c3b7fbaa9e07e9caf58dcd8ce4458dd226886a77a2a369382eb967fe67cd72f0"
+  },
+  {
+    "path": "src/youtube-upload.js",
+    "live_sha256": "e4051e6809ed63e0d5bcaaaec4b593c736539f250641d3e69f2de06ce9d19676",
+    "local_sha256": "e4051e6809ed63e0d5bcaaaec4b593c736539f250641d3e69f2de06ce9d19676"
+  },
+  {
+    "path": "src/zcode-api.js",
+    "live_sha256": "d6bbce18306d3b4bd33a2091aec97db44a2c45cdb1903f1b2b2047abd8fb2168",
+    "local_sha256": "d6bbce18306d3b4bd33a2091aec97db44a2c45cdb1903f1b2b2047abd8fb2168"
+  },
+  {
+    "path": "src/zcode-cli.js",
+    "live_sha256": "66ed2815ab89c7b332c254c198a7d0566788795e69a3078272648befa9cc051c",
+    "local_sha256": "66ed2815ab89c7b332c254c198a7d0566788795e69a3078272648befa9cc051c"
+  },
+  {
+    "path": "scripts/__pycache__/append-receipt-log.cpython-314.pyc",
+    "live_sha256": "d8725044db257bc3fdaa7bca0199a1ee886ad345181152822be86e932ba35833",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/__pycache__/append-weight-log.cpython-314.pyc",
+    "live_sha256": "d5f7c6d16fb17a627159ebd9900985f027847dcd3010755b4be2fca9fc4cdc92",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/agentskills-scout-run.js",
+    "live_sha256": "93a5df9b53c1fd2f2d145ba04f89ba827d08c0e98fcf3d5167526bbb1f2fa681",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/append-receipt-log.py",
+    "live_sha256": "15cb0b852e0e6795d71da857f2a00e3b2a615eae1be204b74c7652b91c460cdb",
+    "local_sha256": "15cb0b852e0e6795d71da857f2a00e3b2a615eae1be204b74c7652b91c460cdb"
+  },
+  {
+    "path": "scripts/append-weight-log.py",
+    "live_sha256": "f76abce7df13527c7be73660b642e5f40bec335b6e9541ed9a601d7229f3cb2e",
+    "local_sha256": "f76abce7df13527c7be73660b642e5f40bec335b6e9541ed9a601d7229f3cb2e"
+  },
+  {
+    "path": "scripts/bench-flareon-image-vision.mjs",
+    "live_sha256": "bd7cd98df28afa226b573e89dafa3be56c63666654398ff8aee62c509177f52b",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/build-cityhop-lower-thirds.py",
+    "live_sha256": "0b5810d78ae72cba92eeb994285a9885d8589ddd06ddbafd97ee37e0adc3b78c",
+    "local_sha256": "0b5810d78ae72cba92eeb994285a9885d8589ddd06ddbafd97ee37e0adc3b78c"
+  },
+  {
+    "path": "scripts/capture-semantic-traces.mjs",
+    "live_sha256": "4a02bf8150a14ed1a5a047ba4ecc037bf60f8aca9ce47e6b6b9881c51abadede",
+    "local_sha256": "67eec43b3de44e77dd9a3288eaec8fe178a36b48feb165548830b5296206aa71"
+  },
+  {
+    "path": "scripts/check-imports.mjs",
+    "live_sha256": "01f32c455d136a2bf04b1da318ceb4d52cb7d766a91e0bf55ff086371e1b9327",
+    "local_sha256": "01f32c455d136a2bf04b1da318ceb4d52cb7d766a91e0bf55ff086371e1b9327"
+  },
+  {
+    "path": "scripts/cityhop-backfill-visual-review.py",
+    "live_sha256": "9a740f3327a5d70b353635d2fb5f175bb2c3b557a872e9588e07696cb300b4f1",
+    "local_sha256": "9a740f3327a5d70b353635d2fb5f175bb2c3b557a872e9588e07696cb300b4f1"
+  },
+  {
+    "path": "scripts/cityhop-batch-queue.py",
+    "live_sha256": "85a0a79a16a57636553605b90b52281acae7c24b1ea9305d85beff18fb22ced2",
+    "local_sha256": "85a0a79a16a57636553605b90b52281acae7c24b1ea9305d85beff18fb22ced2"
+  },
+  {
+    "path": "scripts/cityhop-batch-queue.sh",
+    "live_sha256": "9afbc36a9669cc21e86e8f1db30556a0b0968c1511c7f55cc808e5510012fd66",
+    "local_sha256": "9afbc36a9669cc21e86e8f1db30556a0b0968c1511c7f55cc808e5510012fd66"
+  },
+  {
+    "path": "scripts/cityhop-batch-watch.sh",
+    "live_sha256": "f3d82e5035650a46f546c7fa52ebd9a78dc6d2e649d79ec53aa4a0c99292746d",
+    "local_sha256": "f3d82e5035650a46f546c7fa52ebd9a78dc6d2e649d79ec53aa4a0c99292746d"
+  },
+  {
+    "path": "scripts/cityhop-cities-publish-daemon.sh",
+    "live_sha256": "405d0c49b0bf6e5e8cea63ca62e305a375d731a18f032f468b51d4ab078d7ba0",
+    "local_sha256": "405d0c49b0bf6e5e8cea63ca62e305a375d731a18f032f468b51d4ab078d7ba0"
+  },
+  {
+    "path": "scripts/cityhop-cities-publish.py",
+    "live_sha256": "eb8b8130213bb9974059e88c5c37d4ea4930ba8207584133dab084e036196863",
+    "local_sha256": "eb8b8130213bb9974059e88c5c37d4ea4930ba8207584133dab084e036196863"
+  },
+  {
+    "path": "scripts/cityhop-clip-render-workflow.sh",
+    "live_sha256": "25c6c0ef3171a1d8ae2cd16e0dd3e5825768102cb85a881329798f34ac24dec3",
+    "local_sha256": "25c6c0ef3171a1d8ae2cd16e0dd3e5825768102cb85a881329798f34ac24dec3"
+  },
+  {
+    "path": "scripts/cityhop-dashboard-live-sync.sh",
+    "live_sha256": "e5367b5a8c2041c9db2edf13ba0fa5f98a7a39a2fa3f5a2269f682c1d3821af4",
+    "local_sha256": "e5367b5a8c2041c9db2edf13ba0fa5f98a7a39a2fa3f5a2269f682c1d3821af4"
+  },
+  {
+    "path": "scripts/cityhop-dashboard-snapshot.sh",
+    "live_sha256": "f0e0814ed8f9a2cd3ea1a6c42a28813d74e2bdf77dcdd3f7545a3d6f60442a67",
+    "local_sha256": "f0e0814ed8f9a2cd3ea1a6c42a28813d74e2bdf77dcdd3f7545a3d6f60442a67"
+  },
+  {
+    "path": "scripts/cityhop-engine.sh",
+    "live_sha256": "0dc371b25b39f5c2ee5e48ae3dff084d5119fd61606adfc21b0e30f638f32f97",
+    "local_sha256": "0dc371b25b39f5c2ee5e48ae3dff084d5119fd61606adfc21b0e30f638f32f97"
+  },
+  {
+    "path": "scripts/cityhop-fetch-queue-from-db.py",
+    "live_sha256": "08b919e95810af88f2c5d40b04940424f08042ea29df6e5b66bb4f0b9acbea4a",
+    "local_sha256": "08b919e95810af88f2c5d40b04940424f08042ea29df6e5b66bb4f0b9acbea4a"
+  },
+  {
+    "path": "scripts/cityhop-mpt-cleanup.py",
+    "live_sha256": "795afa84cf1e3ac9ed73d8adebb8ebb8edadbb3a51bf3b6f7ff9b52d500d49db",
+    "local_sha256": "795afa84cf1e3ac9ed73d8adebb8ebb8edadbb3a51bf3b6f7ff9b52d500d49db"
+  },
+  {
+    "path": "scripts/cityhop-mpt-clip-catalog.py",
+    "live_sha256": "5bfa841c87dc8543b234cf91938431403fc0571e04cb959918d962df0358e34f",
+    "local_sha256": "5bfa841c87dc8543b234cf91938431403fc0571e04cb959918d962df0358e34f"
+  },
+  {
+    "path": "scripts/cityhop-nespc-autopilot.sh",
+    "live_sha256": "f309af658d4f85a59640f9f96943d680ce44e98987cc47eb889a83c23a0101a6",
+    "local_sha256": "f309af658d4f85a59640f9f96943d680ce44e98987cc47eb889a83c23a0101a6"
+  },
+  {
+    "path": "scripts/cityhop-pipeline-env.defaults.sh",
+    "live_sha256": "15ee033e558be3e79bfb48d768fb6c0cc6099556e189b5cc6d28e9741f7c736d",
+    "local_sha256": "15ee033e558be3e79bfb48d768fb6c0cc6099556e189b5cc6d28e9741f7c736d"
+  },
+  {
+    "path": "scripts/cityhop-pixabay-rate-check.sh",
+    "live_sha256": "8519fb56065d92e4cc2294884a3c8efe9786317cf6511c1ceb430ac2d3d8899e",
+    "local_sha256": "8519fb56065d92e4cc2294884a3c8efe9786317cf6511c1ceb430ac2d3d8899e"
+  },
+  {
+    "path": "scripts/cityhop-plan-daily-publish.sh",
+    "live_sha256": "aec0ee92be5f9caf01f9a8037d84df630f1c27904b539437df7f93e2c666ce17",
+    "local_sha256": "aec0ee92be5f9caf01f9a8037d84df630f1c27904b539437df7f93e2c666ce17"
+  },
+  {
+    "path": "scripts/cityhop-pregen-batch.py",
+    "live_sha256": "24953283b110b7817a04c10b09133026f0c2ad578e2420508c10d79bbf588f50",
+    "local_sha256": "24953283b110b7817a04c10b09133026f0c2ad578e2420508c10d79bbf588f50"
+  },
+  {
+    "path": "scripts/cityhop-pregen-one.mjs",
+    "live_sha256": "e6d44cceca5f790bbf5fcd71556353fb9af5b2d53ce774b18f0a7c257a7fb3b8",
+    "local_sha256": "e6d44cceca5f790bbf5fcd71556353fb9af5b2d53ce774b18f0a7c257a7fb3b8"
+  },
+  {
+    "path": "scripts/cityhop-publish-archive-sprint.py",
+    "live_sha256": "af5d02df3c21d2cf9599aea6b5006fffcce342c9ed4dfc241408652b639bd8ab",
+    "local_sha256": "af5d02df3c21d2cf9599aea6b5006fffcce342c9ed4dfc241408652b639bd8ab"
+  },
+  {
+    "path": "scripts/cityhop-publish-one.sh",
+    "live_sha256": "5174d67fa5561cd46a97d0cab95f9150cdb5db401060687f432e1fa65220588b",
+    "local_sha256": "5174d67fa5561cd46a97d0cab95f9150cdb5db401060687f432e1fa65220588b"
+  },
+  {
+    "path": "scripts/cityhop-publish-spread.sh",
+    "live_sha256": "7d41854c98314ade9e81caa39914fddcc10e085da3310cde81ed6d7d3b730516",
+    "local_sha256": "7d41854c98314ade9e81caa39914fddcc10e085da3310cde81ed6d7d3b730516"
+  },
+  {
+    "path": "scripts/cityhop-queue-repair.py",
+    "live_sha256": "53435e77d9535100a21b15e8631893cb72ac22053a8ac0cae28e628b0d71a45b",
+    "local_sha256": "53435e77d9535100a21b15e8631893cb72ac22053a8ac0cae28e628b0d71a45b"
+  },
+  {
+    "path": "scripts/cityhop-render-keep-awake.sh",
+    "live_sha256": "b0b0c4c855c0a7182d10e9eca86c721c0288e437c9d6c2de643d4d0a462906cc",
+    "local_sha256": "b0b0c4c855c0a7182d10e9eca86c721c0288e437c9d6c2de643d4d0a462906cc"
+  },
+  {
+    "path": "scripts/cityhop-repair-prepared-bundles.mjs",
+    "live_sha256": "2cb700a562a16d1076f706477f1a7a18e914eef719067dfcd8e7c65a30b4ee5b",
+    "local_sha256": "2cb700a562a16d1076f706477f1a7a18e914eef719067dfcd8e7c65a30b4ee5b"
+  },
+  {
+    "path": "scripts/cityhop-repair-prepared-bundles.py",
+    "live_sha256": "78f956819b4a57258e17a9fba8d9d9f56b151f18e3ecd6f6b84b8463b60b0f7f",
+    "local_sha256": "78f956819b4a57258e17a9fba8d9d9f56b151f18e3ecd6f6b84b8463b60b0f7f"
+  },
+  {
+    "path": "scripts/cityhop-repair-prepared-bundles.sh",
+    "live_sha256": "c0d35ff3e64dd11185e7b6d96647d33243a4a56f30e2359cfdb9348e3af1957d",
+    "local_sha256": "c0d35ff3e64dd11185e7b6d96647d33243a4a56f30e2359cfdb9348e3af1957d"
+  },
+  {
+    "path": "scripts/cityhop-requeue-uploaded-for-remake.py",
+    "live_sha256": "593570859140d87637d438e45e52cc04e78da866e03f6faa36fe0823b2056149",
+    "local_sha256": "593570859140d87637d438e45e52cc04e78da866e03f6faa36fe0823b2056149"
+  },
+  {
+    "path": "scripts/cityhop-rescue-overlong-shorts.mjs",
+    "live_sha256": "f1a4f63bf4a7df8f7a2ca4b207ad3223acc764b33082e8a79610f420f9438065",
+    "local_sha256": "f1a4f63bf4a7df8f7a2ca4b207ad3223acc764b33082e8a79610f420f9438065"
+  },
+  {
+    "path": "scripts/cityhop-resume.sh",
+    "live_sha256": "e3a3b688ec256ed553a505b70ef004553d2f4b137347102884503312f0f56d03",
+    "local_sha256": "e3a3b688ec256ed553a505b70ef004553d2f4b137347102884503312f0f56d03"
+  },
+  {
+    "path": "scripts/cityhop-run-auto.sh",
+    "live_sha256": "aca564218732133518ab4cf7bb2fc80de2155dd75fa0ae9a90fa57e36fb4fc98",
+    "local_sha256": "aca564218732133518ab4cf7bb2fc80de2155dd75fa0ae9a90fa57e36fb4fc98"
+  },
+  {
+    "path": "scripts/cityhop-run-local-mac.sh",
+    "live_sha256": "90cf8dbdc01302a48fb72e3b8eda17fc1d6e4c5b4682f65637e6f7f20b74b771",
+    "local_sha256": "90cf8dbdc01302a48fb72e3b8eda17fc1d6e4c5b4682f65637e6f7f20b74b771"
+  },
+  {
+    "path": "scripts/cityhop-sanitize-planner-env.sh",
+    "live_sha256": "c7141a8e3d29c1d69458f5525db0ec7d64fe08a062f3e43ddb38f7a48bce02c0",
+    "local_sha256": "c7141a8e3d29c1d69458f5525db0ec7d64fe08a062f3e43ddb38f7a48bce02c0"
+  },
+  {
+    "path": "scripts/cityhop-short-title-check.mjs",
+    "live_sha256": "efb95ae4a8fc3e21a2091a2ed7d9c41011da2efd6b5d006c36c73b44f120f4f6",
+    "local_sha256": "efb95ae4a8fc3e21a2091a2ed7d9c41011da2efd6b5d006c36c73b44f120f4f6"
+  },
+  {
+    "path": "scripts/cityhop-split-youtube-beats.py",
+    "live_sha256": "b81ca869af9cc1bcb365c46a3931df26e71ae98e69d3b1135bf138e167be6f79",
+    "local_sha256": "b81ca869af9cc1bcb365c46a3931df26e71ae98e69d3b1135bf138e167be6f79"
+  },
+  {
+    "path": "scripts/cityhop-sync-queue-vercel.sh",
+    "live_sha256": "7b0e6f62433aee1eb2fb8ebe8f8f015220d0ab6e57a52c8a7986ae0ce096b86a",
+    "local_sha256": "7b0e6f62433aee1eb2fb8ebe8f8f015220d0ab6e57a52c8a7986ae0ce096b86a"
+  },
+  {
+    "path": "scripts/cityhop-sync-scripted-queue.py",
+    "live_sha256": "8562072d7f6bbccc758cc16b1f1a6f7eb94374e76bffcfbc8a6ac2b86a9d00ea",
+    "local_sha256": "8562072d7f6bbccc758cc16b1f1a6f7eb94374e76bffcfbc8a6ac2b86a9d00ea"
+  },
+  {
+    "path": "scripts/cityhop-test-render.mjs",
+    "live_sha256": "da4e35c518f62c5c90d26bd9c12f5752705164b3c24fed3d0cab93acf7bba697",
+    "local_sha256": "da4e35c518f62c5c90d26bd9c12f5752705164b3c24fed3d0cab93acf7bba697"
+  },
+  {
+    "path": "scripts/cityhop-youtube-auth.js",
+    "live_sha256": "f65ab49f4ec2774c84368dd3c3a70f5c07692507a8c0d7e594777c2932ad7098",
+    "local_sha256": "f65ab49f4ec2774c84368dd3c3a70f5c07692507a8c0d7e594777c2932ad7098"
+  },
+  {
+    "path": "scripts/cityhop-youtube-upload.mjs",
+    "live_sha256": "5ff595c2cd3f638baf747fd3d83c8448c6c8da198240c09fe5bcce4b6117ae8a",
+    "local_sha256": "5ff595c2cd3f638baf747fd3d83c8448c6c8da198240c09fe5bcce4b6117ae8a"
+  },
+  {
+    "path": "scripts/codevira-mcp-lib.sh",
+    "live_sha256": "1572623280ca0a5861a1d209c8c835c3f7d46118d20da1a1337db800d67412f1",
+    "local_sha256": "1572623280ca0a5861a1d209c8c835c3f7d46118d20da1a1337db800d67412f1"
+  },
+  {
+    "path": "scripts/configure-cityhop-dashboard-blob.sh",
+    "live_sha256": "99f9044e9e370825329c847c5318b46901e67fc744795ea4306eca55e2d4a537",
+    "local_sha256": "99f9044e9e370825329c847c5318b46901e67fc744795ea4306eca55e2d4a537"
+  },
+  {
+    "path": "scripts/configure-cityhop-mpt.sh",
+    "live_sha256": "fad380b2c7f39658289da33d1362457a110a82e04cd60446a7a29957a2c2c486",
+    "local_sha256": "0727a0908c683aac276cc5e40790e5aaa4265ce75c63a4a26c80a3eb66bfa22d"
+  },
+  {
+    "path": "scripts/configure-flareon-nespc-prompts.sh",
+    "live_sha256": "9db0ea2cc623271e7158d678f68b6c10d594d4dfa40f845cc502a7fd580974d8",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/configure-gmail-oauth-from-json.sh",
+    "live_sha256": "c4552d688980a4d2fdd4a96ce99e706a11f23b91a7415df8cfb52b1523bab3ee",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/configure-honcho-gemini-peer1.sh",
+    "live_sha256": "bb2fab6e0da5276fe815f37189cfcd5875d9c5b4a2762a3de038bb5a95820a26",
+    "local_sha256": "1bfb7bc32e181e77f7a0744ca67e4a2c904b7041c1819b909ff5a6f8c78ee030"
+  },
+  {
+    "path": "scripts/configure-honcho-llm-proxy-local.py",
+    "live_sha256": "8f8014f4f51567bf95448de87c87e857f55f78af8fcb49dbe7c0523f61924d16",
+    "local_sha256": "8f8014f4f51567bf95448de87c87e857f55f78af8fcb49dbe7c0523f61924d16"
+  },
+  {
+    "path": "scripts/configure-honcho-llm-proxy-nespc.sh",
+    "live_sha256": "50da9ee126d9f568f378e6b021eb55ae009373399e0a2446a717ed2ec7650897",
+    "local_sha256": "50da9ee126d9f568f378e6b021eb55ae009373399e0a2446a717ed2ec7650897"
+  },
+  {
+    "path": "scripts/configure-honcho-llm-proxy-peer1.sh",
+    "live_sha256": "539c819f5e9bb4ba1215be743878b0ab5a8a1ac031020c88de5ce3ad9235960b",
+    "local_sha256": "1753d6dfd03639fa47e679a0454e0773c050be4277d3c7b351b8d9675d8086e0"
+  },
+  {
+    "path": "scripts/configure-peer1-poko-hospital-url.sh",
+    "live_sha256": "e79ebedd56da867770934ee15d7fdd7c18bba328073a71d105b7843e4f6892aa",
+    "local_sha256": "1331f19443d019fb13b9532ffbf359bfc01c03b8d5a927bfc3e51cd13740dd5f"
+  },
+  {
+    "path": "scripts/configure-pi-flareon-backup.sh",
+    "live_sha256": "26791e01da7648fe106c15795949e0ba0e87ad16d0cd2a5948815c7a1263e3bc",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/cursor-codevira-mcp.sh",
+    "live_sha256": "edd471cda493493c4f4a7c4b2f239f181d9740f6f7c2e3a843656f8feff26499",
+    "local_sha256": "edd471cda493493c4f4a7c4b2f239f181d9740f6f7c2e3a843656f8feff26499"
+  },
+  {
+    "path": "scripts/cursor-flareon-honcho-mcp.sh",
+    "live_sha256": "2ad6201e8a20b23054556d28fac7cd19f0fe2fb15e9608e3abf2b27bab5676ee",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/cursor-hermes-peer1-mcp.sh",
+    "live_sha256": "5f146dc70f114204a29039b9b03c2bb2a878226b1dba62e0ac4a24c9e66134fa",
+    "local_sha256": "f80799c2a1fbabbca6bdd85aaab6d63dec1052c2354216fc550f71da28c55d82"
+  },
+  {
+    "path": "scripts/cursor-honcho-mcp.sh",
+    "live_sha256": "4624b019bc2752b856395c530b47657022b995e64c0289b298639ee598d7218b",
+    "local_sha256": "4624b019bc2752b856395c530b47657022b995e64c0289b298639ee598d7218b"
+  },
+  {
+    "path": "scripts/cursor-honcho-session.sh",
+    "live_sha256": "5ddb31dd9a927e8e107fae51cff7208479c6e162f3f0dc52ddd3cf8796720fe0",
+    "local_sha256": "5ddb31dd9a927e8e107fae51cff7208479c6e162f3f0dc52ddd3cf8796720fe0"
+  },
+  {
+    "path": "scripts/cursor-qwen-mcp.sh",
+    "live_sha256": "b64c5ed57fab1da8d6217ec934943fdbd344409e2f445e5238b6970f5abe7593",
+    "local_sha256": "b64c5ed57fab1da8d6217ec934943fdbd344409e2f445e5238b6970f5abe7593"
+  },
+  {
+    "path": "scripts/deploy-cityhop-dashboard-vercel.sh",
+    "live_sha256": "f1a6a3a68cbf93d6f4ed8d6bbf5d1dfe55c982b913da9d00305364cde84463d0",
+    "local_sha256": "f1a6a3a68cbf93d6f4ed8d6bbf5d1dfe55c982b913da9d00305364cde84463d0"
+  },
+  {
+    "path": "scripts/deploy-peer1-flareon-independent.sh",
+    "live_sha256": "ed853f882847661f092b0fbf56845ba89aea574cbb3db399904e106cb48a8245",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/deploy-peer1-flareon.sh",
+    "live_sha256": "fcccaf3ca09f3e00db6741ff62546d72f0fc3d4661e2eff60de963bf7ccad02c",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/deploy-peer1-poko.sh",
+    "live_sha256": "58de3d8c872384f1e27e4d0a4ae3c6e43e7ab8c8cee47437303269e4efea682b",
+    "local_sha256": "58de3d8c872384f1e27e4d0a4ae3c6e43e7ab8c8cee47437303269e4efea682b"
+  },
+  {
+    "path": "scripts/deploy-peer1-runtime.sh",
+    "live_sha256": "696ae5056c793cd0b92a31e281d7e5574f22cd104c97aa944ddc37ec1935da24",
+    "local_sha256": "6e10dd9c5ae032141c0b78d47992970e3a2fb3eea5419ba1399df07c2234f33e"
+  },
+  {
+    "path": "scripts/deploy-peer1.sh",
+    "live_sha256": "b6a8f8de59c71d524b2f5712ef34418a54cc14efc2de9eeba54b97d46217860e",
+    "local_sha256": "b12acabe3b6a6c99fbe918c4544c4b0ad31b27150dc2694e50ba136942405bcc"
+  },
+  {
+    "path": "scripts/deploy-peer2-flareon-fallback.sh",
+    "live_sha256": "f4939e50dba8ddd9f8c304c0a3e24adea410f52b1bda5f5c1179ae98559c08ec",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/deploy-restart-flareon-watch.sh",
+    "live_sha256": "2d55499586c5e1b8fdb4a723c6bb45462622577575b49536037d85341cf5d30f",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/dsh-codevira-mcp.sh",
+    "live_sha256": "973b4fd50bb7cefa716cd5468dde5e4e2ed0e94d0b82ded5e031ff43c17a6335",
+    "local_sha256": "973b4fd50bb7cefa716cd5468dde5e4e2ed0e94d0b82ded5e031ff43c17a6335"
+  },
+  {
+    "path": "scripts/dsh-honcho-mcp.sh",
+    "live_sha256": "ef93ef88ebc8713430673a22a39fceca9b61ebbe3a001f06c7bb52f313da5377",
+    "local_sha256": "ef93ef88ebc8713430673a22a39fceca9b61ebbe3a001f06c7bb52f313da5377"
+  },
+  {
+    "path": "scripts/flareon-context-analyze.mjs",
+    "live_sha256": "69c903ef3c2c2c1f75103b02ea4565862a7799ad764be9080fbece2a5e914972",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/flareon-crawl4ai.py",
+    "live_sha256": "1ad29e2a8b9813eea2f83cdad071d75a1c9ffc115377ab7419636584c686efe1",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/flareon-honcho-mcp-ensure.sh",
+    "live_sha256": "0f91a3f10edfcf35351a39b6043935b3fb8b4c2aec3f636db2ee7658daf6f38c",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/flareon-intent-50.mjs",
+    "live_sha256": "a9860a66b59ecaeb3e29d527471cd205d67eb47e8c54f0e902d26ceecf5bf225",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/flareon-intent-eval.mjs",
+    "live_sha256": "3f989ef7f2c658aee8bc94525b2e2a892ef7db77db8845471ab6a0fe31e66b2c",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/flareon-proactive-checkin.py",
+    "live_sha256": "c0aa8b497ec6dc0734ecbde3256f1cb8e78218e1b8577f03675aff66cde2b2d6",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/flareon-secrets.sh",
+    "live_sha256": "f15138eb1f64a14200ec902dfbebf15b3701c46e78025f1b12f13a54c051b401",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/flareon-seed-study-focus-reminders.mjs",
+    "live_sha256": "ceedb41d798ab8783d059ccb9fd1bb10369716dc8bf1cfb7e7cb559177cac1f2",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/gemma4-cursor-proxy.mjs",
+    "live_sha256": "61bb47b139709902543fee421dea686630822690037d62e2cae0b6b2250324e6",
+    "local_sha256": "61bb47b139709902543fee421dea686630822690037d62e2cae0b6b2250324e6"
+  },
+  {
+    "path": "scripts/gmail-accounts-list.js",
+    "live_sha256": "f3b1070d185ee9303ba5295edab71c814203e1d6b497e39d020680f4169dca50",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/gmail-auth-exchange.js",
+    "live_sha256": "9539ab3fe3caffc187504e57c8be9d6a2cc537adf84465a053e37ac34faf6f5a",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/gmail-auth-url.js",
+    "live_sha256": "ee596dee572217d6a7c9941b1ab12fbf58ae351aa0bad4259322b3f5cf174bbe",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/gmail-auth.js",
+    "live_sha256": "dc7504aa390ad0dcebe49b77115a68aa25aa45524eb07a3a23c3d97c0d873b6f",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/gmail-learn-once.js",
+    "live_sha256": "6b377512febb0ca614e6d83377c02cdb57576f350f7807541ea3e658a13f04a4",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/griffin-plan-daily-spread.sh",
+    "live_sha256": "6537384014da5066cb29a211cb64a511b53763e7549b2d997bb583d790fda015",
+    "local_sha256": "6537384014da5066cb29a211cb64a511b53763e7549b2d997bb583d790fda015"
+  },
+  {
+    "path": "scripts/griffin-upload-one.sh",
+    "live_sha256": "a6b79fd477d7159a8ca38e0fe374af8e7b68262a9c2ad32827fec088a2ea6838",
+    "local_sha256": "a6b79fd477d7159a8ca38e0fe374af8e7b68262a9c2ad32827fec088a2ea6838"
+  },
+  {
+    "path": "scripts/griffin-upload-random.mjs",
+    "live_sha256": "d02340be9f95966ced37846aaecae749fc8a2f4b0e47dd50e88ebd065df9f3f7",
+    "local_sha256": "d02340be9f95966ced37846aaecae749fc8a2f4b0e47dd50e88ebd065df9f3f7"
+  },
+  {
+    "path": "scripts/griffin-youtube-auth.js",
+    "live_sha256": "beb9eef951b3c805e70f1edd6e84670913e65b6bfae1b48d2fbb2a49ddd7edc5",
+    "local_sha256": "61e7ca1e0eebd5479f023fcae4e2600b65a4b84e7ee4cc3572fd07a43b4d540b"
+  },
+  {
+    "path": "scripts/grocery-migrate.mjs",
+    "live_sha256": "216274c8fdc03ab40e4a6a12b99a0b06ca60c63a99018fe2c211714429ed6b86",
+    "local_sha256": "16709fa77674b6b153d79cd9580bd07b7fbfb3aa9112e2046bc95c394e69817d"
+  },
+  {
+    "path": "scripts/grocery-price-snapshot.mjs",
+    "live_sha256": "517a19893b4f2500dfbb16c5817da9cb3fc37194066e7f1793b88318c922834a",
+    "local_sha256": "cd015cc91860e4b28fd1f2ede0ac773806eec36e9dcd4041301bcf720205b333"
+  },
+  {
+    "path": "scripts/grocery-telegram-canary.mjs",
+    "live_sha256": "64340746504f83c6d1f66144cc733f4c8883959c0ab7f9d0a15387ca3435360d",
+    "local_sha256": "855feef9e23528fba45805d6b1f73fc4e5f43cbe520156a01f0db20b53cc4baf"
+  },
+  {
+    "path": "scripts/grocery-telegram-live-en.mjs",
+    "live_sha256": "19543b367d30be9775496803b292ef3d62604924086ef376387910689018368a",
+    "local_sha256": "d82f71179cd9ae9d36b88d50f6d2a6e5724c0855f4cd9890c0c2008983eae16c"
+  },
+  {
+    "path": "scripts/grocery-telegram-live-it2.mjs",
+    "live_sha256": "8fafb1f147a6679e91e32028c70d411adb90ccea50c043562b674a5ebad3ee50",
+    "local_sha256": "1d06b66009e9f9fc35fc64bda61c0571afc2a1913c7761b3f4acb2228246e80c"
+  },
+  {
+    "path": "scripts/honcho-cursor-watch.py",
+    "live_sha256": "303db30d7e065ea9337018fd8057ab15f594872143a3d7c62e38c03c963fabf2",
+    "local_sha256": "0d840565fb5f685f37a623083cc37c2a4a1f695ff8b274e16209f8d0b6b8465e"
+  },
+  {
+    "path": "scripts/honcho-cursor-watch.sh",
+    "live_sha256": "dba87880730446120fc4b10e6b9c00c4e3803b902f02116ec0cb001413cd4433",
+    "local_sha256": "17f357dbf2c0ac055b6fa3b559aa01a286e9f0583b706bdecea7645f533e1d90"
+  },
+  {
+    "path": "scripts/honcho-mcp-lib.sh",
+    "live_sha256": "1c001b51430a833d9e6d88efc5cb71ea8bde926bbfabffcf58e1bf12de10c582",
+    "local_sha256": "a0861a7876200cf422a4a00c704a2e593e1b2774749f1936442caf194abce5aa"
+  },
+  {
+    "path": "scripts/honcho-memory-codex-hook.sh",
+    "live_sha256": "3323482ffada975b27a7a8ee4dbc616e26bf4d55ae4f3810a99631cf389fef99",
+    "local_sha256": "3323482ffada975b27a7a8ee4dbc616e26bf4d55ae4f3810a99631cf389fef99"
+  },
+  {
+    "path": "scripts/honcho-memory-cursor-hook.sh",
+    "live_sha256": "911eb4a52a111be1c3c4140bf7a7c967b1e008d06103392febb4cef6ef2d10a2",
+    "local_sha256": "911eb4a52a111be1c3c4140bf7a7c967b1e008d06103392febb4cef6ef2d10a2"
+  },
+  {
+    "path": "scripts/honcho-memory-hook.py",
+    "live_sha256": "6aa8b31fa8da7ff9f77855bc0a2e2e1f9cbeac7b4aabb42d222c9a0e6f99726f",
+    "local_sha256": "6aa8b31fa8da7ff9f77855bc0a2e2e1f9cbeac7b4aabb42d222c9a0e6f99726f"
+  },
+  {
+    "path": "scripts/honcho-nespc-tunnel.sh",
+    "live_sha256": "264f66ab938f1bb4d4c476b4d7b5923abf675470f0daa58422e319b122051d9e",
+    "local_sha256": "264f66ab938f1bb4d4c476b4d7b5923abf675470f0daa58422e319b122051d9e"
+  },
+  {
+    "path": "scripts/honcho-peer1-tunnel.sh",
+    "live_sha256": "1ad9b05888c831bf28c01c82d9aaf72379754922c928d7569a62b5a76e169140",
+    "local_sha256": "6e02dc5a7268f98230c70d0d689809981d1221b055a30452b66e7ceeccbf1c06"
+  },
+  {
+    "path": "scripts/honcho.env.example",
+    "live_sha256": "942ff755dc05e5482729940ae33fca2700b77b4e9a219a86d797ed7c3cba53fe",
+    "local_sha256": "942ff755dc05e5482729940ae33fca2700b77b4e9a219a86d797ed7c3cba53fe"
+  },
+  {
+    "path": "scripts/install-agentskills-scout-cron.sh",
+    "live_sha256": "d832fc8e0e8f66520d6832c5112a5a8b3f4de04f180f332632154f4276a37da8",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/install-codevira-nespc.sh",
+    "live_sha256": "a767086570b1d1ebccedf688e2666b027024e21f3a5df0c83547980f0c2ad31a",
+    "local_sha256": "2a81a066c619a235646aca063602ad6851b0715b0eaf1bae5e6de702cdf27c7c"
+  },
+  {
+    "path": "scripts/install-codex-honcho-mcp.sh",
+    "live_sha256": "582ab4d1b465095d98b5f05826e13058c8f38b17c76115a7c13c7964de604136",
+    "local_sha256": "582ab4d1b465095d98b5f05826e13058c8f38b17c76115a7c13c7964de604136"
+  },
+  {
+    "path": "scripts/install-connect-cursor-harness.sh",
+    "live_sha256": "cddc1c1fef5c2f396049d0aa152687001b82187860901e96ff9fa98b0a205686",
+    "local_sha256": "8bf378c3dfc49873fdd5a8efc93b8fb19a7837e1916a10d30c9b6f4527717b17"
+  },
+  {
+    "path": "scripts/install-cursor-honcho-session-linux.sh",
+    "live_sha256": "85ee4d3005dbb7c0f5bd7aa76585104d08ebc14e8c14977e985cffbfc1863d16",
+    "local_sha256": "85ee4d3005dbb7c0f5bd7aa76585104d08ebc14e8c14977e985cffbfc1863d16"
+  },
+  {
+    "path": "scripts/install-cursor-honcho-session.sh",
+    "live_sha256": "ce2dc526c322e50bd0512e377aa80096bd6b3bcca35fd815bb192f675b73f90d",
+    "local_sha256": "ce2dc526c322e50bd0512e377aa80096bd6b3bcca35fd815bb192f675b73f90d"
+  },
+  {
+    "path": "scripts/install-flareon-proactive-checkins.sh",
+    "live_sha256": "d1dcacdc43d5721b1be9215cecdea0b6770a920533c24521987b6a9bbb0e6a36",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/install-flareon-replica-sync-pi-timer.sh",
+    "live_sha256": "cf7d6701d9f25586e85492b06a65303377b2256552d27c33d835b926bd3a7f30",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/install-honcho-cursor-watch.sh",
+    "live_sha256": "3a4dd768d9e754351b14317c3873a0fe845a0d72a3e0936b3e62ef428ad8c92d",
+    "local_sha256": "935a44da1fdf990b5319291f204123c0687710feb9d76f12d669c5839c84b1c3"
+  },
+  {
+    "path": "scripts/install-honcho-mcp.sh",
+    "live_sha256": "b436b60224f102854e40af91bf94d5cda8853dbb1a21a3928a816e10875d0568",
+    "local_sha256": "51dc8e12fb2b9adb810a0dfd31f0e39da2f2d5fd8a9542dc7d4ed0b9231da07b"
+  },
+  {
+    "path": "scripts/install-honcho-memory-automation.sh",
+    "live_sha256": "32c38652583864898dd27ea91ee0b949b908a57299701af63a69b657a4abdcd6",
+    "local_sha256": "32c38652583864898dd27ea91ee0b949b908a57299701af63a69b657a4abdcd6"
+  },
+  {
+    "path": "scripts/install-honcho-peer1.sh",
+    "live_sha256": "c0d73910ea1b39a240c3c10e085906ee13bdf16d399f8700909b48828402b801",
+    "local_sha256": "1be1c460571313368fcf2f6fbe7c38dfa6852ef9a5ef4a0c2afb8905a0d96a5a"
+  },
+  {
+    "path": "scripts/install-local-codex-as-api.sh",
+    "live_sha256": "0ad056065b03dfc0fb6ee4622afde354d868bab09ceb38df4e39b5048144ff9e",
+    "local_sha256": "0ad056065b03dfc0fb6ee4622afde354d868bab09ceb38df4e39b5048144ff9e"
+  },
+  {
+    "path": "scripts/install-local-codex.sh",
+    "live_sha256": "8d8eaad574c25c7d7d14516be06a24a51922cf508c9666d8207151d37194c683",
+    "local_sha256": "e41aa3375402854516b7dcefe072f50b36284693a8e0b751284fac95d35b74b7"
+  },
+  {
+    "path": "scripts/install-mac-cityhop-batch-watch.sh",
+    "live_sha256": "54362b775cf28c9144ddc62bb26b72bf1b64e2e4e5dddea8d59fb495275ee1e9",
+    "local_sha256": "54362b775cf28c9144ddc62bb26b72bf1b64e2e4e5dddea8d59fb495275ee1e9"
+  },
+  {
+    "path": "scripts/install-mac-cityhop-batch.sh",
+    "live_sha256": "dbd8776dd55c1e9da07bb4e148c8f9b714a20becc2bb124acae646975e66a2d3",
+    "local_sha256": "dbd8776dd55c1e9da07bb4e148c8f9b714a20becc2bb124acae646975e66a2d3"
+  },
+  {
+    "path": "scripts/install-mac-cityhop-dashboard-sync.sh",
+    "live_sha256": "ed4f7def6372edcd8c69ce41ba3ddcf9741f53ad247c781d2d0cb272e9cbb1b7",
+    "local_sha256": "ed4f7def6372edcd8c69ce41ba3ddcf9741f53ad247c781d2d0cb272e9cbb1b7"
+  },
+  {
+    "path": "scripts/install-mac-cityhop-nespc-tunnel.sh",
+    "live_sha256": "ef05bff5f5b3bed035927791110084fe8c84cdd3a992439a107c83963558a15a",
+    "local_sha256": "ef05bff5f5b3bed035927791110084fe8c84cdd3a992439a107c83963558a15a"
+  },
+  {
+    "path": "scripts/install-mac-cityhop-render-keep-awake.sh",
+    "live_sha256": "247bc1e4028a52434e07440c73be66f2de57807958e36ee87f1b39c42d0109fe",
+    "local_sha256": "247bc1e4028a52434e07440c73be66f2de57807958e36ee87f1b39c42d0109fe"
+  },
+  {
+    "path": "scripts/install-mac-moneyprinterturbo.sh",
+    "live_sha256": "a52a80f6b208251837a278830862a8a22d844b15d6a6f99ecca06fb02cb6e987",
+    "local_sha256": "a52a80f6b208251837a278830862a8a22d844b15d6a6f99ecca06fb02cb6e987"
+  },
+  {
+    "path": "scripts/install-mac-nespc-gemma4-tunnel.sh",
+    "live_sha256": "3e34b31606010ee3e367e89979ec413bd8a7650cfc33460cf205ecb63c0c885d",
+    "local_sha256": "3e34b31606010ee3e367e89979ec413bd8a7650cfc33460cf205ecb63c0c885d"
+  },
+  {
+    "path": "scripts/install-mac-ollama-gemma4-12b-q8.sh",
+    "live_sha256": "8ed4fc30af1ffb756882e4efc4f2adf12bc4675fd2ad74306b4f8413fcf1aba5",
+    "local_sha256": "e450b90dfe03758777334c696cea8e96440809d6d649139ee81427928dcc3453"
+  },
+  {
+    "path": "scripts/install-mac-ollama-gemma4-26b.sh",
+    "live_sha256": "fa687d21370116d65e1320dde94408255c30c52ce58986fd3e6cbab69a5ef863",
+    "local_sha256": "fa687d21370116d65e1320dde94408255c30c52ce58986fd3e6cbab69a5ef863"
+  },
+  {
+    "path": "scripts/install-nespc-cityhop-autopilot.sh",
+    "live_sha256": "c64a0455c3c2ca94af7fa6d04fd6b91f71f9be59ef80ff38b034b5cad97579dc",
+    "local_sha256": "c64a0455c3c2ca94af7fa6d04fd6b91f71f9be59ef80ff38b034b5cad97579dc"
+  },
+  {
+    "path": "scripts/install-nespc-cityhop-cities-publish.sh",
+    "live_sha256": "dc68dd6df2478e8cc4a7a727ae5ed72def2be0498e97b00f7694a2f46c061b3c",
+    "local_sha256": "dc68dd6df2478e8cc4a7a727ae5ed72def2be0498e97b00f7694a2f46c061b3c"
+  },
+  {
+    "path": "scripts/install-nespc-cityhop-daily-publish-spread.sh",
+    "live_sha256": "ef91f8047365731dd6c4575deb690383fcb03891767b3c7d149d2af1f8dfc8f7",
+    "local_sha256": "ef91f8047365731dd6c4575deb690383fcb03891767b3c7d149d2af1f8dfc8f7"
+  },
+  {
+    "path": "scripts/install-nespc-cityhop-dashboard-sync.sh",
+    "live_sha256": "5d3a656792e3e1d6d43da24e29dc94bebcc6d4172289e2c33716e3d1054e624b",
+    "local_sha256": "5d3a656792e3e1d6d43da24e29dc94bebcc6d4172289e2c33716e3d1054e624b"
+  },
+  {
+    "path": "scripts/install-nespc-cityhop-publish-spread.sh",
+    "live_sha256": "6051fb6b1a2c9a95bfee6c2edb2a4d2d5faa04031b6a78eac093cc2f396e282b",
+    "local_sha256": "6051fb6b1a2c9a95bfee6c2edb2a4d2d5faa04031b6a78eac093cc2f396e282b"
+  },
+  {
+    "path": "scripts/install-nespc-cityhop.sh",
+    "live_sha256": "404830810a8297aa3d30e4fef4181915b46927c52bda6a3960ac45d609c8a56f",
+    "local_sha256": "9787947366431dd44246b9e7c4e71f8579f250211dc551c6ab10973664092480"
+  },
+  {
+    "path": "scripts/install-nespc-cursor-bloat-prune-systemd.sh",
+    "live_sha256": "1d3f4dba098c61c5320633bce69751be7a529e060267380c7ef46bcc1cc2a3c7",
+    "local_sha256": "1d3f4dba098c61c5320633bce69751be7a529e060267380c7ef46bcc1cc2a3c7"
+  },
+  {
+    "path": "scripts/install-nespc-cursor-bloat-prune.sh",
+    "live_sha256": "4d2c1cfc31d6cae512d01c89482afe005b6ff81e3446d028be64637fa700dc8c",
+    "local_sha256": "4d2c1cfc31d6cae512d01c89482afe005b6ff81e3446d028be64637fa700dc8c"
+  },
+  {
+    "path": "scripts/install-nespc-cursor-tasks-api.sh",
+    "live_sha256": "0fb0d629ccd808ea41251f5f9b3a9e216fe91b82b1c4e686dc096f937d55534e",
+    "local_sha256": "6f73c732a02f95e8a533ccab011bebeee0d9f5ff23801c712c65b86d43d78807"
+  },
+  {
+    "path": "scripts/install-nespc-display-policy.sh",
+    "live_sha256": "87a829ee9349ed3ba141b343386d80c392dd6083638cd94d7d4c47d284f42dff",
+    "local_sha256": "87a829ee9349ed3ba141b343386d80c392dd6083638cd94d7d4c47d284f42dff"
+  },
+  {
+    "path": "scripts/install-nespc-flareon-cursor-honcho.sh",
+    "live_sha256": "225a0f0a7fdb0079f4e33b5c62317ab5a6153509d3a0db1ed64aed4cd505ae30",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/install-nespc-flareon-primary.sh",
+    "live_sha256": "a370205f5327d845ffad8462c3d4b0f3d6b00b9c3786f09e425c3da0dce8a9fd",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/install-nespc-griffin-daily-upload.sh",
+    "live_sha256": "fa808e123244887f3a662c7630c0292888f8be1d882134944425bbb4849bbcb5",
+    "local_sha256": "fa808e123244887f3a662c7630c0292888f8be1d882134944425bbb4849bbcb5"
+  },
+  {
+    "path": "scripts/install-nespc-honcho-ollama.sh",
+    "live_sha256": "dbfe3fb8cd174cf11d1491627493f8fd8e8fd0cd1e945f0d7a1fe00acdf61d0f",
+    "local_sha256": "dbfe3fb8cd174cf11d1491627493f8fd8e8fd0cd1e945f0d7a1fe00acdf61d0f"
+  },
+  {
+    "path": "scripts/install-nespc-honcho.sh",
+    "live_sha256": "1007b3a0b093a7bf471fe49164a534f5e13541b6de045a5fd787cb76c6aa4b3d",
+    "local_sha256": "6c5efdfbb4165fd42d0818bb8a6a898b184a3bf894e63e159735c83b003a35c9"
+  },
+  {
+    "path": "scripts/install-nespc-local-models.sh",
+    "live_sha256": "9a5db8ebeea845e0ce8bb8983d4f209e21001fd67a14dfb5ccaa3e81d9524705",
+    "local_sha256": "8c21300dd494264f7df0d5eabc9c915da1b360ff55724f80857da75a44c20772"
+  },
+  {
+    "path": "scripts/install-nespc-model-tunnels.sh",
+    "live_sha256": "2d9fa7fd27dd244ae305fb08efd8213ae0bb36bb3fbd023349b54a99fea9c07f",
+    "local_sha256": "59c9dcb1098d5072dc809725029ce1fc8dd9769979fcbf7d2d431e8d5cf2f3aa"
+  },
+  {
+    "path": "scripts/install-nespc-moneyprinterturbo.sh",
+    "live_sha256": "b858bb4a328387ff5f6fe3b6826c435024cd65504898bbf4b5f840185ec1e89a",
+    "local_sha256": "b858bb4a328387ff5f6fe3b6826c435024cd65504898bbf4b5f840185ec1e89a"
+  },
+  {
+    "path": "scripts/install-nespc-node.sh",
+    "live_sha256": "846cf5c43483165a4c06a3067d038d0f738decbb421be9ce5cb22e2ddd5d0f2f",
+    "local_sha256": "846cf5c43483165a4c06a3067d038d0f738decbb421be9ce5cb22e2ddd5d0f2f"
+  },
+  {
+    "path": "scripts/install-nespc-ollama-gemma4.sh",
+    "live_sha256": "7af1149863d72a4b7b355f9a580ade342a62061b2dc6cacc7c9fc5d53999ad85",
+    "local_sha256": "7af1149863d72a4b7b355f9a580ade342a62061b2dc6cacc7c9fc5d53999ad85"
+  },
+  {
+    "path": "scripts/install-nespc-whisper-stt.sh",
+    "live_sha256": "ec5e898b01a2c727d873f317b034d2ba71144c7b3666739bb353b59b8dcadd30",
+    "local_sha256": "8c5125441b6c737fbad8ff954060b22ac05579e155c250401057641c96cba4dd"
+  },
+  {
+    "path": "scripts/install-peer1-codex-tunnel.sh",
+    "live_sha256": "78d2a8b7a277799724e91300a00d7678a7527b2d50f18aac07d31f46ac7fa00e",
+    "local_sha256": "354162aa7eef75db92bd93ab3240ee80feebdd1e4b07d0a2c863745b6ae4f513"
+  },
+  {
+    "path": "scripts/install-peer1-codex.sh",
+    "live_sha256": "337442da75c66a4512b01b5e60ee50a04fdf77ff1cc251e9aa4105673cb4bf23",
+    "local_sha256": "70c59ee5048c6b562034ebf030fb8dccbfdb1b83b10cb3f8a5c260e59ffd0ca2"
+  },
+  {
+    "path": "scripts/install-peer1-cursor-as-api-tunnel.sh",
+    "live_sha256": "b783eb4929969e7aca9ee90e44a1de58a2f58e58d2944d798789d7957e1aafae",
+    "local_sha256": "b21b7f6bd012916c329949d906109f744dfc947b2f3ff7e2d31e5946063d6b1a"
+  },
+  {
+    "path": "scripts/install-peer1-cursor-as-api.sh",
+    "live_sha256": "e119215ec920b4364625d162ceed2d795b0a73d679e6c9af64b0019096f1310e",
+    "local_sha256": "b6b6663d5d7a2482306fd58bf40630d7741574ff82e38360ce615fc886db7971"
+  },
+  {
+    "path": "scripts/install-peer1-flareon-failover-watchdog.sh",
+    "live_sha256": "5a3d2978545c5d55da475824f2d23ae8da267c8b26a6609f057cbdaeff397734",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/install-peer1-hermes-llm-proxy.sh",
+    "live_sha256": "7edb28a0ba236ddedc44ea6b805eab8d9e306f14d92d3ccf666e99eb09b2a267",
+    "local_sha256": "f7a2e98a3c48443ecad6e650ff3977a8403feb46433f3bd0f8ef875ff091472d"
+  },
+  {
+    "path": "scripts/install-peer1-hermes-local-mcp.sh",
+    "live_sha256": "d67e79050f8651a3addd2f090b177e2ef6cd798fe52fd96b893a47f18a75650c",
+    "local_sha256": "7467703897895310ba562d77f36f0ec9afc87b5554859f540ea2348d735ba0a2"
+  },
+  {
+    "path": "scripts/install-peer1-zcode-cli.sh",
+    "live_sha256": "4f9cd9980c5b8245c3956a3cceac66435f4e45c868d2f64bd111043002326010",
+    "local_sha256": "4f9cd9980c5b8245c3956a3cceac66435f4e45c868d2f64bd111043002326010"
+  },
+  {
+    "path": "scripts/install-peer2-flareon-failover-watchdog.sh",
+    "live_sha256": "88439f25efa18934bbe77fe5f37b320d2845c48b2a45a0eb5539933c122cc3ed",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/install-peer2-honcho-tunnel.sh",
+    "live_sha256": "d9a4d815408510a6afd29386ba5d645d8b703c1c3991deb5bdefc92aee3e112d",
+    "local_sha256": "11eace65751e633ad72f30aa597baf7a09f88988412a6f34bbc0bd8179357fc3"
+  },
+  {
+    "path": "scripts/install-peer2-poko-tunnel.sh",
+    "live_sha256": "51ac45d77f3d0b4421ad673d42a66447099c04739d0728d1a6d02255f6567212",
+    "local_sha256": "52f5440fd449f36d07612190e112d7d63e39682f525f053fac6b4bf6cacc6b3e"
+  },
+  {
+    "path": "scripts/install-pi-cursor-remote.sh",
+    "live_sha256": "3ae809b07fb9d2503ead317472ce17fafc31c29bd16aa01f2a2158397794f113",
+    "local_sha256": "ad8ac02ec283d1cd1d9da1e1ad48151a6707538415ac6af202e515602edf267d"
+  },
+  {
+    "path": "scripts/install-pi-flareon-failover-watchdog.sh",
+    "live_sha256": "9c347389d183dcb606c7d3dfaf93ef9db11d6039c0c09486da0ac22c95066cc1",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/install-pi-flareon-replica.sh",
+    "live_sha256": "34a9bdd8027d52e141791a502ae99c0503f42bdf4a41b51dbfca641486b0db00",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/install-pi-griffin-daily-upload.sh",
+    "live_sha256": "1b5ed8610e04ea6f940b5bccc8900bf29eda3e34527e053ec35d596586fbab22",
+    "local_sha256": "1b5ed8610e04ea6f940b5bccc8900bf29eda3e34527e053ec35d596586fbab22"
+  },
+  {
+    "path": "scripts/install-pi-honcho-tunnel.sh",
+    "live_sha256": "333b343e0d6444d68332bace62e57cc70406e42d8ba90e96e63b8a71999b9a66",
+    "local_sha256": "c29c317f676c75edaf84ef423eecc893bf2beb6bf789399f6357f9a9b854d399"
+  },
+  {
+    "path": "scripts/keep-auth.js",
+    "live_sha256": "0831e0653031837910a44dec8785ecd2512956610d9a383e3907cba65df75fac",
+    "local_sha256": "0831e0653031837910a44dec8785ecd2512956610d9a383e3907cba65df75fac"
+  },
+  {
+    "path": "scripts/nes-display-policy.sh",
+    "live_sha256": "d46fe1b2067db489458f5b612e59103a165fbf7ec27a3c3883422172e64b61d1",
+    "local_sha256": "d46fe1b2067db489458f5b612e59103a165fbf7ec27a3c3883422172e64b61d1"
+  },
+  {
+    "path": "scripts/nespc-prune-cursor-bloat.sh",
+    "live_sha256": "67094b2bdfb4423bd7ab58e62ead254a3f05d534eca52f45c735293624c8b960",
+    "local_sha256": "c663f04dbf986ee48e5c18f6b3121eedbb319c9d43bf6b967da503969bb962ed"
+  },
+  {
+    "path": "scripts/nespc-wifi-diag.sh",
+    "live_sha256": "f67b0e910e67c33a8912275e00b0e3b8b327616cc2c09f2e58c8cdad84653366",
+    "local_sha256": "f67b0e910e67c33a8912275e00b0e3b8b327616cc2c09f2e58c8cdad84653366"
+  },
+  {
+    "path": "scripts/newsroom-bootstrap-demo.mjs",
+    "live_sha256": "c69ca74d0c9154a524084593fb8b01054627b02ebac1e0f17be43cdb6f232d8b",
+    "local_sha256": "c69ca74d0c9154a524084593fb8b01054627b02ebac1e0f17be43cdb6f232d8b"
+  },
+  {
+    "path": "scripts/newsroom-desk.mjs",
+    "live_sha256": "2b76621a1323ed96d2692f4daa4b1f59511b8dfd5fe3253ba4343825bf16d81c",
+    "local_sha256": "2b76621a1323ed96d2692f4daa4b1f59511b8dfd5fe3253ba4343825bf16d81c"
+  },
+  {
+    "path": "scripts/newsroom-launch-sources.json",
+    "live_sha256": "a3c4a8de42833b4695b15f8ecd3795ebfa89ca31ae5b066847282066424f60d2",
+    "local_sha256": "a3c4a8de42833b4695b15f8ecd3795ebfa89ca31ae5b066847282066424f60d2"
+  },
+  {
+    "path": "scripts/newsroom-launch.mjs",
+    "live_sha256": "7d5fc7b0f71db2633b98c8520c139c1dd4bb708858971473ccc55f3c1109ba1e",
+    "local_sha256": "7d5fc7b0f71db2633b98c8520c139c1dd4bb708858971473ccc55f3c1109ba1e"
+  },
+  {
+    "path": "scripts/newsroom-publisher.mjs",
+    "live_sha256": "7c644a91ba35e5ddc79c08412ecc8996ea07f709cd07111f5e0bfede16f82b6b",
+    "local_sha256": "7c644a91ba35e5ddc79c08412ecc8996ea07f709cd07111f5e0bfede16f82b6b"
+  },
+  {
+    "path": "scripts/patch-cityhop-mpt-material.sh",
+    "live_sha256": "0cefcf081d72c77d22b4af9bf0943efee4089900b936f69878e1a96fa4812008",
+    "local_sha256": "0cefcf081d72c77d22b4af9bf0943efee4089900b936f69878e1a96fa4812008"
+  },
+  {
+    "path": "scripts/patch-cityhop-mpt-subtitle.sh",
+    "live_sha256": "f7b12f9f723f34a68cc8e6b28c38c15863ecea2ef707708a906a11788a875287",
+    "local_sha256": "f7b12f9f723f34a68cc8e6b28c38c15863ecea2ef707708a906a11788a875287"
+  },
+  {
+    "path": "scripts/patch-cityhop-mpt-transitions.sh",
+    "live_sha256": "b7e92ae45432ac16ae7d3a29d8b46793fd8a6712980e5d2a99d7a07739a64492",
+    "local_sha256": "b7e92ae45432ac16ae7d3a29d8b46793fd8a6712980e5d2a99d7a07739a64492"
+  },
+  {
+    "path": "scripts/patch-cityhop-mpt-voice-style.sh",
+    "live_sha256": "29e2e960400784f80b44a10aaad5602e3ec744a4a91890a6c2ef589f13ab4b1c",
+    "local_sha256": "29e2e960400784f80b44a10aaad5602e3ec744a4a91890a6c2ef589f13ab4b1c"
+  },
+  {
+    "path": "scripts/patch-cursor-agent-api-cli-args.sh",
+    "live_sha256": "0c5905f6a5bf59a541e60e1c5d94c70b7d005ba7e1adb63e8477875366b801b6",
+    "local_sha256": "0c5905f6a5bf59a541e60e1c5d94c70b7d005ba7e1adb63e8477875366b801b6"
+  },
+  {
+    "path": "scripts/patch-cursor-planner-env-peer1.py",
+    "live_sha256": "a713e300ba08aa082757403cb481b900637104e7f6dd9094215211501a4466fe",
+    "local_sha256": "0b6e784c87db74178b1427198751b5be18e25a6d2a37b55a50663ed88cdeffb3"
+  },
+  {
+    "path": "scripts/patch-honcho-compose-ollama.py",
+    "live_sha256": "f8922de82fd019271f5ae2946bffec7a9fa5df03c372402dec66c912c57eb3cf",
+    "local_sha256": "f8922de82fd019271f5ae2946bffec7a9fa5df03c372402dec66c912c57eb3cf"
+  },
+  {
+    "path": "scripts/patches/mpt-cityhop_material.py",
+    "live_sha256": "951d3d1e776815a6b64703002fbaf8c18ff070aa6850ee0f38689f523d60c003",
+    "local_sha256": "951d3d1e776815a6b64703002fbaf8c18ff070aa6850ee0f38689f523d60c003"
+  },
+  {
+    "path": "scripts/patches/mpt-cityhop_subtitle.py",
+    "live_sha256": "997be2bc01adf18bef45cbb2fc8575551129ee70e18409fc85edf09bed99deaa",
+    "local_sha256": "997be2bc01adf18bef45cbb2fc8575551129ee70e18409fc85edf09bed99deaa"
+  },
+  {
+    "path": "scripts/patches/mpt-video_effects-cityhop.py",
+    "live_sha256": "be86ea112fbf2382140b8e89935b346e027bcf7de39e51e4184923ed123a70d9",
+    "local_sha256": "be86ea112fbf2382140b8e89935b346e027bcf7de39e51e4184923ed123a70d9"
+  },
+  {
+    "path": "scripts/peer1-codex-tunnel-url.sh",
+    "live_sha256": "10f5367da6602ad91aff4a2e4a062c246b518d831a5a41872a0e1fc603f00d68",
+    "local_sha256": "508e60468ab9117c93678b9cced50668305261e6d61b4ed052f7b95689baf78f"
+  },
+  {
+    "path": "scripts/peer1-codex-tunnel-watchdog.sh",
+    "live_sha256": "81b09db2dcd4b4300d3546c2af496d7abb65dc415bb1c09cb1524b05ab889e24",
+    "local_sha256": "53854b3115df29b880659285a921d8828d9f11a9cdf71fa9320c4d96c773f0bf"
+  },
+  {
+    "path": "scripts/peer1-codex-tunnel.sh",
+    "live_sha256": "9c145b5eb488c20d248020d28e591dca0d7dd31d4bf22e932338d711a6a00d3e",
+    "local_sha256": "7c2e7e335e7901ca82ff82c8c0ebead7c94f1da9d200c2d674e12ea33f1fe2ee"
+  },
+  {
+    "path": "scripts/peer1-cursor-as-api-tunnel-watchdog.sh",
+    "live_sha256": "ee4e1bfd5f18f11fbbb4340091ef55a266c7e21f26f71e6649337b14f645606b",
+    "local_sha256": "5a7d01e04229b78fda2f2bab66fe1e1df0ef80fae2a67dab341d5d09ce9f9226"
+  },
+  {
+    "path": "scripts/peer1-cursor-as-api-tunnel.sh",
+    "live_sha256": "fb5089a4589acd7f5f5bb311abb274f1924406a9de0a52b2a0c8b2900f0ec125",
+    "local_sha256": "f2be7379366900567013a2b5ed920565805d92cc6cfbb48aef72a23f12a98024"
+  },
+  {
+    "path": "scripts/peer1-flareon-failover-watchdog.sh",
+    "live_sha256": "a997d17835ffaeba299860b68b4559ac330039d74ae12c7400b2688a3bca611f",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/peer2-flareon-failover-watchdog.sh",
+    "live_sha256": "4930fec4711c0b024ef334be98f110fa25ca6b748c2a6cfb9898c6697e51f2ed",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/pi-flareon-failover-watchdog.sh",
+    "live_sha256": "43d3e3452aea5be29287053b2c13ac28ae15f3d3dbd35b3525a028e083aee71e",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/pi-flareon-replica-sync-local.sh",
+    "live_sha256": "c9753930b53db74593107e7275c597b7befcbcd54e27148930003bf1e1abf003",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/pi-honcho-tunnel.sh",
+    "live_sha256": "b2fff01b561d045463b8fa4de7f662a6b1c439e5524599268f7fd908364bbbaf",
+    "local_sha256": "b2fff01b561d045463b8fa4de7f662a6b1c439e5524599268f7fd908364bbbaf"
+  },
+  {
+    "path": "scripts/poko-abuse-report.js",
+    "live_sha256": "9da9291a398f8f9a309a228389b7515cd728e0bc21f085638a63364c492bfa97",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/poko-card-x.js",
+    "live_sha256": "a878a82876b0ecedeedc309b1b1a954c6f606da66405bc1fba19b36c8b326eff",
+    "local_sha256": "a878a82876b0ecedeedc309b1b1a954c6f606da66405bc1fba19b36c8b326eff"
+  },
+  {
+    "path": "scripts/poko-market-battery.sh",
+    "live_sha256": "99e7f515072ed6cb5e26ba7ce3d565adadb93234ef86af575d0240ad09ad4286",
+    "local_sha256": "99e7f515072ed6cb5e26ba7ce3d565adadb93234ef86af575d0240ad09ad4286"
+  },
+  {
+    "path": "scripts/poko-truth-friend-service.py",
+    "live_sha256": "63c2c49fb0a59816e8b0234f3d7c0c77f9a4fe088fa895b1d678f912d95598fc",
+    "local_sha256": "63c2c49fb0a59816e8b0234f3d7c0c77f9a4fe088fa895b1d678f912d95598fc"
+  },
+  {
+    "path": "scripts/poko-truth-friend.js",
+    "live_sha256": "676b06119eb689a40ef5ad1695aed9cec4859106ce318522df746ec071967763",
+    "local_sha256": "676b06119eb689a40ef5ad1695aed9cec4859106ce318522df746ec071967763"
+  },
+  {
+    "path": "scripts/poko-truth-friend.sh",
+    "live_sha256": "eea9002ba2026d0242372d03595ffb2f834cab6bedb3820a99d27ee57297dfe0",
+    "local_sha256": "eea9002ba2026d0242372d03595ffb2f834cab6bedb3820a99d27ee57297dfe0"
+  },
+  {
+    "path": "scripts/poko-youtube-auth.js",
+    "live_sha256": "923b15a4491f26cef6b0e784ed0eebd21e8b4d7d8112aabc13359d655640f84c",
+    "local_sha256": "507b853c321bf31184ed6b3cfcccd839ff00fb78a87aae48a60510944f33ef12"
+  },
+  {
+    "path": "scripts/poko-youtube-comment.js",
+    "live_sha256": "f15684264fc343aab6a0666676bbd7a8d30dc4b2c9c5f3e640359ee9ab4f3351",
+    "local_sha256": "f15684264fc343aab6a0666676bbd7a8d30dc4b2c9c5f3e640359ee9ab4f3351"
+  },
+  {
+    "path": "scripts/poko-youtube-reply-poll.js",
+    "live_sha256": "e4a37afdd492055adf750d763e389f82c5568a91d19869fed385ef906b3ad1e8",
+    "local_sha256": "e4a37afdd492055adf750d763e389f82c5568a91d19869fed385ef906b3ad1e8"
+  },
+  {
+    "path": "scripts/push-riot-key-peer1.sh",
+    "live_sha256": "5750b32178c0675bb1f440d1980e1ac1d979aee3f3af033aebe3b6440c429575",
+    "local_sha256": "5750b32178c0675bb1f440d1980e1ac1d979aee3f3af033aebe3b6440c429575"
+  },
+  {
+    "path": "scripts/qwen-mcp-server.py",
+    "live_sha256": "ae53db105ddcf7f6b4fa159d03486922ee5b9808a85d590dcbe5af4b2b048bd0",
+    "local_sha256": "995d01ab6e5cf6088fba1b13a0b3b290326b0512a574198c2583657cdd43993a"
+  },
+  {
+    "path": "scripts/remote-nespc-cursor-agent.sh",
+    "live_sha256": "f1030271e1bf17ab611c8d6f6e2c148111fd291c4022df006edbfb0ddc731ea0",
+    "local_sha256": "f1030271e1bf17ab611c8d6f6e2c148111fd291c4022df006edbfb0ddc731ea0"
+  },
+  {
+    "path": "scripts/remote-nespc-harness-agent.sh",
+    "live_sha256": "ad9597a1ff009faa3a4683bb077756405360622249613e13dbc49392803640e7",
+    "local_sha256": "70ecd4841dce86a75d8f9223f3b59f47205bad8f286f861764d06f023ca5dcec"
+  },
+  {
+    "path": "scripts/remote-peer1-cursor-agent.sh",
+    "live_sha256": "efce178d5d5f6766b93150c0cb08e668d4ec969b4966ef752042a4fb528a97c1",
+    "local_sha256": "5b24ac44ac0f732bd84f1d45e6467547008b221a09b0ad874bbd6d2eaedcb251"
+  },
+  {
+    "path": "scripts/republish-latest-poko-news.mjs",
+    "live_sha256": "50e14ced491945e62be0085059575e32ecd7742d883c6be03e2ba322831dbae5",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/run-dsh-headless.sh",
+    "live_sha256": "bdb27243f96e19e0914b9c5cbda725a52756309120ff5811f262345038087867",
+    "local_sha256": "bdb27243f96e19e0914b9c5cbda725a52756309120ff5811f262345038087867"
+  },
+  {
+    "path": "scripts/run-intent-eval.mjs",
+    "live_sha256": "70c64744060276d18e8edfff3e8ced8e9211d730c9dfd4803007e4d586aee55b",
+    "local_sha256": "6db7bc13ff0e5f7e4d16dbaafb86486b9256947c3fb45cd88ee0be875dd587ee"
+  },
+  {
+    "path": "scripts/run-semantic-eval.mjs",
+    "live_sha256": "1094444259decb3f78ca62e67e6541c2aa1b7e5328bc74b8e31c3b8e13da15be",
+    "local_sha256": "5dbba822034eacafc2512bf757e02869b82b02a84c74e7c85d4b81f855194bbb"
+  },
+  {
+    "path": "scripts/seed-honcho-cityhop-content-frame.sh",
+    "live_sha256": "fc8dcd6b775593eaffc5f9d596232ed505a55de2851380aa704186926f2b2889",
+    "local_sha256": "fc8dcd6b775593eaffc5f9d596232ed505a55de2851380aa704186926f2b2889"
+  },
+  {
+    "path": "scripts/seed-honcho-cityhop-mac-render.sh",
+    "live_sha256": "64b77293bed029569cd7a317e689bf6e60b055bf01e8731383580083ed14b740",
+    "local_sha256": "64b77293bed029569cd7a317e689bf6e60b055bf01e8731383580083ed14b740"
+  },
+  {
+    "path": "scripts/seed-honcho-cityhop.sh",
+    "live_sha256": "d9457dde3d74f60bddd7cd9c54a9ea3d19a4ebf653c3bf00a4abd251bd36193e",
+    "local_sha256": "899e767cc8f15b4ae9625c1740e6da4cde7427074211867713be730461e4baa4"
+  },
+  {
+    "path": "scripts/seed-honcho-project-catalog.sh",
+    "live_sha256": "e5f2d7c67dedfe3cded16af36d4768a7b058a322da1459994f12a0aabe71c44f",
+    "local_sha256": "3252fab59cae7136b29abee3ea639574fe68f80644c6fa42960ef0be5c1f0b93"
+  },
+  {
+    "path": "scripts/start-local-codex-as-api.sh",
+    "live_sha256": "0584b14a06d32e92536bb49ff5ae2ecf83371827106b74f4da443e9e88cae00d",
+    "local_sha256": "0584b14a06d32e92536bb49ff5ae2ecf83371827106b74f4da443e9e88cae00d"
+  },
+  {
+    "path": "scripts/start-mac-moneyprinterturbo.sh",
+    "live_sha256": "5a94030b03dadf2430f5e02587569d8b6abc4fed9a210ea457ee124d239c46e1",
+    "local_sha256": "5a94030b03dadf2430f5e02587569d8b6abc4fed9a210ea457ee124d239c46e1"
+  },
+  {
+    "path": "scripts/start-mac-nespc-cityhop-tunnel.sh",
+    "live_sha256": "822b438a929a0dde0f6b4a8c91ac945fb1694e583c1de4eaba973a8a3f26f5f4",
+    "local_sha256": "822b438a929a0dde0f6b4a8c91ac945fb1694e583c1de4eaba973a8a3f26f5f4"
+  },
+  {
+    "path": "scripts/start-mac-nespc-gemma4-tunnel.sh",
+    "live_sha256": "a5ccf81369937a20df990a6a1477b4faeeabef6ad6c05a5a708b634e0e92b48d",
+    "local_sha256": "a5ccf81369937a20df990a6a1477b4faeeabef6ad6c05a5a708b634e0e92b48d"
+  },
+  {
+    "path": "scripts/start-mac-nespc-ollama-tunnel.sh",
+    "live_sha256": "691ba5990d7a15fe902823840c24be2048c482ad79e9c64c7fd049ce8b1cea76",
+    "local_sha256": "691ba5990d7a15fe902823840c24be2048c482ad79e9c64c7fd049ce8b1cea76"
+  },
+  {
+    "path": "scripts/sync-bot-hospital-token-peer1.sh",
+    "live_sha256": "ed181c5fbb4cd871fc8a269b438ba4b2c7dde442ad539fe2403c9c50515dd1d2",
+    "local_sha256": "13edc069978ce4b08c1fc879e60e0ed966b5a55906d8a6fcdd8611dce78c8edb"
+  },
+  {
+    "path": "scripts/sync-cityhop-mac-pipeline.sh",
+    "live_sha256": "c9f4473c69b9f82ec88a1d9ffd0b304ed3534e3a481e3483a276bb15b465b5ea",
+    "local_sha256": "c9f4473c69b9f82ec88a1d9ffd0b304ed3534e3a481e3483a276bb15b465b5ea"
+  },
+  {
+    "path": "scripts/sync-flareon-replica-pi.sh",
+    "live_sha256": "fefb2e30c80e27cc5decf02cc9a74bf664cd50f6b0cc913ec926251313016b53",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/sync-flareon-secrets-from-peer1.sh",
+    "live_sha256": "cd97bc32848e1f8d14e522e601738f7883ba913e02a9970d0c57f653ede8a0b7",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/sync-flareon-secrets-peer1.sh",
+    "live_sha256": "3d528c73e73f80f0892fb17b7bef12656452933ca38cbf4e6a0c421352fe6d01",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/sync-flareon-secrets-peer2.sh",
+    "live_sha256": "0fa92a254291e47e63bf9b5552fd24081413e9e9cfdb652e8f8e04e5f1043a98",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/sync-keep-notes.js",
+    "live_sha256": "4746151c1c97b081f5ddc2651181680251ad45f4a386cb31161c84ab862dc97f",
+    "local_sha256": "4746151c1c97b081f5ddc2651181680251ad45f4a386cb31161c84ab862dc97f"
+  },
+  {
+    "path": "scripts/sync-obsidian-from-pi.sh",
+    "live_sha256": "21a11f5ef03b29c803fb3b8fe3da9c95e10ffa08015cf43550a650e7721980fa",
+    "local_sha256": "9e40f8838ec0e3d445fcec2e6f3168de81529e89afc6245e7b65e5b07a89832d"
+  },
+  {
+    "path": "scripts/test-agentskills-scout.js",
+    "live_sha256": "fa19d88c893a0278ef57a100041ebda2b2b54a31df9d880d34d3e170f6bcba67",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/test-flareon-intent.mjs",
+    "live_sha256": "f4cbb56750fa6993dc7f03101ac56b4dcf8132048c62331e6bcbc26df97e5a2b",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/test-flareon-planner-peer1.mjs",
+    "live_sha256": "f553e7286c4a40412be4e2ea35fc94c129c0b135bf22c3440422b6106c635ced",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/test-intent-heuristics.mjs",
+    "live_sha256": "512fc4e5ea840a6d2a4d004aeff9da7e445bfaea2b80a0cf5ed02931b94499b8",
+    "local_sha256": "512fc4e5ea840a6d2a4d004aeff9da7e445bfaea2b80a0cf5ed02931b94499b8"
+  },
+  {
+    "path": "scripts/test-ollama-isolation.mjs",
+    "live_sha256": "f513621c7798f0c0bc0d5aec36de1f9ae16072498e9d005b3e3df4e5df462bb0",
+    "local_sha256": "d4885d242e1c12dc7cb32b63e457ccc57b7d2e7b43e28fe910abb9e6d8274a8d"
+  },
+  {
+    "path": "scripts/test-plan-response-peer1.mjs",
+    "live_sha256": "a657366e245e3f70bbec0035549fdb42156658c8ea2ceef57dd80685ecd371f5",
+    "local_sha256": "ea3da53b7aeddf7aaed845a4c05d510786ec9676b9b2cf0b43a3b70c96e5d557"
+  },
+  {
+    "path": "scripts/test-poko-isolation.mjs",
+    "live_sha256": "d831978a186e78967f41e8f2261bab362e882270c9ce73ca4522741ed25cc0f9",
+    "local_sha256": "7f75444f350229958a92778be96b0901e3135ead5d95bededdb7719e9fcc8c97"
+  },
+  {
+    "path": "scripts/test-poko-news-hashtags.js",
+    "live_sha256": "cae02973f11e3cf744dd96a1bc5be4d0475e713c5d7e6329d1093164df4a4285",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/test-social-operations.js",
+    "live_sha256": "0af9458dee3f7e1c9f6332a846e9c82513f9fd35174956125312e205ad51c80d",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/test-spreadsheet-graph.js",
+    "live_sha256": "06ab025fbae68ef0a2108f956c6ab7f3e0c8b9aa274cf6b296e23a7be838d083",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/test-task-lifecycle.js",
+    "live_sha256": "0f15d7b6b6cefca994d32d294e5c46c8dbafe7b8577645e099a1fbe84c5f7b51",
+    "local_sha256": null
+  },
+  {
+    "path": "scripts/verify-nespc-model-proxies.sh",
+    "live_sha256": "0432a8bb45b4af1af7cd60661b177348364919d0e113faa303ec793c02036468",
+    "local_sha256": "5cd9407687f526703b2f52c36a793a169851abfaeb87c5e5074fd85c3c57ee01"
+  }
+]

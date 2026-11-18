@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "complete": false,
+  "deployed_base": "a021c677",
+  "entries": [
+    {"id":"D05-D20","verified":false,"status":"pending","reason":"Discord slash registration, dispatch and handlers still live only in Node"},
+    {"id":"J10","verified":false,"status":"pending","reason":"Riot monitor, betting persistence and money invariants not ported"},
+    {"id":"J09","verified":false,"status":"pending","reason":"Scout, newsroom integration and posting proofs not ported"},
+    {"id":"H36","verified":false,"status":"pending","reason":"Native fallback brain, planner chain and Honcho parity not ported"},
+    {"id":"H37","verified":false,"status":"partial","reason":"X signing, CRC and signature verification ported; event processing and HTTP route not ported"},
+    {"id":"H38","verified":false,"status":"pending","reason":"Observation/Honcho writes not ported"},
+    {"id":"H39-H40","verified":false,"status":"pending","reason":"Social operation routing and publication pipeline not ported"},
+    {"id":"H41","verified":false,"status":"pending","reason":"Privileged admin brain and memory not ported"},
+    {"id":"X27-X28","verified":false,"status":"partial","reason":"Native X REST client implemented; signature method HMAC-SHA256 as in live Node, not verified against a live X call; full social and Riot/YouTube jobs not ported"},
+    {"id":"H17-F17","verified":false,"status":"partial","reason":"Poko OAuth callback, token exchange/refresh, secure token files and YouTube REST client implemented; public callback dispatch/deployment wiring pending"},
+    {"id":"J15","verified":false,"status":"pending","reason":"Shorts scheduler, upload and Europe/Rome slot rules not ported"},
+    {"id":"J16","verified":false,"status":"partial","reason":"Truth-friend pure selection/text ported; composeHook and daily job not ported"},
+    {"id":"poko-card-x","verified":false,"status":"partial","reason":"Pure selection/text and X client ported; native publishing job not ported"},
+    {"id":"poko-youtube-replies","verified":false,"status":"partial","reason":"Failure diagnosed and typed commentsDisabled error implemented; native one-pass poller not ported"},
+    {"id":"POKO_HOSPITAL_URL","verified":false,"status":"partial","reason":"Explicit configurable native client rejects dead port; P-OPS Rust deployment address and scout integration pending"}
+  ]
+}
