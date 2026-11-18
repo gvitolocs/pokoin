@@ -172,8 +172,9 @@ publisher is still required; this is a protocol model, not a completion claim.
 6. Mount F16 correctly and integrate H42 into the production API router.
    `serve` now refuses to start without an explicit `--legacy-data-dir`:
    `--data-dir` holds the v2 CMS exports, and substituting it would serve the
-   wrong v1 records. Nothing passes that mount yet, so
-   `newsroom-articles.json` is still not read by the Rust binary; `status`
+   wrong v1 records. The standalone server does read
+   `newsroom-articles.json` from that mount (`website.rs`), but no production
+   caller passes one, so the shared API still has no F16 reader; `status`
    lists this as a parity gap.
 7. Run crash/rollback acceptance against local fakes and reconcile the
    implementation with the formal model. Only then replace the explicit
