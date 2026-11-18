@@ -394,15 +394,18 @@ test('the desk reads the other sources with the sales, one window at a time', ()
   assert.ok(page.indexOf('const [graphRange') < page.indexOf('fetchCardSales(cardId, { slices: true })'));
   assert.ok(page.indexOf('askGraphHistory(PRICE_HISTORY_DEFAULT_RANGE)') < page.indexOf('fetchCardSales(cardId, { slices: true })'));
   assert.match(history, /fetchCardPriceHistory\(cardId, bounds\)/);
-  // One read per card and window, kept for the next visit.
-  assert.match(history, /const graphHistoryKey = \(\) => `\$\{cardId\}\|\$\{graphRange\(\)\}`;/);
-  assert.match(history, /saveCardPriceHistory\(cardId, range, entry\);/);
+  // One read per card, window and facet, kept for the next visit: a fields=graph
+  // answer holds the TCGplayer series of the facet it was read for.
+  assert.match(page, /const graphAskKey = \(range, reverse\) => `\$\{cardId\}\|\$\{range\}\|\$\{reverse \? 'r' : 'n'\}`;/);
+  assert.match(history, /const graphHistoryKey = \(\) => graphAskKey\(graphRange\(\), salesReverse\(\)\);/);
+  assert.match(history, /const bounds = \{ \.\.\.priceHistoryRange\(range, new Date\(\)\.toISOString\(\)\.slice\(0, 10\)\), reverse \};/);
+  assert.match(history, /saveCardPriceHistory\(cardId, range, entry, \{ reverse \}\);/);
   // A late answer for a card or window nobody asked for anymore is dropped, and
   // what is already drawn stays until the new window answers.
   assert.match(history, /if \(disposed \|\| untrack\(graphHistoryKey\) !== askedFor\) return;/);
   assert.match(page, /const entry = priceHistory\(\);\s*return entry \? \{ key: entry\.range/);
   assert.match(page, /sources=\{graphSources\(\)\}\s*nowPoint=\{graphNowPoint\(\)\}\s*range=\{graphRangeProps\(\)\}\s*onRange=\{setGraphRange\}/);
-  // Pokoin now is the cheapest live listing this desk already has.
+  // Pokoin's price right now is the cheapest live listing this desk already has.
   assert.match(page, /const graphNowPoint = \(\) => \(graphDrawn\(\) \? Number\(nativeLive\(\)\[0\]\?\.pricePkn\) \|\| 0 : 0\);/);
   // Cardmarket quotes foil and normal in one product: the graph's own Reverse decides.
   assert.match(page, /priceSourceSeries\(priceHistory\(\)\?\.history, \{ reverse: salesReverse\(\) \}\)/);
@@ -436,12 +439,12 @@ test('an uncached graph waits for both reads, at most 1.5s after the sales', () 
 test('the desk peeks the persisted history cache, stale included, and redraws only on new data', () => {
   const history = page.slice(page.indexOf('const graphHistoryKey'), page.indexOf('const graphRangeProps'));
   assert.match(page, /import \{ peekCardPriceHistory, rememberStaleCardPriceHistory, saveCardPriceHistory \} from '@market\/price-history-cache\.js';/);
-  assert.match(history, /const readGraphHistory = \(range\) => peekCardPriceHistory\(cardId, range\)\n\s*\|\| rememberStaleCardPriceHistory\(cardId, range\);/);
-  assert.match(page, /const \[priceHistory, setPriceHistory\] = createSignal\(readGraphHistory\(PRICE_HISTORY_DEFAULT_RANGE\)\);/);
-  assert.match(history, /const known = readGraphHistory\(range\);/);
-  // A range button is the same read: cached paints at once, uncached keeps the
-  // lines that are drawn until it answers.
-  assert.match(page, /createEffect\(graphHistoryKey, \(key\) => \{\n\s*if \(key\) askGraphHistory\(key\.slice\(cardId\.length \+ 1\)\);/);
+  assert.match(history, /const readGraphHistory = \(range, reverse\) => peekCardPriceHistory\(cardId, range, \{ reverse \}\)\n\s*\|\| rememberStaleCardPriceHistory\(cardId, range, \{ reverse \}\);/);
+  assert.match(page, /const \[priceHistory, setPriceHistory\] = createSignal\(\n\s*readGraphHistory\(PRICE_HISTORY_DEFAULT_RANGE, untrack\(salesReverse\)\),\n\s*\);/);
+  assert.match(history, /const known = readGraphHistory\(range, reverse\);/);
+  // A range button or the Reverse chip is the same read: cached paints at once,
+  // uncached keeps the lines that are drawn until it answers.
+  assert.match(page, /createEffect\(graphHistoryKey, \(key\) => \{\n\s*if \(key\) askGraphHistory\(key\.slice\(cardId\.length \+ 1\)\.split\('\|'\)\[0\]\);/);
   // Identical data does not re-render a graph the cache already drew.
   assert.match(page, /setPriceHistory\(\(prev\) => \(prev && JSON\.stringify\(prev\) === JSON\.stringify\(entry\) \? prev : entry\)\);/);
 });
@@ -451,7 +454,7 @@ test('a cached window is still re-read: the cache paints the first frame, not th
     page.indexOf('function askGraphHistory'),
     page.indexOf('askGraphHistory(PRICE_HISTORY_DEFAULT_RANGE);'),
   );
-  const between = asked.slice(asked.indexOf('readGraphHistory(range)'), asked.indexOf('fetchCardPriceHistory('));
+  const between = asked.slice(asked.indexOf('readGraphHistory(range, reverse)'), asked.indexOf('fetchCardPriceHistory('));
   assert.ok(between.length > 20, 'the cache read and the API read sit in the same call');
   // No early return between them: a card seen once keeps drawing, but never
   // keeps showing what it knew for the next 15 days.
@@ -481,11 +484,14 @@ test('long windows read their dates with the year', () => {
   assert.match(graph, /<strong>\{formatSoldDayWithYear\(day\(\), geo\(\)\.dateLocale, geo\(\)\.withYear\)\}<\/strong>/);
 });
 
-test('tooltip rows: Pokoin now only on the last day, and a whole-number PKN', () => {
+test('tooltip rows: the Pokoin dot only on the last day, and a whole-number PKN', () => {
   const graph = fs.readFileSync(new URL('../components/desk/SoldPriceGraph.jsx', import.meta.url), 'utf8');
-  // Pokoin now quotes today only: its row joins when the guide stands on the
-  // last day of the drawn range, and is left out on the days before it.
-  assert.match(graph, /const now = nowOn\(\) && hoverDay\(\) && String\(hoverDay\(\)\) === String\(tipEndDay\(\)\)/);
+  // A Pokoin dot with no line of its own quotes today only: its row joins when
+  // the guide stands on the last day of the drawn range, left out before that.
+  // With a line the one source row already is the Pokoin row, so there is never
+  // a second one.
+  assert.match(graph, /const now = nowLine\(\) && nowOn\(\) && hoverDay\(\) && String\(hoverDay\(\)\) === String\(tipEndDay\(\)\)/);
+  assert.match(graph, /\{ \.\.\.POKOIN_SOURCE, kind: 'now', value: nowValue\(\) \}/);
   // The rows format through the desk's row formatter when the desk gives one.
   assert.match(graph, /props\.formatRowPrice \? props\.formatRowPrice\(pkn\) \|\| formatValue\(pkn\) : formatValue\(pkn\)/);
   assert.match(page, /formatRowPrice=\{graphRowPrice\}/);
@@ -493,6 +499,33 @@ test('tooltip rows: Pokoin now only on the last day, and a whole-number PKN', ()
   assert.match(page, /const graphRowPrice = \(pkn\) => \{/);
   assert.match(page, /const whole = formatPkn\(Math\.round\(pkn\)\);/);
   assert.match(page, /if \(parts\.local && parts\.pkn\) return `\$\{parts\.local\} \(\$\{whole\}\)`;/);
+});
+
+test('Pokoin is one line: its own history, with today as the last point', () => {
+  const graph = fs.readFileSync(new URL('../components/desk/SoldPriceGraph.jsx', import.meta.url), 'utf8');
+  const history = fs.readFileSync(new URL('../../../market/src/price-history.js', import.meta.url), 'utf8');
+  // One key, labelled Pokoin, drawn from pokoin.days like every other source.
+  assert.match(history, /export const POKOIN_SOURCE = \{\n\s*key: 'pokoin',\n\s*label: 'Pokoin',\n\s*short: 'PK',\n\s*color: 'var\(--yellow\)',\n\s*dashed: false,\n\s*gapDays: 3,/);
+  assert.match(history, /pokoin: pokoinAskDays\(history\?\.pokoin\),/);
+  assert.deepEqual(
+    (history.match(/key: 'pokoin'/g) || []).length,
+    1,
+    'Pokoin is one source, not a line and a fourth key beside it',
+  );
+  assert.doesNotMatch(graph, /POKOIN_NOW_SOURCE|pokoin_now|Pokoin now/);
+  // The dot is that line's next point when the line stops today or yesterday…
+  assert.match(graph, /const reachesNow = nowPt && bounds\(\) && pokoinLine\n\s*\? soldGraphNearDay\(pokoinLine\.days, bounds\(\)\.to, 1\)/);
+  assert.match(graph, /const nowJoin = reachesNow \? join\(\[place\(reachesNow\), \[nowPt\.x, nowPt\.y\]\]\) : '';/);
+  assert.match(graph, /join: row\.key === POKOIN_SOURCE\.key \? nowJoin : '',/);
+  assert.match(graph, /<Show when=\{row\.join\}><polyline points=\{row\.join\} \/><\/Show>/);
+  // …and stands alone, stub included, when it does not reach.
+  assert.match(graph, /now: nowPt \? \{ \.\.\.nowPt, joined: Boolean\(nowJoin\) \} : null,/);
+  assert.match(graph, /<Show when=\{!now\(\)\.joined\}>\n\s*<line x1=\{now\(\)\.x - 44\}/);
+  // Today's price is a plotted value, so the scale holds it and no key appears
+  // twice: the dot's own key is there only while there is no Pokoin line.
+  assert.match(graph, /if \(nowOn\(\)\) values\.push\(nowValue\(\) \* factor\);/);
+  assert.match(graph, /const nowLine = createMemo\(\(\) => \(nowValue\(\) && !sourceLines\(\)\.some\(\(row\) => row\.key === POKOIN_SOURCE\.key\)/);
+  assert.match(graph, /const nowOn = createMemo\(\(\) => nowValue\(\) > 0 && shown\(POKOIN_SOURCE\.key\)\);/);
 });
 
 test('on a narrow panel the keys span it and drop the picked key without overlays', () => {

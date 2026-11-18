@@ -448,15 +448,21 @@ function CardDesk(props) {
   // The other price sources join the graph, they do not replace it. Their
   // history is read with the sales, not after the hero, and kept beside them in
   // localStorage (market/src/price-history-cache.js), so a card seen before
-  // draws complete on the first frame. One read per card and window; the lines
-  // already drawn stay while another window loads.
+  // draws complete on the first frame. One read per card, window and facet; the
+  // lines already drawn stay while another window loads.
   const GRAPH_HISTORY_WAIT_MS = 1500;
   const [graphRange, setGraphRange] = createSignal(PRICE_HISTORY_DEFAULT_RANGE);
-  const graphHistoryKey = () => `${cardId}|${graphRange()}`;
+  // A `fields=graph` answer holds the one TCGplayer series and the one Cardmarket
+  // trend of the facet it was read for, so the Reverse chip is another read and
+  // not just another plot: the facet belongs to the key.
+  const graphAskKey = (range, reverse) => `${cardId}|${range}|${reverse ? 'r' : 'n'}`;
+  const graphHistoryKey = () => graphAskKey(graphRange(), salesReverse());
   /** This desk's window: read fresh, or the last one read before it went stale. */
-  const readGraphHistory = (range) => peekCardPriceHistory(cardId, range)
-    || rememberStaleCardPriceHistory(cardId, range);
-  const [priceHistory, setPriceHistory] = createSignal(readGraphHistory(PRICE_HISTORY_DEFAULT_RANGE));
+  const readGraphHistory = (range, reverse) => peekCardPriceHistory(cardId, range, { reverse })
+    || rememberStaleCardPriceHistory(cardId, range, { reverse });
+  const [priceHistory, setPriceHistory] = createSignal(
+    readGraphHistory(PRICE_HISTORY_DEFAULT_RANGE, untrack(salesReverse)),
+  );
   // Nothing is plotted until the sales and the history are both in, at the
   // latest GRAPH_HISTORY_WAIT_MS after the sales: the graph is drawn once, not
   // twice. A history that lands after that cap still joins it. The two reads
@@ -468,23 +474,24 @@ function CardDesk(props) {
   let graphHistoryAsked = '';
 
   function askGraphHistory(range) {
-    const askedFor = `${cardId}|${range}`;
+    const reverse = untrack(salesReverse);
+    const askedFor = graphAskKey(range, reverse);
     if (disposed || graphHistoryAsked === askedFor) return;
     graphHistoryAsked = askedFor;
     // A cached window paints at once and is still re-read below: what the desk
     // knew is only the first frame, never the data it keeps showing. The first
     // call runs in the component scope with the entry the signal was
     // initialised with, and Solid 2 refuses a write there (WRITE_OWNED_SCOPE).
-    const known = readGraphHistory(range);
+    const known = readGraphHistory(range, reverse);
     if (known && known !== untrack(priceHistory) && untrack(graphHistoryKey) === askedFor) setPriceHistory(known);
-    const bounds = priceHistoryRange(range, new Date().toISOString().slice(0, 10));
+    const bounds = { ...priceHistoryRange(range, new Date().toISOString().slice(0, 10)), reverse };
     fetchCardPriceHistory(cardId, bounds).then((history) => {
-      // Dropped if this card or window is not the one asked for anymore.
+      // Dropped if this card, window or facet is not the one asked for anymore.
       if (disposed || untrack(graphHistoryKey) !== askedFor) return;
       // An answer of nothing is not cached, so the next visit asks again.
       if (!history) return;
       const entry = { range, from: bounds.from, to: bounds.to, history };
-      saveCardPriceHistory(cardId, range, entry);
+      saveCardPriceHistory(cardId, range, entry, { reverse });
       // Already drawn from the cache: data that has not changed never redraws.
       setPriceHistory((prev) => (prev && JSON.stringify(prev) === JSON.stringify(entry) ? prev : entry));
     });
@@ -492,7 +499,7 @@ function CardDesk(props) {
 
   askGraphHistory(PRICE_HISTORY_DEFAULT_RANGE);
   createEffect(graphHistoryKey, (key) => {
-    if (key) askGraphHistory(key.slice(cardId.length + 1));
+    if (key) askGraphHistory(key.slice(cardId.length + 1).split('|')[0]);
   });
   createEffect(
     () => (salesSlices() == null ? 'no-sales' : priceHistory() == null ? 'history' : 'both'),
