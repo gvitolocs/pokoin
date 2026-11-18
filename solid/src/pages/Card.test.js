@@ -503,6 +503,27 @@ test('the desk peeks the persisted history cache, stale included, and redraws on
   assert.match(page, /setPriceHistory\(\(prev\) => \(prev && JSON\.stringify\(prev\) === JSON\.stringify\(entry\) \? prev : entry\)\);/);
 });
 
+test('a sold re-read that changed nothing does not re-plot the graph', () => {
+  // PH-R034 P6: every desk visit re-reads the sold slices, and writing a fresh
+  // array for the answer that is already drawn recomputed `soldGraphView` and
+  // re-rendered the whole SVG. This is the history write's own rule, on the sold
+  // line: the desk keeps the array it painted when the new one plots the same.
+  assert.match(page, /import \{ sameSoldSlices, soldGraphView, soldTraitsForGraphDay \} from '@market\/sold-sales\.js';/);
+  const guard = page.slice(page.indexOf('function showSalesSlices('), page.indexOf('fetchCardSales(cardId, { slices: true })'));
+  assert.match(guard, /setSalesSlices\(\(prev\) => \(sameSoldSlices\(prev, slices\) \? prev : slices\)\);/);
+  assert.equal((page.match(/setSalesSlices\(/g) || []).length, 1, 'the signal is written from the guard alone');
+  // Every arrival path goes through it, and none of them stops the revalidation:
+  // the answer is still stored, only the redraw stands down.
+  const read = page.slice(page.indexOf('fetchCardSales(cardId, { slices: true })'), page.indexOf('function showVersionSet'));
+  assert.doesNotMatch(read, /setSalesSlices\(/);
+  assert.match(read, /if \(!peekCardSales\(cardId\)\) showSalesSlices\(\[\]\);/);
+  assert.ok(read.indexOf('saveCardSales(cardId, data.slices)') < read.indexOf('showSalesSlices(data.slices)'), 'stored, then painted');
+  assert.match(read, /showSalesSlices\(stale\?\.slices \?\? \[\]\);/);
+  // P6 stops at the plot: the draw-once rule, its cap and the Silver gate belong
+  // to the history path and an equality guard must not reach them.
+  assert.doesNotMatch(guard, /graphDrawn|accountSilver|GRAPH_HISTORY_WAIT_MS|priceHistory/);
+});
+
 test('a cached window is still re-read: the cache paints the first frame, not the data', () => {
   const asked = page.slice(
     page.indexOf('function askGraphHistory'),

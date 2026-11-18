@@ -128,7 +128,7 @@ import {
 import { eraHref, expansionLogoSrc, tcgEra } from '@market/set-logos.js';
 import { listingSelectId, shopDragOffers } from '@market/shop-marquee.js';
 import { peekCardSales, rememberStaleCardSales, saveCardSales } from '@market/sold-sales-cache.js';
-import { soldGraphView, soldTraitsForGraphDay } from '@market/sold-sales.js';
+import { sameSoldSlices, soldGraphView, soldTraitsForGraphDay } from '@market/sold-sales.js';
 import { soldSeriesColor } from '@market/sold-graph.js';
 import { Action, track } from '@market/track.js';
 import CardArt from '../components/CardArt.jsx';
@@ -569,18 +569,25 @@ function CardDesk(props) {
       return () => window.clearTimeout(timer);
     },
   );
+  // The sold slices are re-read on every visit, and an answer that equals what is
+  // already drawn is not new data: handing the graph a fresh array for it
+  // recomputes `soldGraphView` and re-plots the whole SVG. The history write above
+  // keeps `prev` on an equal entry; this is the same rule for the sold line.
+  function showSalesSlices(slices) {
+    setSalesSlices((prev) => (sameSoldSlices(prev, slices) ? prev : slices));
+  }
   fetchCardSales(cardId, { slices: true }).then((data) => {
     if (disposed) return;
     if (!Array.isArray(data?.slices)) {
-      if (!peekCardSales(cardId)) setSalesSlices([]);
+      if (!peekCardSales(cardId)) showSalesSlices([]);
       return;
     }
     saveCardSales(cardId, data.slices);
-    setSalesSlices(data.slices);
+    showSalesSlices(data.slices);
   }).catch(() => {
     if (disposed || peekCardSales(cardId)) return;
     const stale = rememberStaleCardSales(cardId);
-    setSalesSlices(stale?.slices ?? []);
+    showSalesSlices(stale?.slices ?? []);
   });
   function showVersionSet(data) {
     if (disposed) return;
