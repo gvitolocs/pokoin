@@ -80,6 +80,21 @@
   mask-size: contain;
 }
 
+/* A game with no SVG file: same square, its initial in a ring. */
+.game-icon-fallback {
+  -webkit-mask-image: none;
+  mask-image: none;
+  background: none;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .game-menu {
   left: 0;
   right: auto;
