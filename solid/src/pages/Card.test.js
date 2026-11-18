@@ -387,25 +387,129 @@ test('every price source is a line inside the graph the desk already had', () =>
   assert.match(graph, /soldGraphHoverRows\(tipLines\(\), hoverDay\(\)/);
 });
 
-test('the desk reads the other sources after the hero, one window at a time', () => {
+test('the desk reads the other sources with the sales, one window at a time', () => {
   assert.match(page, /const \[graphRange, setGraphRange\] = createSignal\(PRICE_HISTORY_DEFAULT_RANGE\);/);
-  // Not before the hero, not before the sales: idle, then ask.
+  // With the sales, never after the hero and idle: the graph is drawn once.
   const history = page.slice(page.indexOf('const graphHistoryKey'), page.indexOf('const graphRangeProps'));
-  assert.match(history, /afterHero\(\(\) => whenIdle\(\(\) => \{/);
-  assert.ok(page.indexOf('const [graphRange') > page.indexOf('fetchCardSales(cardId, { slices: true })'));
+  assert.ok(page.indexOf('const [graphRange') < page.indexOf('fetchCardSales(cardId, { slices: true })'));
+  assert.ok(page.indexOf('askGraphHistory(PRICE_HISTORY_DEFAULT_RANGE)') < page.indexOf('fetchCardSales(cardId, { slices: true })'));
   assert.match(history, /fetchCardPriceHistory\(cardId, bounds\)/);
-  // One read per card and window, kept in memory for the next visit.
+  // One read per card and window, kept for the next visit.
   assert.match(history, /const graphHistoryKey = \(\) => `\$\{cardId\}\|\$\{graphRange\(\)\}`;/);
-  assert.match(history, /priceHistoryCache\.set\(askedFor, entry\);/);
+  assert.match(history, /saveCardPriceHistory\(cardId, range, entry\);/);
   // A late answer for a card or window nobody asked for anymore is dropped, and
   // what is already drawn stays until the new window answers.
   assert.match(history, /if \(disposed \|\| untrack\(graphHistoryKey\) !== askedFor\) return;/);
   assert.match(page, /const entry = priceHistory\(\);\s*return entry \? \{ key: entry\.range/);
-  assert.match(page, /sources=\{graphSources\(\)\}\s*nowPoint=\{graphNowPoint\(\)\}\s*range=\{graphRangeProps\(\)\}\s*onRange=\{setGraphRange\}/);
+  assert.match(page, /sources=\{graphSources\(\)\}\s*nowPoint=\{graphNowPoint\(\)\}\s*range=\{graphRangeProps\(\)\}\s*onRange=\{accountSilver\(\) \? setGraphRange : undefined\}/);
   // Pokoin now is the cheapest live listing this desk already has.
-  assert.match(page, /const graphNowPoint = \(\) => Number\(nativeLive\(\)\[0\]\?\.pricePkn\) \|\| 0;/);
+  assert.match(page, /const graphNowPoint = \(\) => \(graphDrawn\(\) && accountSilver\(\) \? Number\(nativeLive\(\)\[0\]\?\.pricePkn\) \|\| 0 : 0\);/);
   // Cardmarket quotes foil and normal in one product: the graph's own Reverse decides.
   assert.match(page, /priceSourceSeries\(priceHistory\(\)\?\.history, \{ reverse: salesReverse\(\) \}\)/);
+});
+
+test('the card graph draws once, complete: no sold line alone while the history loads', () => {
+  // PH-03: the history read left the hero and idle gate, so the sold line drew
+  // a second before the other sources rewrote the same panel.
+  const history = page.slice(
+    page.indexOf('// The other price sources join the graph'),
+    page.indexOf('fetchCardSales(cardId, { slices: true })'),
+  );
+  assert.ok(history.length > 200, 'the history read is one block, beside the sales');
+  assert.doesNotMatch(history, /whenIdle|afterHero|holdForHero/);
+  assert.match(history, /askGraphHistory\(PRICE_HISTORY_DEFAULT_RANGE\);/);
+  // The panel gets nothing at all until both reads are in, so no key, scale or
+  // line arrives after the first draw.
+  assert.match(page, /const graphSeries = \(\) => \{\n\s*if \(!graphDrawn\(\)\) return null;/);
+  assert.match(page, /const graphOverlays = \(\) => \{\n\s*if \(!graphDrawn\(\)\) return \[\];/);
+  assert.match(page, /const graphRangeProps = \(\) => \{\n\s*if \(!graphDrawn\(\) \|\| !accountSilver\(\)\) return null;/);
+  assert.match(page, /const graphSources = createMemo\(\(\) => \(graphDrawn\(\)/);
+});
+
+test('an uncached graph waits for both reads, at most 1.5s after the sales', () => {
+  assert.match(page, /const GRAPH_HISTORY_WAIT_MS = 1500;/);
+  assert.match(page, /const \[graphDrawn, setGraphDrawn\] = createSignal\(\n\s*Boolean\(untrack\(priceHistory\) && untrack\(salesSlices\) != null\),\n\s*\);/);
+  assert.match(page, /const timer = window\.setTimeout\(\(\) => setGraphDrawn\(true\), GRAPH_HISTORY_WAIT_MS\);/);
+  assert.match(page, /return \(\) => window\.clearTimeout\(timer\);/);
+});
+
+test('the other price sources are Silver only: nothing asked or cached without them', () => {
+  // PH-10: the desk has one Silver signal, the account store's (the header and
+  // /extension gate on it too): cached session at the first paint, confirmed
+  // profile afterwards.
+  assert.match(page, /import \{ accountSilver \} from '\.\.\/stores\/account\.js';/);
+  // The read is the gate's own: a visitor without Silver sends this desk's
+  // graph to no /api/marketplace-card-price-history at all.
+  assert.match(page, /function askGraphHistory\(range\) \{\n\s*if \(!untrack\(accountSilver\)\) return;/);
+  assert.equal((page.match(/fetchCardPriceHistory\(/g) || []).length, 1, 'the one history read is the gated one');
+  // Neither is its cache: no peek before the gate, and the write lives inside
+  // the read the gate guards.
+  assert.match(page, /untrack\(accountSilver\) \? readGraphHistory\(PRICE_HISTORY_DEFAULT_RANGE\) : null/);
+  const asked = page.slice(page.indexOf('function askGraphHistory'), page.indexOf('askGraphHistory(PRICE_HISTORY_DEFAULT_RANGE);'));
+  assert.ok(asked.indexOf('if (!untrack(accountSilver)) return;') < asked.indexOf('readGraphHistory(range)'), 'the cache peek sits behind the gate');
+  assert.ok(asked.indexOf('if (!untrack(accountSilver)) return;') < asked.indexOf('saveCardPriceHistory(cardId'), 'the cache write sits behind the gate');
+  // What SoldPriceGraph takes for the sources is Silver's alone; without these
+  // four props it draws the sold median, its overlays and its tooltip only.
+  assert.match(page, /const graphSources = createMemo\(\(\) => \(graphDrawn\(\) && accountSilver\(\)/);
+  assert.match(page, /const graphNowPoint = \(\) => \(graphDrawn\(\) && accountSilver\(\)/);
+  assert.match(page, /const graphRangeProps = \(\) => \{\n\s*if \(!graphDrawn\(\) \|\| !accountSilver\(\)\) return null;/);
+  assert.match(page, /onRange=\{accountSilver\(\) \? setGraphRange : undefined\}/);
+  // The sold line and its overlays never depended on the sources: they stay.
+  assert.match(page, /const graphSeries = \(\) => \{\n\s*if \(!graphDrawn\(\)\) return null;/);
+  assert.match(page, /const graphOverlays = \(\) => \{\n\s*if \(!graphDrawn\(\)\) return \[\];/);
+});
+
+test('Silver turning on later asks then; without it the graph waits for nothing', () => {
+  const gate = page.slice(
+    page.indexOf('askGraphHistory(PRICE_HISTORY_DEFAULT_RANGE);'),
+    page.indexOf('fetchCardSales(cardId, { slices: true })'),
+  );
+  // The cached session can say Silver at the first paint and the confirmed
+  // profile can arrive after it: the window is read at that moment and its
+  // lines join the graph in one draw.
+  assert.match(gate, /createEffect\(accountSilver, \(silver\) => \{\n\s*if \(silver\) askGraphHistory\(untrack\(graphRange\)\);/);
+  // 'sold' is the state nobody but Silver is in: the graph draws with the
+  // sales, not 1.5s after them waiting for a read that is never coming.
+  assert.match(gate, /if \(!accountSilver\(\)\) return 'sold';/);
+  assert.match(gate, /if \(state !== 'history'\) \{\n\s*setGraphDrawn\(true\);/);
+});
+
+test('the desk peeks the persisted history cache, stale included, and redraws only on new data', () => {
+  const history = page.slice(page.indexOf('const graphHistoryKey'), page.indexOf('const graphRangeProps'));
+  assert.match(page, /import \{ peekCardPriceHistory, rememberStaleCardPriceHistory, saveCardPriceHistory \} from '@market\/price-history-cache\.js';/);
+  assert.match(history, /const readGraphHistory = \(range\) => peekCardPriceHistory\(cardId, range\)\n\s*\|\| rememberStaleCardPriceHistory\(cardId, range\);/);
+  assert.match(page, /const \[priceHistory, setPriceHistory\] = createSignal\(\n\s*untrack\(accountSilver\) \? readGraphHistory\(PRICE_HISTORY_DEFAULT_RANGE\) : null,\n\s*\);/);
+  assert.match(history, /const known = readGraphHistory\(range\);/);
+  // A range button is the same read: cached paints at once, uncached keeps the
+  // lines that are drawn until it answers.
+  assert.match(page, /createEffect\(graphHistoryKey, \(key\) => \{\n\s*if \(key\) askGraphHistory\(key\.slice\(cardId\.length \+ 1\)\);/);
+  // Identical data does not re-render a graph the cache already drew.
+  assert.match(page, /setPriceHistory\(\(prev\) => \(prev && JSON\.stringify\(prev\) === JSON\.stringify\(entry\) \? prev : entry\)\);/);
+});
+
+test('a cached window is still re-read: the cache paints the first frame, not the data', () => {
+  const asked = page.slice(
+    page.indexOf('function askGraphHistory'),
+    page.indexOf('askGraphHistory(PRICE_HISTORY_DEFAULT_RANGE);'),
+  );
+  const between = asked.slice(asked.indexOf('readGraphHistory(range)'), asked.indexOf('fetchCardPriceHistory('));
+  assert.ok(between.length > 20, 'the cache read and the API read sit in the same call');
+  // No early return between them: a card seen once keeps drawing, but never
+  // keeps showing what it knew for the next 15 days.
+  assert.doesNotMatch(between, /\breturn\b/);
+  assert.match(between, /setPriceHistory\(known\);/);
+  assert.match(asked, /fetchCardPriceHistory\(cardId, bounds\)/);
+  // One read per card and window per page view, whether or not it was cached.
+  assert.match(asked, /if \(disposed \|\| graphHistoryAsked === askedFor\) return;/);
+  // PH-R009 round 2: the first call runs in the component scope, where Solid 2
+  // refuses a signal write (WRITE_OWNED_SCOPE), and its cached entry is exactly
+  // what the signal was initialised with: only a different window ever sets.
+  assert.match(
+    asked,
+    /if \(known && known !== untrack\(priceHistory\) && untrack\(graphHistoryKey\) === askedFor\) setPriceHistory\(known\);/,
+  );
+  const firstWrite = between.slice(between.indexOf('const known'));
+  assert.ok(!/setPriceHistory\((?!known\))/.test(firstWrite), 'nothing else is written before the fetch');
 });
 
 test('long windows read their dates with the year', () => {

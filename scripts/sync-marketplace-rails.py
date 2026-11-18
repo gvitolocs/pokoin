@@ -392,16 +392,125 @@ def pick_live_homepage(cards: list[dict], limit: int) -> list[dict]:
     return mixed
 
 
-# Homepage New cards: curated printings, matched by set + collector number +
-# name. Same Pokémon names are different variants and must stay separate.
-# Do not sort this list after retrieval.
+# Homepage New cards: the newest set shuffled once per UTC day, then spread over
+# rarities so the rail is not the first collector numbers of the set. Same Pokémon
+# names are different variants and must stay separate.
+NEW_CARDS_RAIL_ID = "new_cards"
 NEW_CARDS_LIMIT = 20
-def pick_new_set_cards(cards, limit=NEW_CARDS_LIMIT):
-    """Choose a stable collector order without collapsing name variants."""
-    def order(card):
-        match = re.search(r"(\d+)(?:\s*/\s*\d+)?", str(card.get("number") or card.get("card_number") or ""))
-        return (int(match.group(1)) if match else 1_000_000, card_id(card))
-    return take_rail(sorted(cards, key=order), limit, unique_names=False)
+# One in three of the first RAIL_RARITY_WINDOW rail cards should be above common
+# when the pool has them, and no rarity runs three deep while another is available.
+RAIL_RARITY_WINDOW = 12
+RAIL_ABOVE_COMMON_SHARE = 3
+COMMON_RARITY_KEY = "common"
+# The candidates column is often the generic "Card"; the printed label inside the
+# collector number is what tells a common from a chase.
+COMMON_RARITY_LABELS = frozenset({"", "card", "common"})
+
+
+def utc_day(now: datetime | None = None) -> str:
+    dt = now or datetime.now(timezone.utc)
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%d")
+
+
+def rail_day_seed(rail_id: str, day: str | None = None) -> str:
+    """Shuffle seed of one rail on one UTC day: every visitor gets the same
+    order until midnight and a new one tomorrow, with no randomness at read
+    time so the rail response stays cacheable."""
+    return f"{day or utc_day()}:{rail_id}"
+
+
+def rarity_label(card: dict) -> str:
+    """Printed rarity text. CardTrader prefixes it onto the collector number
+    ("Rare | 119/214"); the rarity column is often the generic "Card"."""
+    for key in ("number", "card_number"):
+        blob = str(card.get(key) or "")
+        if "|" in blob:
+            label = blob.split("|", 1)[0].strip()
+            if label:
+                return label
+    return str(card.get("rarity") or "").strip()
+
+
+def rarity_key(card: dict) -> str:
+    """Rarity group used for spacing: every common-ish spelling is one group."""
+    label = rarity_label(card).casefold()
+    return COMMON_RARITY_KEY if label in COMMON_RARITY_LABELS else label
+
+
+def is_above_common(card: dict) -> bool:
+    return rarity_key(card) != COMMON_RARITY_KEY
+
+
+def space_rarities(
+    cards: list[dict],
+    window: int = RAIL_RARITY_WINDOW,
+    share: int = RAIL_ABOVE_COMMON_SHARE,
+) -> list[dict]:
+    """Re-order a shuffled pool without adding or dropping anything: never three
+    of one rarity side by side while another rarity is still left, and at least
+    one in `share` of the first `window` cards above common when the pool has
+    them. Every other card keeps the place the shuffle gave it as closely as the
+    two rules allow."""
+    pool = list(cards or [])
+    if not pool:
+        return []
+    labels = [rarity_key(card) for card in pool]
+    buckets: dict[str, list[int]] = {}
+    for position, label in enumerate(labels):
+        buckets.setdefault(label, []).append(position)
+    above_total = sum(
+        len(positions) for label, positions in buckets.items()
+        if label != COMMON_RARITY_KEY
+    )
+    want_above = min(above_total, window // share) if share > 0 else 0
+    stride = window // want_above if want_above > 0 else window + 1
+    heads = {label: 0 for label in buckets}
+    out: list[int] = []
+    above_placed = 0
+    while len(out) < len(pool):
+        available = [
+            label for label, positions in buckets.items() if heads[label] < len(positions)
+        ]
+        if len(out) >= 2 and labels[out[-1]] == labels[out[-2]] and len(available) > 1:
+            running = labels[out[-1]]
+            available = [label for label in available if label != running]
+        if (
+            want_above > 0
+            and above_placed < want_above
+            and len(out) < window
+            and (len(out) + 1) % stride == 0
+        ):
+            richer = [label for label in available if label != COMMON_RARITY_KEY]
+            if richer:
+                available = richer
+        label = min(available, key=lambda item: buckets[item][heads[item]])
+        out.append(buckets[label][heads[label]])
+        heads[label] += 1
+        if label != COMMON_RARITY_KEY:
+            above_placed += 1
+    return [pool[position] for position in out]
+
+
+def pick_new_set_cards(
+    cards: list[dict],
+    limit: int = NEW_CARDS_LIMIT,
+    *,
+    seed: str | None = None,
+    rng: random.Random | None = None,
+) -> list[dict]:
+    """The whole newest set mixed daily, then the first `limit` of that order."""
+    mixer = (
+        rng
+        if rng is not None
+        else random.Random(seed if seed is not None else rail_day_seed(NEW_CARDS_RAIL_ID))
+    )
+    # The pool query caps the set without an order of its own, so sort before
+    # mixing: the daily order must follow from the seed and the printings, not
+    # from whichever rows Postgres happened to return first.
+    pool = sorted(cards or [], key=card_id)
+    shuffled = list(pool)
+    mixer.shuffle(shuffled)
+    return take_rail(space_rarities(shuffled), limit, unique_names=False)
 
 
 # Homepage Featured: 30 random 30th Anniversary singles. Daily seed so the
@@ -824,7 +933,11 @@ def psql_cards_for_set_aliases(
     aliases: tuple[str, ...],
     like_needles: tuple[str, ...] = (),
     limit: int = 400,
+    stable_limit: bool = False,
 ) -> list[dict]:
+    """Printings of the named sets. stable_limit orders by card id so a set with
+    more printings than `limit` yields the same rows on every run — the daily
+    rail shuffle needs a pool that does not move under it."""
     lowered = [item.strip().lower() for item in aliases if str(item).strip()]
     if not lowered and not like_needles:
         return []
@@ -837,6 +950,7 @@ def psql_cards_for_set_aliases(
         if clean:
             clauses.append(f"c.set_name ILIKE '%{clean}%'")
     set_filter = " OR ".join(clauses)
+    order = "ORDER BY c.card_id" if stable_limit else ""
     sql = f"""
 {session_sql("20s")}
 SELECT row_to_json(t)
@@ -853,6 +967,7 @@ FROM (
     AND coalesce(c.cdn_image_url, c.image_url) IS NOT NULL
     {NOT_MERCH_SINGLE_SQL}
     AND ({set_filter})
+  {order}
   LIMIT {int(limit)}
 ) t;
 """
@@ -1198,9 +1313,18 @@ def main() -> None:
         )
     live_pool = overlay_pkn(psql_live_set_cards(16))
     new_pool = overlay_pkn(
-        psql_cards_for_set_aliases(NEW_CARDS_SET_ALIASES, NEW_CARDS_SET_NEEDLES, limit=400)
+        psql_cards_for_set_aliases(
+            NEW_CARDS_SET_ALIASES,
+            NEW_CARDS_SET_NEEDLES,
+            limit=400,
+            stable_limit=True,
+        )
     )
-    new_cards = overlay_cardtrader_asks(pick_new_set_cards(new_pool), limit=24)
+    new_cards_day = utc_day()
+    new_cards = overlay_cardtrader_asks(
+        pick_new_set_cards(new_pool, seed=rail_day_seed(NEW_CARDS_RAIL_ID, new_cards_day)),
+        limit=24,
+    )
     spotlight = overlay_cardtrader_asks(pick_live_homepage(live_pool, 16), limit=20)
     if not spotlight:
         spotlight = overlay_cardtrader_asks(overlay_pkn(home_spotlight)) or new_cards
@@ -1209,10 +1333,11 @@ def main() -> None:
     new_meta = {
         "source": "featured_set_override",
         "set": NEW_CARDS_SET,
-        "rank": "collector",
+        "rank": "daily_shuffle",
+        "day": new_cards_day,
         **meta_rate,
     }
-    rails.append(rail("new_cards", new_cards, new_meta))
+    rails.append(rail(NEW_CARDS_RAIL_ID, new_cards, new_meta))
     rails.append(rail("spotlight", spotlight, {"source": "live_sets_chase_inset", **meta_rate}))
     if featured_from_thirtieth:
         featured_meta = {

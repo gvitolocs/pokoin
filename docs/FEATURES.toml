@@ -357,6 +357,14 @@ proof = ["pokoin-rust/apps/cardtrader-price-cache/tests/rules.rs", "pokoin-rust/
 status = "partial"
 
 [[flow]]
+id = "home-rails"
+name = "Visitor browses the marketplace home rails"
+money = false
+entry = ["solid/src/pages/Home.jsx", "market/src/lists.js"]
+proof = ["market/src/lists.home-rails.test.js", "workers/marketplace-home.test.mjs"]
+status = "partial"
+
+[[flow]]
 id = "browse-pages"
 name = "Visitor browses sets, eras, expansions and artists"
 money = false

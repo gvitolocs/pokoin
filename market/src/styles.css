@@ -449,6 +449,29 @@ button, input, select { font: inherit; color: inherit; }
   cursor: pointer;
 }
 
+/* Card games hover card: the icon sits left of the name like the search-bar
+   game picker, so `.nav-preview a` stops stacking and `.nav-preview li span`
+   stops muting and shrinking the name. */
+.nav-preview .nav-game {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.nav-preview .nav-game .game-icon {
+  width: 1.2rem;
+  height: 1.2rem;
+  color: inherit;
+}
+
+.nav-preview li .nav-game-name {
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  white-space: nowrap;
+}
+
 .nav-preview-dash {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 8.5rem;
@@ -4779,6 +4802,15 @@ html:root:root .card-page.flutter-page .card-desk .desk-cell {
   border-radius: 14px;
   overflow: visible;
   cursor: pointer;
+}
+
+/* Out of flow like the chips and the keys above it, so the plot fills the panel
+   and never decides its height. A percentage height inside an auto-height panel
+   is resolved from the svg's own aspect ratio, so the desk row moved when the
+   first frame landed (220 -> 192 -> 214 px at 1440 wide). */
+.sold-graph > svg {
+  position: absolute;
+  inset: 0;
 }
 
 .sold-graph.is-all {

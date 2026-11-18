@@ -25,6 +25,7 @@
 //! | [`timing`] | `_request_timing.js` | per-request span + slow-request log |
 //! | [`expansions`] | `marketplace-expansions.js` (loaders) | `rows_for_expansions`, `snapshot_for_expansion` |
 //! | [`card_versions`] | `marketplace-card-versions.js` + the availability fragments of `marketplace-cards.js` | `rows_for_versions`, `candidate_rows_for_card_id` |
+//! | [`table_presence`] | (PH-02 guard) | cached `to_regclass` probe of one table of one game database |
 //!
 //! Rows are `serde_json::Value` objects, exactly what `to_jsonb(row)` yields.
 //! SQL functions take `&PgPool` (the request game's pool; `pokemon` reads the
@@ -51,4 +52,5 @@ pub mod react_sql;
 pub mod row;
 pub mod slug;
 pub mod sql_json;
+pub mod table_presence;
 pub mod timing;

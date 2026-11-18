@@ -4,13 +4,17 @@
 pub mod api;
 pub mod config;
 pub mod connect;
+pub mod decide;
 pub mod discord;
 pub mod discord_context;
 pub mod format;
 pub mod gate;
+pub mod gateway_lock;
 pub mod health;
 pub mod hermes;
 pub mod history;
+pub mod invisible;
+pub mod jev;
 pub mod media;
 pub mod redact;
 pub mod telegram;
@@ -23,3 +27,7 @@ pub const WPKN_CONTRACT_ADDRESS: &str = "0x91A17E2bddfF839078BD395482B38e4AC1527
 pub fn contract_address_reply() -> String {
     format!("BNB Chain wPKN contract address:\n{WPKN_CONTRACT_ADDRESS}")
 }
+pub mod hospital;
+pub mod social_text;
+pub mod x_client;
+pub mod youtube;

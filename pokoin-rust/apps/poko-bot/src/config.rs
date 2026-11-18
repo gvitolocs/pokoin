@@ -43,6 +43,11 @@ pub struct Config {
     pub max_audio_duration_seconds: u64,
     pub state_dir: PathBuf,
     pub health_addr: SocketAddr,
+    /// Host-wide gateway singleton lock (same record format as Hermes Node).
+    pub gateway_lock_enabled: bool,
+    pub gateway_lock_dir: PathBuf,
+    /// Bounded wait-out cycles when every route failed transiently.
+    pub transient_wait_ms: Vec<u64>,
 }
 
 impl Config {
@@ -86,6 +91,20 @@ impl Config {
             gemini_model: env_or("POKO_BOT_GEMINI_MODEL", "gemini-2.5-flash-lite"),
             max_audio_bytes,
             max_audio_duration_seconds,
+            gateway_lock_enabled: !matches!(
+                env_or("HERMES_GATEWAY_LOCK", "true")
+                    .to_ascii_lowercase()
+                    .as_str(),
+                "false" | "off" | "0"
+            ),
+            gateway_lock_dir: PathBuf::from(env_or(
+                "HERMES_GATEWAY_LOCK_DIR",
+                &format!(
+                    "{}/gateway-locks",
+                    env_or("POKO_BOT_STATE_DIR", "/var/lib/poko-bot")
+                ),
+            )),
+            transient_wait_ms: parse_ms_list("POKO_BOT_TRANSIENT_WAIT_MS", &[4_000, 12_000])?,
             state_dir: PathBuf::from(env_or("POKO_BOT_STATE_DIR", "/var/lib/poko-bot")),
             health_addr,
         })
@@ -114,6 +133,9 @@ impl Config {
             max_audio_duration_seconds: 900,
             state_dir: PathBuf::from("/tmp/poko-bot-test"),
             health_addr: "127.0.0.1:9".parse().expect("addr"),
+            gateway_lock_enabled: false,
+            gateway_lock_dir: PathBuf::from("/tmp/poko-bot-test/gateway-locks"),
+            transient_wait_ms: Vec::new(),
         }
     }
 
@@ -140,6 +162,9 @@ impl Config {
             max_audio_duration_seconds = self.max_audio_duration_seconds,
             state_dir = %self.state_dir.display(),
             health = %self.health_addr,
+            gateway_lock = on_off(self.gateway_lock_enabled),
+            gateway_lock_dir = %self.gateway_lock_dir.display(),
+            transient_wait_ms = ?self.transient_wait_ms,
             "poko-bot config"
         );
     }
@@ -205,9 +230,47 @@ fn parse_u64(name: &str, default: u64) -> anyhow::Result<u64> {
     }
 }
 
+/// Comma-separated millisecond delays ("4000,12000"); empty disables.
+fn parse_ms_list(name: &str, default: &[u64]) -> anyhow::Result<Vec<u64>> {
+    match env::var(name) {
+        Err(_) => Ok(default.to_vec()),
+        Ok(raw) => raw
+            .split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(|item| {
+                item.parse()
+                    .map_err(|error| anyhow::anyhow!("{name}: {error}"))
+            })
+            .collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transient_wait_list_parses_and_can_be_disabled() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        env::remove_var("POKO_BOT_TRANSIENT_WAIT_MS");
+        assert_eq!(
+            parse_ms_list("POKO_BOT_TRANSIENT_WAIT_MS", &[4_000, 12_000]).unwrap(),
+            vec![4_000, 12_000]
+        );
+        env::set_var("POKO_BOT_TRANSIENT_WAIT_MS", " 100, 250 ");
+        assert_eq!(
+            parse_ms_list("POKO_BOT_TRANSIENT_WAIT_MS", &[1]).unwrap(),
+            vec![100, 250]
+        );
+        env::set_var("POKO_BOT_TRANSIENT_WAIT_MS", "");
+        assert!(parse_ms_list("POKO_BOT_TRANSIENT_WAIT_MS", &[1])
+            .unwrap()
+            .is_empty());
+        env::set_var("POKO_BOT_TRANSIENT_WAIT_MS", "soon");
+        assert!(parse_ms_list("POKO_BOT_TRANSIENT_WAIT_MS", &[1]).is_err());
+        env::remove_var("POKO_BOT_TRANSIENT_WAIT_MS");
+    }
 
     #[test]
     fn off_values_are_anything_but_on_true_one() {
