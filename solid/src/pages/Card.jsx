@@ -467,11 +467,10 @@ function CardDesk(props) {
     const askedFor = `${cardId}|${range}`;
     if (disposed || graphHistoryAsked === askedFor) return;
     graphHistoryAsked = askedFor;
+    // A cached window paints at once and is still re-read below: what the desk
+    // knew is only the first frame, never the data it keeps showing.
     const known = readGraphHistory(range);
-    if (known) {
-      if (untrack(graphHistoryKey) === askedFor) setPriceHistory(known);
-      return;
-    }
+    if (known && untrack(graphHistoryKey) === askedFor) setPriceHistory(known);
     const bounds = priceHistoryRange(range, new Date().toISOString().slice(0, 10));
     fetchCardPriceHistory(cardId, bounds).then((history) => {
       // Dropped if this card or window is not the one asked for anymore.

@@ -446,6 +446,22 @@ test('the desk peeks the persisted history cache, stale included, and redraws on
   assert.match(page, /setPriceHistory\(\(prev\) => \(prev && JSON\.stringify\(prev\) === JSON\.stringify\(entry\) \? prev : entry\)\);/);
 });
 
+test('a cached window is still re-read: the cache paints the first frame, not the data', () => {
+  const asked = page.slice(
+    page.indexOf('function askGraphHistory'),
+    page.indexOf('askGraphHistory(PRICE_HISTORY_DEFAULT_RANGE);'),
+  );
+  const between = asked.slice(asked.indexOf('readGraphHistory(range)'), asked.indexOf('fetchCardPriceHistory('));
+  assert.ok(between.length > 20, 'the cache read and the API read sit in the same call');
+  // No early return between them: a card seen once keeps drawing, but never
+  // keeps showing what it knew for the next 15 days.
+  assert.doesNotMatch(between, /\breturn\b/);
+  assert.match(between, /setPriceHistory\(known\);/);
+  assert.match(asked, /fetchCardPriceHistory\(cardId, bounds\)/);
+  // One read per card and window per page view, whether or not it was cached.
+  assert.match(asked, /if \(disposed \|\| graphHistoryAsked === askedFor\) return;/);
+});
+
 test('long windows read their dates with the year', () => {
   const graph = fs.readFileSync(new URL('../components/desk/SoldPriceGraph.jsx', import.meta.url), 'utf8');
   // The drawn window decides: past 300 days, or first and last day across New Year.
