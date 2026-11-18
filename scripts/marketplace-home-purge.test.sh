@@ -11,7 +11,12 @@
 set -eu
 
 repo=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-base=$(mktemp -d "${TMPDIR:-$HOME/scratch/tmp}/marketplace-home-purge-test.XXXXXX")
+# TMPDIR when set, else the system default: a CI runner has no $HOME/scratch/tmp.
+# mktemp will not create a missing parent, so make it first.
+if [ -n "${TMPDIR:-}" ] && [ ! -d "$TMPDIR" ]; then
+    mkdir -p "$TMPDIR"
+fi
+base=$(mktemp -d "${TMPDIR:-/tmp}/marketplace-home-purge-test.XXXXXX")
 trap 'rm -rf "$base"' EXIT INT TERM
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 TOKEN='tok-8kQ2sampleNotARealValue'
