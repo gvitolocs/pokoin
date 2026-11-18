@@ -167,9 +167,10 @@ test('the editor keeps its own draft and closes without sending it', () => {
   assert.match(editorSrc, /role="dialog"/);
   assert.match(editorSrc, /aria-modal="true"/);
   assert.match(editorSrc, /onKeyDown=\{onKey\}/);
-  // Escape and Cancel are the same thing: throw the draft away.
-  assert.match(editorSrc, /onClose: \(\) => props\.onClose\(\),/);
-  assert.match(editorSrc, /onClick=\{\(\) => props\.onClose\(\)\} data-testid="collections-cancel"/);
+  // Escape and Cancel reach the same leave(): closing sends nothing, and the
+  // table keeps what it had.
+  assert.match(editorSrc, /onClose: \(\) => leave\('Escape'\),/);
+  assert.match(editorSrc, /onClick=\{\(\) => leave\(\)\} data-testid="collections-cancel"/);
   // A refused save says why in the dialog's own voice and keeps every field.
   assert.match(editorSrc, /setServerProblem\(answer\?\.message \|\| 'Could not save the collection\.'\)/);
   assert.match(editorSrc, /disabled=\{saving\(\) \|\| Boolean\(problems\(\)\.length\)\}/);
@@ -180,7 +181,7 @@ test('the card search sends the public id of the game the picker shows', () => {
   // The header's game uses the header's typeahead; anything else is the
   // marketplace search, asked for cards of that game.
   assert.match(editorSrc, /createSignal\(props\.hostGame \|\| game\(\)\.id\)/);
-  assert.match(editorSrc, /createLiveSuggest\(query, \{ kind: 'singles', limit: SEARCH_LIMIT \}\)/);
+  assert.match(editorSrc, /createLiveSuggest\(props\.query, \{ kind: 'singles', limit: SEARCH_LIMIT \}\)/);
   assert.match(editorSrc, /productType: 'card', game: gameId/);
   // A result with no public card id is dropped, not sent as something else.
   assert.match(editorSrc, /filter\(\(row\) => \/\^\\d\+\$\/\.test\(row\.cardId\)\)/);
@@ -214,6 +215,25 @@ test('a row shows the server price of its exact slice, or says it has none', () 
   // Only an amount wears the gold of a number.
   assert.match(editorSrc, /collections-item-price\$\{line\(\) === 'amount' \? '' : ' is-note'\}/);
   assert.match(css, /\.collections-item-price\.is-note \{\n\s*color: var\(--muted\);/);
+});
+
+test('a close asks once, inline, about a draft the server has never seen', () => {
+  // One decision behind every path out: Escape, Cancel, the cross and the scrim.
+  assert.match(editorSrc, /onClick=\{\(\) => leave\(\)\} \/>\n\s*<div\n\s*class="collections-editor"/);
+  assert.match(editorSrc, /aria-label="Close" onClick=\{\(\) => leave\(\)\}/);
+  assert.match(editorSrc, /switch \(closeIntent\(\{ key, search: searchText\(\), dirty: dirty\(\), asking: asking\(\) \}\)\)/);
+  assert.match(editorSrc, /const dirty = createMemo\(\(\) => draftChanged\(draft\(\), book\(\)\.saved\(\)\)\)/);
+  // The question sits in the footer, names its two answers, and the dialog does
+  // not close on the way to them.
+  assert.match(editorSrc, /data-testid="collections-discard-ask">Discard changes\?</);
+  assert.match(editorSrc, /class="btn is-danger" onClick=\{\(\) => props\.onClose\(\)\} data-testid="collections-discard"/);
+  assert.match(editorSrc, /data-testid="collections-keep-editing"/);
+  // Escape is about the query while one is in the field, so the field lives with
+  // the decision and not inside either search component.
+  assert.match(editorSrc, /const \[searchText, setSearchText\] = createSignal\(''\)/);
+  assert.match(editorSrc, /query=\{searchText\}\n\s*onQuery=\{setSearchText\}/);
+  assert.equal((editorSrc.match(/props\.onClose\(\)/g) || []).length, 2, 'only the discarded draft closes');
+  assert.match(css, /\.collections-ask \{\n\s*margin-right: auto;/);
 });
 
 test('the item rows use the listing forms vocabulary and clamp copies', () => {

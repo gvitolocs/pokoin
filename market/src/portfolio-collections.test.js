@@ -6,7 +6,9 @@ import {
   collectionErrorMessage,
   collectionIdFromKey,
   collectionKey,
+  closeIntent,
   commitQuantity,
+  draftChanged,
   draftErrors,
   DEFAULT_LIMITS,
   emptyCollections,
@@ -335,6 +337,41 @@ test('the save body carries the items the server reads back, and no price', () =
   assert.equal('pricedId' in saveBody(draft).items[0], false, 'which slice the desk last saw priced stays home');
   assert.equal('id' in saveBody(newDraft({ name: 'New', items: [] })), false, 'a new list sends no id');
   assert.equal(saveBody({ name: 'x', items: [{ id: 'slice', cardId: '1', quantity: 1 }] }).items[0].id, undefined, 'the client slice key stays home');
+});
+
+test('every path out of the editor is one decision about the draft', () => {
+  assert.equal(closeIntent({}), 'close', 'an unchanged draft has nothing to throw away');
+  assert.equal(closeIntent({ key: 'Escape', dirty: true }), 'ask', 'Escape on a draft the server has never seen asks first');
+  assert.equal(closeIntent({ dirty: true }), 'ask', 'Cancel, the cross and the scrim ask the same question');
+  // A query in the field is what Escape is about, and only with the key.
+  assert.equal(closeIntent({ key: 'Escape', search: 'charizard', dirty: true }), 'search');
+  assert.equal(closeIntent({ key: 'Escape', search: '   ', dirty: true }), 'ask', 'a field of spaces is no query');
+  assert.equal(closeIntent({ search: 'charizard', dirty: true }), 'ask', 'a click does not empty a field');
+  assert.equal(closeIntent({ key: 'Escape', search: 'charizard' }), 'search', 'the query goes before the list does');
+  // Asked once: any further request answers the question, it does not repeat it.
+  assert.equal(closeIntent({ key: 'Escape', dirty: true, asking: true }), 'stay');
+  assert.equal(closeIntent({ dirty: true, asking: true }), 'stay');
+  assert.equal(closeIntent({ key: 'Escape', search: 'charizard', dirty: true, asking: true }), 'search');
+});
+
+test('a draft is changed when the body it would send differs', () => {
+  const saved = normalizeCollections(payload()).collections[0];
+  const open = newDraft(saved);
+  assert.equal(draftChanged(open, saved), false, 'opened and left alone');
+  const renamed = { ...open, name: 'Charizard binders' };
+  assert.equal(draftChanged(renamed, saved), true);
+  assert.equal(draftChanged({ ...renamed, name: saved.name }, saved), false, 'a name typed and typed back');
+  const moved = setItem(open, open.items[0].id, { quantity: 4 });
+  assert.equal(draftChanged(moved, saved), true);
+  assert.equal(draftChanged(setItem(moved, moved.items[0].id, { quantity: saved.items[0].quantity }), saved), false);
+  const facet = setItem(open, open.items[0].id, { condition: 'MP' });
+  assert.equal(draftChanged(facet, saved), true);
+  assert.equal(draftChanged(setItem(facet, facet.items[0].id, { condition: saved.items[0].condition }), saved), false, 'a facet moved and moved back');
+  assert.equal(draftChanged(addItem(open, { cardId: '999999' }), saved), true, 'a card added');
+  assert.equal(draftChanged(removeItem(open, open.items[0].id), saved), true, 'a card removed');
+  assert.equal(draftChanged(newDraft(), null), false, 'a new list nobody has filled in');
+  assert.equal(draftChanged(newDraft(null), null), false);
+  assert.equal(draftChanged(addItem(newDraft(), { cardId: '1' }), null), true);
 });
 
 test('every error code reads as a sentence', () => {

@@ -197,6 +197,19 @@
   border-top: 1px solid var(--g5);
 }
 
+/* The one question a close asks, in the footer whose buttons it replaces. */
+.collections-ask {
+  margin-right: auto;
+  align-self: center;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.collections-confirm {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .collections-field {
   display: grid;
   gap: 0.25rem;

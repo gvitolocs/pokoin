@@ -4,7 +4,9 @@ import { cardFromCatalogRow, fetchSearch } from '@market/api.js';
 import { LIST_LANGS, MOOD_CONDS } from '@market/card-desk.js';
 import {
   addItem,
+  closeIntent,
   commitQuantity,
+  draftChanged,
   itemPriceLine,
   newDraft,
   newItem,
@@ -114,12 +116,11 @@ function SearchUi(props) {
 
 /** The header game's own typeahead: the same engine and ranker as the search bar. */
 function HostCardSearch(props) {
-  const [query, setQuery] = createSignal('');
-  const found = createLiveSuggest(query, { kind: 'singles', limit: SEARCH_LIMIT });
+  const found = createLiveSuggest(props.query, { kind: 'singles', limit: SEARCH_LIMIT });
   return (
     <SearchUi
-      query={query}
-      onQuery={setQuery}
+      query={props.query}
+      onQuery={props.onQuery}
       rows={searchRows(found(), props.gameId)}
       placeholder="Pokémon card name, set or number"
       onPick={props.onPick}
@@ -135,13 +136,12 @@ function HostCardSearch(props) {
  * nothing about another, so this path is the search the results page uses.
  */
 function CatalogCardSearch(props) {
-  const [query, setQuery] = createSignal('');
   const [rows, setRows] = createSignal([]);
   const [busy, setBusy] = createSignal(false);
 
-  createEffect(() => [query(), props.gameId], ([text, gameId]) => {
+  createEffect(() => [props.query(), props.gameId], ([typed, gameId]) => {
     setRows([]);
-    const name = String(text || '').trim();
+    const name = String(typed || '').trim();
     if (name.length < 2) {
       setBusy(false);
       return undefined;
@@ -167,8 +167,8 @@ function CatalogCardSearch(props) {
 
   return (
     <SearchUi
-      query={query}
-      onQuery={setQuery}
+      query={props.query}
+      onQuery={props.onQuery}
       rows={busy() ? [] : rows()}
       placeholder="Card name in this game"
       onPick={props.onPick}
@@ -280,13 +280,16 @@ function ItemRow(props) {
  * The collection editor: name it, find the cards, set the facets, save.
  *
  * Opened from a Collections row (Edit) or the New collection button, it holds a
- * draft of its own: Cancel and Escape throw it away without asking the server
- * anything, and a save that comes back refused keeps both the dialog and every
- * field in it. A saved row and its copies are what the answer says they are —
- * the server resolves every price, so nothing here asks for one. The amount a
- * row shows is the server's own for that exact slice: a card added from the
- * search, or one whose facets have moved since the answer, waits to be priced
- * by the save.
+ * draft of its own: leaving it sends nothing to the server, and a save that
+ * comes back refused keeps both the dialog and every field in it. A saved row
+ * and its copies are what the answer says they are — the server resolves every
+ * price, so nothing here asks for one. The amount a row shows is the server's
+ * own for that exact slice: a card added from the search, or one whose facets
+ * have moved since the answer, waits to be priced by the save.
+ *
+ * Escape, Cancel, the cross and the scrim all go through `leave`, which asks
+ * once — inline — before it throws a changed draft away. `closeIntent` decides
+ * what any of them means.
  *
  * The card search is the header typeahead when the seller is in the page's own
  * game (`createLiveSuggest`, one ranker for one name pool) and the marketplace
@@ -298,6 +301,10 @@ export default function CollectionEditor(props) {
   const [draft, setDraft] = createSignal(newDraft(book().saved()));
   const [serverProblem, setServerProblem] = createSignal('');
   const [pickedGame, setPickedGame] = createSignal(props.hostGame || game().id);
+  // The query lives here, not in the field: Escape is one handler for the whole
+  // dialog, and what it means depends on whether a search is open.
+  const [searchText, setSearchText] = createSignal('');
+  const [asking, setAsking] = createSignal(false);
   // The typeahead ranks one name pool — the page's own game, and Pokémon only.
   // Any other game the picker offers goes to the marketplace search instead.
   const liveSearch = () => pickedGame() === (props.hostGame || game().id) && isPokemonGame();
@@ -315,9 +322,28 @@ export default function CollectionEditor(props) {
 
   let box;
   let nameBox;
+  const dirty = createMemo(() => draftChanged(draft(), book().saved()));
+
+  function leave(key = '') {
+    switch (closeIntent({ key, search: searchText(), dirty: dirty(), asking: asking() })) {
+      case 'search':
+        // The query was what Escape was about; the list keeps every field.
+        setSearchText('');
+        break;
+      case 'ask':
+        setAsking(true);
+        break;
+      case 'stay':
+        setAsking(false);
+        break;
+      default:
+        // Closing is discarding: nothing is sent, and the table keeps what it had.
+        props.onClose();
+    }
+  }
+
   const onKey = useDialogFocus(() => box, {
-    // Closing is discarding: nothing is sent, and the table keeps what it had.
-    onClose: () => props.onClose(),
+    onClose: () => leave('Escape'),
     first: () => nameBox,
   });
 
@@ -373,7 +399,7 @@ export default function CollectionEditor(props) {
 
   return (
     <Portal mount={document.body}>
-      <div class="collections-scrim" aria-hidden="true" onClick={() => props.onClose()} />
+      <div class="collections-scrim" aria-hidden="true" onClick={() => leave()} />
       <div
         class="collections-editor"
         role="dialog"
@@ -385,7 +411,7 @@ export default function CollectionEditor(props) {
       >
         <header class="collections-head">
           <h3 id="collections-editor-title" class="thread-title">{title()}</h3>
-          <button type="button" class="collections-close" aria-label="Close" onClick={() => props.onClose()}>×</button>
+          <button type="button" class="collections-close" aria-label="Close" onClick={() => leave()}>×</button>
         </header>
 
         <div class="collections-body">
@@ -416,6 +442,8 @@ export default function CollectionEditor(props) {
             </label>
             <Show when={liveSearch()} fallback={(
               <CatalogCardSearch
+                query={searchText}
+                onQuery={setSearchText}
                 gameId={pickedGame()}
                 onPick={add}
                 atCap={atCap()}
@@ -424,6 +452,8 @@ export default function CollectionEditor(props) {
             )}
             >
               <HostCardSearch
+                query={searchText}
+                onQuery={setSearchText}
                 gameId={pickedGame()}
                 onPick={add}
                 atCap={atCap()}
@@ -464,19 +494,36 @@ export default function CollectionEditor(props) {
         </div>
 
         <footer class="collections-foot">
-          <button type="button" class="btn ghost" onClick={() => props.onClose()} data-testid="collections-cancel">
-            Cancel
-          </button>
-          <button
-            type="button"
-            class="btn"
-            disabled={saving() || Boolean(problems().length)}
-            title={reason()}
-            onClick={save}
-            data-testid="collections-save"
+          <Show
+            when={asking()}
+            fallback={(
+              <>
+                <button type="button" class="btn ghost" onClick={() => leave()} data-testid="collections-cancel">
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  class="btn"
+                  disabled={saving() || Boolean(problems().length)}
+                  title={reason()}
+                  onClick={save}
+                  data-testid="collections-save"
+                >
+                  {saving() ? 'Saving…' : 'Save'}
+                </button>
+              </>
+            )}
           >
-            {saving() ? 'Saving…' : 'Save'}
-          </button>
+            <p class="collections-ask" data-testid="collections-discard-ask">Discard changes?</p>
+            <span class="collections-confirm">
+              <button type="button" class="btn is-danger" onClick={() => props.onClose()} data-testid="collections-discard">
+                Discard
+              </button>
+              <button type="button" class="btn ghost" onClick={() => leave()} data-testid="collections-keep-editing">
+                Keep editing
+              </button>
+            </span>
+          </Show>
         </footer>
       </div>
     </Portal>

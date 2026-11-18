@@ -395,6 +395,34 @@ export function saveBody(draft) {
   return body;
 }
 
+/**
+ * What a request to leave the editor means, decided in one place so Escape,
+ * Cancel, the × and the scrim cannot each invent their own rule about a draft.
+ *
+ * - `search` — Escape with a query in the field: that is the seller done with
+ *   the results, not done with the list, so the field empties and nothing else
+ *   happens.
+ * - `close` — an unchanged draft has nothing to throw away.
+ * - `ask` — the draft holds something the server has never seen: one question,
+ *   inline, and nothing closes until it is answered.
+ * - `stay` — the question is already on screen, so a second request answers it
+ *   rather than asking twice.
+ */
+export function closeIntent({ key = '', search = '', dirty = false, asking = false } = {}) {
+  if (key === 'Escape' && text(search)) return 'search';
+  if (!dirty) return 'close';
+  return asking ? 'stay' : 'ask';
+}
+
+/**
+ * Whether the draft differs from the saved list it was opened from. The body it
+ * would send is the comparison, so a name typed and typed back, or a copy count
+ * edited to where it already stood, is not something the seller would lose.
+ */
+export function draftChanged(draft, saved = null) {
+  return JSON.stringify(saveBody(draft)) !== JSON.stringify(saveBody(newDraft(saved)));
+}
+
 const ERROR_MESSAGES = {
   collection_name_required: 'A collection needs a name.',
   collection_item_invalid: 'One of the cards in this collection is not a card we know.',
