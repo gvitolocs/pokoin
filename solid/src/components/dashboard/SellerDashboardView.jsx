@@ -11,6 +11,8 @@ import '@market/sell-spreadsheet.css';
 import { Alert, EmptyDesk, PageHead } from '../Desk.jsx';
 import MiniCardTile from '../MiniCardTile.jsx';
 import CollectionHistoryPanel from './CollectionHistoryPanel.jsx';
+import CollectionEditor from './CollectionEditor.jsx';
+import { withCollections } from '@market/portfolio-segments.js';
 import SegmentTable from './SegmentTable.jsx';
 import TopMoversPanel from './TopMoversPanel.jsx';
 
@@ -284,6 +286,9 @@ export function SellerDashboardView(props) {
   // The range buttons belong to the value graph, so the table keeps its own
   // copy of the window the graph reports; 1M is that graph's opening window.
   const [segmentsRange, setSegmentsRange] = createSignal({ id: '1M', days: 30 });
+  // The saved collections answer as their own model, but the table splits one:
+  // nesting is what puts the Collections level next to the five it already has.
+  const segmentModel = createMemo(() => withCollections(props.segments || null, props.collections?.model() || null));
   const listed = () => props.listed;
   const listingRows = () => props.listingRows || [];
   const movers = () => props.movers || [];
@@ -402,13 +407,24 @@ export function SellerDashboardView(props) {
 
               <HistoryBoundary>
                 <SegmentTable
-                  model={props.segments || null}
+                  model={segmentModel()}
                   pending={Boolean(props.segmentsPending)}
                   range={segmentsRange()}
                   currency={props.moverCurrency || ''}
                   currencyPending={Boolean(props.moverCurrencyPending)}
+                  collections={props.collections || null}
                 />
               </HistoryBoundary>
+
+              {/* Keyed: the dialog holds a draft of its own, so a new list to
+                  edit must be a new dialog, not the old one with another name. */}
+              <Show keyed when={props.collections?.editing()}>
+                <CollectionEditor
+                  book={props.collections}
+                  currency={props.moverCurrency || 'PKN'}
+                  onClose={() => props.collections.closeEdit()}
+                />
+              </Show>
 
               <div class="seller-tile-actions">
                 <DeskLink class="btn ghost" href={props.collectionHref} data-testid="portfolio-view-collection">View collection</DeskLink>
