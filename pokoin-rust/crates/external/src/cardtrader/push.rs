@@ -107,21 +107,11 @@ pub fn price_body(pkn: f64, channel: crate::ct_fees::Channel) -> Option<Value> {
     ct_ask_eur(pkn, channel).map(|price| json!({ "price": json_number(price) }))
 }
 
-/// CardTrader `POST /products` body for a Pokoin listing.
-pub fn product_body(listing: &Value) -> ApiResult<Value> {
-    let id = blueprint(&first(listing, &["cardId", "card_id"], 80))
-        .ok_or_else(|| ApiError::bad_request("CardTrader listing needs a CardTrader blueprint id."))?;
-    let pkn = number(listing.get("pricePkn").or_else(|| listing.get("price_pkn")).unwrap_or(&Value::Null));
-    let price = ct_ask_eur(pkn, listing_channel(listing))
-        .ok_or_else(|| ApiError::bad_request("CardTrader listing needs a positive EUR price."))?;
-    let qty = number(
-        listing
-            .get("quantityAvailable")
-            .or_else(|| listing.get("quantity_available"))
-            .or_else(|| listing.get("quantity"))
-            .unwrap_or(&Value::Null),
-    );
-    let qty = if qty.is_finite() && qty != 0.0 { qty.trunc().max(1.0) } else { 1.0 };
+/// The properties a Pokémon product carries: condition, language and the
+/// printing flags, spelled the way CardTrader's Pokémon blueprint wants them.
+/// One mapping for both a create ([`product_body`]) and a facet edit of a live
+/// product ([`facet_body`]).
+pub fn pokemon_properties(listing: &Value) -> serde_json::Map<String, Value> {
     let condition = match field(listing, "condition", 20).to_uppercase().as_str() {
         "SP" | "LP" => "Slightly Played",
         "MP" => "Moderately Played",
@@ -143,24 +133,54 @@ pub fn product_body(listing: &Value) -> ApiResult<Value> {
         "TH" => "th",
         _ => "en",
     };
+    let mut properties = serde_json::Map::new();
+    properties.insert("condition".into(), json!(condition));
+    properties.insert("pokemon_language".into(), json!(language));
+    properties.insert("signed".into(), json!(listing["signed"] == true));
+    properties.insert("altered".into(), json!(listing["altered"] == true));
+    if first(listing, &["foilState", "foil_state"], 40).eq_ignore_ascii_case("reverse")
+        || listing["reverse"] == true
+    {
+        properties.insert("pokemon_reverse".into(), json!(true));
+    }
+    if listing["firstEdition"] == true || listing["first_edition"] == true {
+        properties.insert("pokemon_first_edition".into(), json!(true));
+    }
+    properties
+}
+
+/// CardTrader `POST /products` body for a Pokoin listing.
+pub fn product_body(listing: &Value) -> ApiResult<Value> {
+    let id = blueprint(&first(listing, &["cardId", "card_id"], 80)).ok_or_else(|| {
+        ApiError::bad_request("CardTrader listing needs a CardTrader blueprint id.")
+    })?;
+    let pkn = number(
+        listing
+            .get("pricePkn")
+            .or_else(|| listing.get("price_pkn"))
+            .unwrap_or(&Value::Null),
+    );
+    let price = ct_ask_eur(pkn, listing_channel(listing))
+        .ok_or_else(|| ApiError::bad_request("CardTrader listing needs a positive EUR price."))?;
+    let qty = number(
+        listing
+            .get("quantityAvailable")
+            .or_else(|| listing.get("quantity_available"))
+            .or_else(|| listing.get("quantity"))
+            .unwrap_or(&Value::Null),
+    );
+    let qty = if qty.is_finite() && qty != 0.0 {
+        qty.trunc().max(1.0)
+    } else {
+        1.0
+    };
     let mut body = json!({
         "blueprint_id": id,
         "price": json_number(price),
         "quantity": json_number(qty),
         "graded": listing["graded"] == true,
-        "properties": {
-            "condition": condition,
-            "pokemon_language": language,
-            "signed": listing["signed"] == true,
-            "altered": listing["altered"] == true,
-        },
+        "properties": Value::Object(pokemon_properties(listing)),
     });
-    if first(listing, &["foilState", "foil_state"], 40).eq_ignore_ascii_case("reverse") || listing["reverse"] == true {
-        body["properties"]["pokemon_reverse"] = json!(true);
-    }
-    if listing["firstEdition"] == true || listing["first_edition"] == true {
-        body["properties"]["pokemon_first_edition"] = json!(true);
-    }
     let id = first(listing, &["id", "listingId"], 80);
     if !id.is_empty() {
         body["user_data_field"] = json!(format!("pokoin:{id}"));
@@ -264,14 +284,17 @@ pub fn ct_condition(condition: &str, possible: &[Value]) -> Option<String> {
     })
 }
 
-/// `POST /products` body for a listing of a game other than Pokémon, from
-/// its blueprint's `editable_properties` (`marketplace_<game>.cardtrader_blueprints`):
-/// only properties the blueprint has and values it allows (`riftbound_language`,
+/// The properties a non-Pokémon product carries, from its blueprint's
+/// `editable_properties` (`marketplace_<game>.cardtrader_blueprints`): only
+/// properties the blueprint has and values it allows (`riftbound_language`,
 /// `riftbound_foil`, `mtg_foil`, `first_edition`, …). A facet the blueprint
-/// cannot carry is refused, so nothing is created, rather than listed on
-/// CardTrader as another copy.
-pub fn product_body_for_blueprint(listing: &Value, editable: &[Value]) -> ApiResult<Value> {
-    let mut body = product_body(listing)?;
+/// cannot carry is refused, so nothing is created or rewritten rather than
+/// listed on CardTrader as another copy. One mapping for both a create
+/// ([`product_body_for_blueprint`]) and a facet edit ([`facet_body`]).
+pub fn blueprint_properties(
+    listing: &Value,
+    editable: &[Value],
+) -> ApiResult<serde_json::Map<String, Value>> {
     let named = |test: &dyn Fn(&str) -> bool| {
         editable.iter().find(|property| property["name"].as_str().is_some_and(|name| test(name)))
     };
@@ -309,8 +332,23 @@ pub fn product_body_for_blueprint(listing: &Value, editable: &[Value]) -> ApiRes
         let property = named(test).filter(|property| boolean(property)).ok_or_else(|| refuse(what))?;
         properties.insert(property["name"].as_str().unwrap_or_default().to_string(), json!(true));
     }
-    body["properties"] = Value::Object(properties);
+    Ok(properties)
+}
+
+/// `POST /products` body for a listing of a game other than Pokémon, built on
+/// [`blueprint_properties`]; the create also needs the blueprint's own
+/// Pokémon-shaped fields, which `product_body` supplies.
+pub fn product_body_for_blueprint(listing: &Value, editable: &[Value]) -> ApiResult<Value> {
+    let mut body = product_body(listing)?;
+    body["properties"] = Value::Object(blueprint_properties(listing, editable)?);
     Ok(body)
+}
+
+/// A blueprint whose properties we cannot read: refuse, nothing is created or
+/// rewritten on it.
+fn blueprint_unknown() -> ApiError {
+    ApiError::bad_request("CardTrader blueprint properties are unknown for this card.")
+        .with_code("cardtrader_blueprint_unknown")
 }
 
 /// The create body for any game: Pokémon's fixed properties, or the
@@ -322,9 +360,41 @@ pub fn product_body_for_game(listing: &Value, editable: Option<&[Value]>) -> Api
     }
     match editable {
         Some(editable) => product_body_for_blueprint(listing, editable),
-        None => Err(ApiError::bad_request("CardTrader blueprint properties are unknown for this card.")
-            .with_code("cardtrader_blueprint_unknown")),
+        None => Err(blueprint_unknown()),
     }
+}
+
+/// The properties a listing's product must carry, dispatched exactly as the
+/// create body is ([`product_body_for_game`]) so the two never disagree.
+fn facet_properties(
+    listing: &Value,
+    editable: Option<&[Value]>,
+) -> ApiResult<serde_json::Map<String, Value>> {
+    if listing_game(listing) == "pokemon" {
+        return Ok(pokemon_properties(listing));
+    }
+    match editable {
+        Some(editable) => blueprint_properties(listing, editable),
+        None => Err(blueprint_unknown()),
+    }
+}
+
+/// CardTrader `PUT /products/:id` body that rewrites what a product *is*: its
+/// condition, language and printing properties, and whether it is a slab. No
+/// price, quantity or description: those follow in the same request through
+/// [`price_body`] and the listing outbox.
+///
+/// `error_mode: "strict"` is what makes this safe to send: without it
+/// CardTrader answers 200 and silently drops a property it does not take on
+/// that product, which would leave the seller's listing describing a card
+/// CardTrader sells as another one. With it a refused facet answers 4xx and
+/// nothing changes ([docs/CARDTRADER_SELLER_SYNC.md]).
+pub fn facet_body(listing: &Value, editable: Option<&[Value]>) -> ApiResult<Value> {
+    Ok(json!({
+        "properties": Value::Object(facet_properties(listing, editable)?),
+        "graded": listing["graded"] == true,
+        "error_mode": "strict",
+    }))
 }
 
 /// What a CardTrader create did, as far as Pokoin can know.
@@ -638,6 +708,89 @@ mod tests {
         assert_eq!(product_body_for_game(&pokemon, None).unwrap()["properties"]["pokemon_language"], json!("it"));
         assert_eq!(ct_language("ZHT", &[json!("en"), json!("zh-TW")]).as_deref(), Some("zh-TW"));
         assert_eq!(ct_condition("LP", &[]).as_deref(), Some("Slightly Played"));
+    }
+
+    #[test]
+    fn facet_body_rewrites_the_product_properties_with_the_create_mapping() {
+        // Italian, reverse, first edition, signed, slabbed: every facet the
+        // product carries. A row reads snake_case, as the save hands it over.
+        let row = json!({"id": "6f1c", "card_id": "238", "marketplace_game": "pokemon", "condition": "LP",
+                         "language": "IT", "foil_state": "reverse", "first_edition": true, "signed": true,
+                         "altered": false, "graded": false, "price_pkn": 200, "quantity_available": 1});
+        let body = facet_body(&row, None).unwrap();
+        assert_eq!(
+            body,
+            json!({"properties": {"condition": "Slightly Played", "pokemon_language": "it",
+                                  "signed": true, "altered": false,
+                                  "pokemon_reverse": true, "pokemon_first_edition": true},
+                   "graded": false, "error_mode": "strict"})
+        );
+        // The properties are the create's, byte for byte, and nothing of the
+        // price, the quantity or the description rides along.
+        assert_eq!(body["properties"], product_body(&json!({
+            "id": "6f1c", "cardId": "238", "pricePkn": 200, "quantityAvailable": 1,
+            "condition": "LP", "language": "IT", "foilState": "reverse", "firstEdition": true, "signed": true,
+        })).unwrap()["properties"]);
+        for key in [
+            "price",
+            "quantity",
+            "blueprint_id",
+            "description",
+            "user_data_field",
+        ] {
+            assert!(body.get(key).is_none(), "{key}");
+        }
+        // A graded slab says so, and a facet left at its default still names it
+        // (a PUT of absolute values: omitting one would keep the old one).
+        let mut slab = row.clone();
+        slab["graded"] = json!(true);
+        let slab = facet_body(&slab, None).unwrap();
+        assert_eq!(slab["graded"], json!(true));
+        assert_eq!(slab["properties"]["condition"], json!("Slightly Played"));
+        let plain = json!({"card_id": "238", "price_pkn": 200, "quantity_available": 1});
+        assert_eq!(
+            facet_body(&plain, None).unwrap()["properties"],
+            json!({"condition": "Near Mint", "pokemon_language": "en", "signed": false, "altered": false})
+        );
+        // Another game: the blueprint's own property names and allowed values.
+        let listing = json!({"id": "l1", "card_id": "801106", "marketplace_game": "riftbound",
+                             "price_pkn": 240, "quantity_available": 1,
+                             "condition": "HP", "language": "KO", "foil_state": "foil"});
+        let body = facet_body(&listing, Some(&riftbound_props())).unwrap();
+        assert_eq!(
+            body["properties"],
+            json!({"condition": "Played", "riftbound_language": "kr", "riftbound_foil": true})
+        );
+        assert_eq!(
+            body["properties"],
+            product_body_for_game(&listing, Some(&riftbound_props())).unwrap()["properties"]
+        );
+        // A facet the blueprint cannot carry is refused before anything is
+        // sent, and so is a game whose blueprint we cannot read.
+        let mut italian = listing.clone();
+        italian["language"] = json!("IT");
+        let refused = facet_body(&italian, Some(&riftbound_props())).unwrap_err();
+        assert_eq!(refused.status, 400);
+        assert_eq!(
+            refused.code.as_deref(),
+            Some("cardtrader_facet_unsupported"),
+            "{refused:?}"
+        );
+        assert!(refused.message.contains("language"), "{refused:?}");
+        let mut first_edition = listing.clone();
+        first_edition["first_edition"] = json!(true);
+        let refused = facet_body(&first_edition, Some(&riftbound_props())).unwrap_err();
+        assert_eq!(
+            refused.code.as_deref(),
+            Some("cardtrader_facet_unsupported")
+        );
+        let unknown = facet_body(&listing, None).unwrap_err();
+        assert_eq!(
+            unknown.code.as_deref(),
+            Some("cardtrader_blueprint_unknown")
+        );
+        // Pokémon never needs the blueprint: its mapping is fixed.
+        assert!(facet_body(&row, Some(&riftbound_props())).is_ok());
     }
 
     #[test]
