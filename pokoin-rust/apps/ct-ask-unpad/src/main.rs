@@ -14,7 +14,9 @@ async fn main() {
     let code = match tool::parse(argv) {
         Ok(args) => match tool::run(&args).await {
             Ok(report) => {
-                for line in report.lines() {
+                // A write run prints each day as it commits, so what is left
+                // here is only the lines that have not gone out yet.
+                for line in report.pending() {
                     println!("{line}");
                 }
                 report.code()

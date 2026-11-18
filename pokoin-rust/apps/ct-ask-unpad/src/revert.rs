@@ -12,22 +12,29 @@ use crate::Report;
 
 pub async fn revert(conn: &mut PgConnection, backup: &str) -> Result<Report, String> {
     preflight::refuse_replica(conn, "revert").await?;
+    preflight::take_lock(conn).await?;
     preflight::require_backup(conn, backup, "revert").await?;
     let table = ident::qualified(backup);
 
     let mut report = Report::default();
     let days = preflight::backed_up_days(conn, backup).await?;
-    report.line(format!(
+    report.landed(format!(
         "revert: public.\"{backup}\" speaks for {} days",
         days.len()
     ));
     let mut restored = 0u64;
     let mut deleted = 0u64;
-    for day in &days {
-        let did = revert_day(conn, &table, day).await?;
+    for (done, day) in days.iter().enumerate() {
+        let did = match revert_day(conn, &table, day).await {
+            Ok(did) => did,
+            Err(error) => {
+                report.stopped("revert", days.len(), done, day);
+                return Err(error);
+            }
+        };
         restored += did.0;
         deleted += did.1;
-        report.line(format!(
+        report.landed(format!(
             "{day}  restored {:>8}  deleted {:>8}",
             did.0, did.1
         ));
@@ -38,7 +45,7 @@ pub async fn revert(conn: &mut PgConnection, backup: &str) -> Result<Report, Str
         sqlx::query(&sql::backup_rows(&table)),
     )
     .await?;
-    report.line(format!(
+    report.landed(format!(
         "revert: {restored} rows back to their old values, {deleted} backup rows removed, {left} left in the backup table"
     ));
     if left != 0 {

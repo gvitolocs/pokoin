@@ -1,5 +1,8 @@
 //! `apply` — the change itself: one `observed_day` per transaction, and every
 //! row is recorded in the backup table in the same transaction that writes it.
+//!
+//! Each day's line goes out as that day commits, so a run that stops partway
+//! says which days are already in the table and which one is not.
 
 use sqlx::postgres::PgConnection;
 use sqlx::{Connection, Transaction};
@@ -20,46 +23,67 @@ struct Day {
 
 pub async fn apply(conn: &mut PgConnection, backup: &str) -> Result<Report, String> {
     preflight::refuse_replica(conn, "apply").await?;
+    preflight::take_lock(conn).await?;
     let table = ident::qualified(backup);
     let created = preflight::create_backup(conn, backup).await?;
     let mut report = Report::default();
-    report.line(format!(
+    report.landed(format!(
         "apply: {} the backup table {table}",
         if created { "created" } else { "using" }
     ));
+    // Read before anything is written, because it counts the rows as they stand
+    // now. It changes no decision: every row of the window loses the pad.
+    let matched = query::native_ask_count(conn).await?;
+    report.landed(format!(
+        "rows whose padded price equals a Pokoin native listing price: {matched}; \
+         every one of them is corrected like the rest of the window"
+    ));
 
     let days = preflight::live_days(conn).await?;
-    report.line(format!("apply: {backup} — {} days in scope", days.len()));
+    report.landed(format!("apply: {backup} — {} days in scope", days.len()));
     let mut seen = 0i64;
     let mut recorded = 0i64;
     let mut written = 0i64;
-    for day in &days {
-        let rows = query::one_day_count(
+    for (done, day) in days.iter().enumerate() {
+        let rows = match query::one_day_count(
             conn,
             &format!("counting the rows of {day}"),
             sql::ROWS_OF_DAY,
             day,
         )
-        .await?;
-        let did = apply_day(conn, &table, backup, day).await?;
+        .await
+        {
+            Ok(rows) => rows,
+            Err(error) => {
+                report.stopped("apply", days.len(), done, day);
+                return Err(error);
+            }
+        };
+        let did = match apply_day(conn, &table, backup, day).await {
+            Ok(did) => did,
+            Err(error) => {
+                report.stopped("apply", days.len(), done, day);
+                return Err(error);
+            }
+        };
         seen += rows;
         recorded += i64::try_from(did.recorded).unwrap_or(i64::MAX);
         written += i64::try_from(did.written).unwrap_or(i64::MAX);
-        report.line(format!(
+        report.landed(format!(
             "{day}  rows {rows:>8}  recorded {:>8}  written {:>8}",
             did.recorded, did.written
         ));
     }
-    report.line(String::new());
-    report.line(format!(
+    report.landed(String::new());
+    report.landed(format!(
         "apply: {seen} rows read, {recorded} old values recorded in {backup}, {written} rows written"
     ));
     if written == 0 {
-        report.line(
+        report.landed(
             "nothing was written: the rows are already right or already recorded".to_string(),
         );
     } else {
-        report.line(format!("run verify --backup-table {backup} to prove it"));
+        report.landed(format!("run verify --backup-table {backup} to prove it"));
     }
     Ok(report)
 }

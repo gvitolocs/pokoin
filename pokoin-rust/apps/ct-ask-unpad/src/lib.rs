@@ -46,6 +46,11 @@ pub const DEFAULT_URL_ENV: &str = "MARKETPLACE_DATABASE_URL";
 /// Sample rows `plan` prints from each end of the price range.
 pub const SAMPLES: i64 = 5;
 
+/// The advisory-lock key that `apply` and `revert` take before any write: this
+/// tool's own name in ASCII, so nothing else can hold it by accident, and below
+/// `i64::MAX` so it is a positive bigint. One write run at a time, anywhere.
+pub const LOCK_KEY: i64 = 0x4354_4153_4B50_4144;
+
 /// Run `args`: read the URL from the named environment variable, then dispatch.
 /// Errors are redacted, so the URL cannot escape in a message.
 pub async fn run(args: &Args) -> Result<Report, String> {

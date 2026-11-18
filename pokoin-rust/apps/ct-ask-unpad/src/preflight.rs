@@ -24,6 +24,28 @@ pub async fn refuse_replica(conn: &mut PgConnection, stage: &str) -> Result<(), 
     Ok(())
 }
 
+/// One write run at a time, on this host and every other: `apply` and `revert`
+/// take [`crate::LOCK_KEY`] as a session lock before they write anything and
+/// hold it until the process ends. It is tried, never waited for, so a second
+/// terminal that starts while the first is still running is refused at once
+/// rather than queueing behind it and repeating the work.
+pub async fn take_lock(conn: &mut PgConnection) -> Result<(), String> {
+    let row = query::row(
+        conn,
+        "taking the run lock",
+        sqlx::query(sql::TRY_LOCK).bind(crate::LOCK_KEY),
+    )
+    .await?;
+    if !query::boolean(&row, "taken")? {
+        return Err(
+            "another apply or revert already holds the run lock: nothing was changed. \
+             Wait for that run to finish."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 /// The columns the backup table has to carry: the key and the six old values.
 /// `fixed_at` has a default and is not checked for, only for the record.
 pub fn expected_columns() -> Vec<&'static str> {
