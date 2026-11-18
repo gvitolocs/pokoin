@@ -9,7 +9,7 @@
  */
 
 import { formatPknNumber } from './pkn.js';
-import { HISTORY_PRESETS, stepHistoryPoints } from './portfolio-history.js';
+import { HISTORY_PRESETS, formatDayLabel, smoothHistoryBandPath, smoothHistoryPath } from './portfolio-history.js';
 import { formatAssetsValue } from './seller-currency.js';
 
 /** Tiles per side of the switch. */
@@ -148,8 +148,11 @@ export function moverTitle(mover, currency = '') {
 }
 
 /**
- * Sparkline geometry. The value is carried between sales, so the line steps —
- * the same reading as the portfolio chart above it. Flat series sit mid-box.
+ * Sparkline geometry, as SVG path `d` strings. The value is carried between
+ * sales and the curve is the monotone one the portfolio chart above uses: it
+ * passes through every point and never rises above or dips below the two it
+ * joins. Flat series sit mid-box. Each point keeps its day and price so a
+ * pointer over the tile can name the real value instead of a curve reading.
  */
 export function moverSpark(mover, size = MOVER_SPARK) {
   const series = mover?.series || [];
@@ -166,17 +169,83 @@ export function moverSpark(mover, size = MOVER_SPARK) {
   const yOf = (value) => (high === low
     ? height / 2
     : height - pad - ((value - low) / (high - low)) * plotHeight);
-  const coords = series.map((point, index) => ({ x: pad + index * step, y: yOf(point.pkn) }));
-  const stepped = stepHistoryPoints(coords);
-  const attr = (list) => list.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+  const coords = series.map((point, index) => ({
+    x: pad + index * step,
+    y: yOf(point.pkn),
+    day: point.day,
+    pkn: point.pkn,
+  }));
   const baseline = height - pad;
+  const edge = [
+    { x: coords[0].x, y: baseline },
+    { x: coords[coords.length - 1].x, y: baseline },
+  ];
   return {
-    line: attr(stepped),
-    area: attr([{ x: coords[0].x, y: baseline }, ...stepped, { x: coords[coords.length - 1].x, y: baseline }]),
+    line: smoothHistoryPath(coords),
+    area: smoothHistoryBandPath(coords, edge),
     points: coords,
     width,
     height,
     high,
     low,
   };
+}
+
+/**
+ * The sparkline day a pointer sits on: `ratio` is the 0..1 position across the
+ * tile's sparkline width and the answer is the nearest point by x, so the
+ * tooltip quotes a price that really happened that day. `currency` is the
+ * tile's display currency, the same unit the tile prices the slice in.
+ */
+export function moverSparkHover(spark, ratio, currency = '') {
+  const points = spark?.points || [];
+  if (!points.length) return null;
+  const width = numberOrZero(spark.width) || MOVER_SPARK.width;
+  const target = Math.min(1, Math.max(0, Number(ratio) || 0)) * width;
+  let index = 0;
+  let best = Infinity;
+  for (let i = 0; i < points.length; i += 1) {
+    const distance = Math.abs(numberOrZero(points[i].x) - target);
+    if (distance >= best) continue;
+    best = distance;
+    index = i;
+  }
+  const point = points[index];
+  return {
+    index,
+    x: numberOrZero(point.x),
+    y: numberOrZero(point.y),
+    day: point.day,
+    pkn: numberOrZero(point.pkn),
+    dateLabel: formatDayLabel(point.day),
+    valueLabel: moverAmount(point.pkn, currency),
+  };
+}
+
+/**
+ * Half the widest tip as a share of the spark box: past this share from either
+ * edge, centering the tip on the day would push it out of the box, so it pins
+ * to the nearer edge instead.
+ */
+const MOVER_SPARK_TIP_EDGE = 35;
+
+/**
+ * Where the day tip sits inside the sparkline's own box: anchored to the
+ * hovered day horizontally, clamped to the box's left and right edges, and
+ * vertically on the side away from the point — the top edge when the point is
+ * in the lower half, the bottom edge otherwise. The tip never leaves the box,
+ * so it never covers the tile's text above the sparkline.
+ */
+export function moverSparkTipPlacement(point, spark) {
+  const width = numberOrZero(spark?.width) || MOVER_SPARK.width;
+  const height = numberOrZero(spark?.height) || MOVER_SPARK.height;
+  const xPct = Math.min(100, Math.max(0, (numberOrZero(point?.x) / width) * 100));
+  const style = numberOrZero(point?.y) > height / 2 ? { top: '0px' } : { bottom: '0px' };
+  if (xPct <= MOVER_SPARK_TIP_EDGE) style.left = '0px';
+  else if (xPct >= 100 - MOVER_SPARK_TIP_EDGE) style.right = '0px';
+  else {
+    style.left = `${xPct}%`;
+    style.transform = 'translateX(-50%)';
+  }
+  return style;
 }

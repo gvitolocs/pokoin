@@ -105,8 +105,21 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
 });
 
 test('Dashboard history panel keeps chart frame; never draws a real fake series', () => {
-  // Multi-day polyline only; a single live day is a point — no flat underline.
-  assert.match(historySrc, /<Show when=\{chart\(\)\.hasLine\}><polyline class="seller-history-line"/);
+  // Multi-day smooth path only; a single live day is a point — no flat underline.
+  assert.match(historySrc, /<Show when=\{chart\(\)\.hasLine\}><path class="seller-history-line"/);
+  // The draw-in reveal rides a clip rect that rests at the full plot width, so
+  // nothing is hidden unless an animation is actually running.
+  assert.match(historySrc, /prefers-reduced-motion/);
+  assert.match(historySrc, /<clipPath id=\{REVEAL_CLIP\}>[\s\S]*?width=\{CHART_W\}/);
+  assert.match(historySrc, /clip-path=\{`url\(#\$\{REVEAL_CLIP\}\)`\}/);
+  assert.match(historySrc, /requestAnimationFrame\(step\)/);
+  assert.match(historySrc, /cancelAnimationFrame\(revealFrame\)/);
+  assert.match(historySrc, /onCleanup\(showWholeChart\)/);
+  // The end dot joins late; the hover dot and the tip are never hidden.
+  assert.match(historySrc, /ref=\{\(el\) => \{ endDotNode = el; \}\}/);
+  assert.match(historySrc, /class="seller-history-point is-hover" style=/);
+  // One dot under the cursor: the last-day dot yields while a hover is active.
+  assert.match(historySrc, /display: hovered\(\)\.dot \? 'none' : ''/);
   assert.match(historySrc, /seller-history-liquidity/);
   assert.match(historySrc, /seller-history-legend/);
   assert.match(historySrc, /seller-history-point/);
@@ -149,4 +162,38 @@ test('CardTrader 1-Day Ready stock shows as dashboard assets, never as listings'
   assert.match(viewSrc, /'has-1dr': oneDayReadyCards\(\) > 0/);
   // The desk never offers CardTrader as a target for a 1-Day Ready account.
   assert.match(targetsSrc, /data\?\.status\?\.connected === true && !ready1d/);
+});
+
+test('Top movers tiles never underline on hover', () => {
+  const css = read('../../../market/src/seller-home.css');
+  // The Top movers tile is one link; the global a:hover underline must not
+  // reach into it — the tile's own outline is the hover affordance.
+  const linkRule = css.match(/\.mover-tile-link:hover[^\0]*?\}/)?.[0] || '';
+  assert.match(linkRule, /:focus/);
+  assert.match(linkRule, /:active/);
+  assert.match(linkRule, /text-decoration: none/);
+  // The Trending rail tile keeps its no-underline hover.
+  assert.match(css, /\.seller-mover:hover \{[^}]*text-decoration: none/);
+});
+
+test('Top movers tiles have no native tooltip, one screen-reader sentence', () => {
+  const panelSrc = read('../components/dashboard/TopMoversPanel.jsx');
+  // The link carries the whole tile as an aria-label, not a title that
+  // repeats the visible text as a native tooltip over the change line.
+  const linkTag = panelSrc.match(/<a class="mover-tile-link"[^>]*>/)?.[0] || '';
+  assert.match(linkTag, /aria-label=\{moverTitle\(mover\(\), props\.currency\)\}/);
+  assert.doesNotMatch(linkTag, / title=/);
+  // Nothing inside the tile carries a title either.
+  assert.doesNotMatch(panelSrc, / title=/);
+});
+
+test('the movers spark tip lives inside the sparkline box', () => {
+  const panelSrc = read('../components/dashboard/TopMoversPanel.jsx');
+  const css = read('../../../market/src/seller-home.css');
+  // Placement is the pure helper: anchored to the day, clamped to the box
+  // edges, never over the copy above the sparkline.
+  assert.match(panelSrc, /moverSparkTipPlacement\(sparkPoint\(\), spark\(\)\)/);
+  const tipRule = css.match(/\.mover-spark-tip \{[^}]*\}/)?.[0] || '';
+  assert.doesNotMatch(tipRule, /bottom:/);
+  assert.doesNotMatch(tipRule, /top:/);
 });
