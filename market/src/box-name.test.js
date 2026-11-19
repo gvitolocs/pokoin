@@ -164,3 +164,50 @@ test('the refusal asks the question again even when it carries no examples', () 
   assert.equal(locationAskFromRefusal({ status: 409, body: { error: 'other' } }).needed, true, 'the question is asked regardless of the examples it brings');
   assert.equal(locationAskFromRefusal({ status: 409, body: {} }).needed, true, 'no examples still means the style was never chosen');
 });
+
+// The three cases the coordinator asked to see side by side: an ordinary box name, a
+// real numbered box, and a name that ends in a year. Each is one rule, not three.
+
+test('Focobomba 006 is ambiguous, and the desk asks for it as a new name', () => {
+  const reading = ambiguousBoxName('Focobomba 006');
+  assert.deepEqual(reading, {
+    raw: 'Focobomba 006',
+    asBox: 'Focobomba 006',
+    asStack: { box: 'Focobomba', stack: 6 },
+  });
+  assert.deepEqual(locationReadingLabels(reading), {
+    asBox: 'box Focobomba 006',
+    asStack: 'box Focobomba, stack 6',
+  });
+  assert.deepEqual(boxNameChoiceLabels(reading), {
+    asBox: 'Box "Focobomba 006"',
+    asStack: 'Box "Focobomba", stack 6',
+  });
+  assert.equal(shouldAskBoxName({ name: 'Focobomba 006', boxes: ['Vetra 2'], answered: {} }), true);
+  assert.equal(shouldAskBoxName({ name: 'Focobomba 006', boxes: ['Focobomba 006'], answered: {} }), false, 'already a box of theirs');
+});
+
+test('Box 6, a real numbered box, is ambiguous the same way and defaults to the whole name', () => {
+  const reading = ambiguousBoxName('Box 6');
+  assert.equal(reading.asBox, 'Box 6', 'no answer means the name as written');
+  assert.deepEqual(reading.asStack, { box: 'Box', stack: 6 });
+  assert.equal(boxNameAskTitle(reading), 'New box "Box 6"?');
+  assert.equal(shouldAskBoxName({ name: 'Box 6', boxes: ['A1', 'Vetra 2'], answered: {} }), true);
+  // Answered once, the whole name stays the default and nothing is asked again.
+  assert.equal(shouldAskBoxName({ name: 'Box 6', boxes: [], answered: { 'Box 6': 'box' } }), false);
+});
+
+test('Promo 2023 ends in a year and is still ambiguous, and a past 9999 clamps', () => {
+  const reading = ambiguousBoxName('Promo 2023');
+  assert.equal(reading.asBox, 'Promo 2023', 'the default stays the whole name');
+  assert.deepEqual(reading.asStack, { box: 'Promo', stack: 2023 }, 'the year is inside what a stack can hold');
+  assert.deepEqual(locationReadingLabels(reading), { asBox: 'box Promo 2023', asStack: 'box Promo, stack 2023' });
+  assert.equal(shouldAskBoxName({ name: 'Promo 2023', boxes: [], answered: {} }), true);
+  const clamped = ambiguousBoxName('Promo 20231');
+  assert.deepEqual(clamped, {
+    raw: 'Promo 20231',
+    asBox: 'Promo 20231',
+    asStack: { box: 'Promo', stack: 9999 },
+  }, 'stack 20231 is out of reach, so the reading says the largest stack there is');
+  assert.equal(locationReadingLabels(clamped).asStack, 'box Promo, stack 9999');
+});
