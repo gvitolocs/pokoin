@@ -983,8 +983,9 @@ pub fn series_start(rows: &Rows, book: &Book, today: &str) -> String {
 ///
 /// A slice key is a fact about a row — its blueprint, condition, language, foil and
 /// edition — never about a day, so it is built once per collection by
-/// [`collection_holdings`] and this reads what that produced. A month of days drawing
-/// the same keys again per day is the same work done thirty times over.
+/// [`collection_holdings`] and this reads what that produced. A window of up to
+/// [`HISTORY_DAYS`] days drawing the same keys again per day is the same work done
+/// four hundred times over.
 pub fn day_segments_on(
     holdings: &[(String, Vec<Holding>)],
     book: &Book,
@@ -2063,8 +2064,8 @@ mod tests {
     fn a_day_is_drawn_from_keyed_holdings_and_never_from_a_row() {
         // Not a timing test: `day_segments_on` has no way to ask what a slice key is,
         // because its arguments hold no row. A key is a fact about a card and is built
-        // once per collection, so a thirty-day series is thirty lookups of the same
-        // keys rather than thirty rebuilds of them.
+        // once per collection, so a series of a hundred days is a hundred lookups of
+        // the same keys rather than a hundred rebuilds of them.
         let collections = vec![
             collection("a", "A", "", vec![item("11")]),
             collection("b", "B", "", vec![item("11"), item("12")]),
