@@ -139,6 +139,21 @@ export function pendingDraft({ draft, applied }) {
 }
 
 /**
+ * The stack half of the split answer, which leaves with its new box in ONE
+ * patch. A seller's own stack edit may skip its write when the number already
+ * matches the current stack; here that skip would lose the number, because a
+ * location patch without a stack gets the stack from the box's stock instead.
+ * So the stack the seller named is always carried, even `6` onto a stack `6`.
+ * The position follows their own edit: with no divider it anchors at 1; with a
+ * divider the cursor of a box nobody has entered yet is the desk's to answer,
+ * so the patch carries no position and the one in force stays.
+ */
+export function stackSplitPatch({ wanted, size }) {
+  const stack = Math.min(9999, Math.max(1, Math.trunc(Number(wanted)) || 1));
+  return Number(size) === 1 ? { stack, startPosition: 1 } : { stack };
+}
+
+/**
  * The greyed state and screen-reader text of the Location field. Off means the
  * batch has no box: the field stays focusable and says how to switch it back on.
  */

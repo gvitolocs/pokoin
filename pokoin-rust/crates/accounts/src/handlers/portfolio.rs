@@ -17,14 +17,17 @@ use crate::domain::portfolio_catalog::{
     catalog_select_sql, is_undefined_table, listing_join_sql, react_image_urls, urls_join_sql,
 };
 use crate::domain::portfolio_history::{
-    add_utc_days, build_daily_series_with_segments, clean_days, field_i64, frozen_card_days,
-    frozen_segment_days, holding_slices, sold_price_book, stored_is_current, stored_is_fresh,
-    top_movers, utc_day_key_ms, wallet_series, Holding, Mover, PricePoint, CARDS_BY_BLUEPRINT_SQL,
-    HISTORY_DAYS, HOLDINGS_SQL, PRICE_BASIS, SERIES_REVISION, SOLD_BY_BLUEPRINT_SQL,
+    add_other_games_to_frozen_days, add_utc_days, build_daily_series_with_segments, clean_days,
+    coerce_date_millis, field_i64, frozen_card_days, frozen_segment_days, holding_slices,
+    needs_games_coverage, sold_price_book, stored_is_current, stored_is_fresh, top_movers,
+    utc_day_key_ms, wallet_series, Holding, Mover, PricePoint, CARDS_BY_BLUEPRINT_SQL,
+    GAMES_COVERAGE, HISTORY_DAYS, HOLDINGS_SQL, PRICE_BASIS, SERIES_REVISION,
+    SOLD_BY_BLUEPRINT_SQL,
 };
 use crate::domain::portfolio_segments::{
-    apply_catalog_rows, fit_segments_budget, game_of, merge_segment_labels, segment_defs,
-    segment_holdings, set_labels, POKEMON, SEGMENTS_REVISION, UNKNOWN_GAME,
+    apply_catalog_rows, fit_segments_budget, game_and_other_holdings, game_of,
+    merge_segment_labels, segment_defs, segment_holdings, set_labels, POKEMON, SEGMENTS_REVISION,
+    UNKNOWN_GAME,
 };
 use crate::error::{ApiError, Result};
 use crate::firestore::{Direction, DocData, Firestore, Query as FirestoreQuery, Value};
@@ -299,13 +302,50 @@ async fn read_card_book(
     ))
 }
 
-/// The stored series read, or `None` when there is nothing saved yet.
-async fn read_stored(firestore: &Firestore, uid: &str) -> Result<Option<Json>> {
+/// A stored history document: its fields, and the instant Firestore created it.
+///
+/// The create time is kept *beside* the JSON and never written into it, because it is
+/// what says whether the stored days were priced before the other games of a
+/// collection came from their own databases (see
+/// [`needs_games_coverage`]) and it is Firestore's own fact, not ours to store.
+#[derive(Debug, Clone)]
+struct StoredHistory {
+    doc: Json,
+    created_at_ms: Option<i64>,
+}
+
+impl StoredHistory {
+    /// Whether this document's frozen days still miss the other games.
+    fn needs_games_coverage(&self) -> bool {
+        needs_games_coverage(Some(&self.doc), self.created_at_ms)
+    }
+}
+
+/// The stored fields of a read document.
+fn stored_doc(stored: Option<&StoredHistory>) -> Option<&Json> {
+    stored.map(|stored| &stored.doc)
+}
+
+/// The stored series read, or `None` when there is nothing saved yet. The error is
+/// boxed: this signature is new, and `clippy::result_large_err` gates a returned
+/// `ApiError` by value.
+async fn read_stored(
+    firestore: &Firestore,
+    uid: &str,
+) -> std::result::Result<Option<StoredHistory>, Box<ApiError>> {
     Ok(firestore
         .doc(format!("{HISTORY}/{uid}"))
         .get()
-        .await?
-        .map(|document| document.to_plain_json()))
+        .await
+        .map_err(Box::new)?
+        .map(|document| {
+            let doc = document.to_plain_json();
+            let create_time = document.create_time.map(Json::String);
+            StoredHistory {
+                doc,
+                created_at_ms: coerce_date_millis(create_time.as_ref()),
+            }
+        }))
 }
 
 /// `readLedger(firestore, uid)` — newest first, best effort on the ordering.
@@ -371,15 +411,17 @@ async fn portfolio_history_inner(state: &DomainState, headers: &HeaderMap) -> Re
     let firestore = state.firestore()?;
     let now_ms = state.clock().now().timestamp_millis();
 
-    let stored = read_stored(&firestore, &uid).await?;
-    match history_plan(stored.as_ref(), now_ms) {
+    let stored = read_stored(&firestore, &uid)
+        .await
+        .map_err(|error| *error)?;
+    match plan_with_games_coverage(stored.as_ref(), now_ms) {
         Plan::ServeFresh => Ok(history_body(
-            stored_days(stored.as_ref()),
-            stored_labels(stored.as_ref()).as_ref(),
+            stored_days(stored_doc(stored.as_ref())),
+            stored_labels(stored_doc(stored.as_ref())).as_ref(),
         )),
         Plan::ServeStaleAndRefresh => {
-            let days = stored_days(stored.as_ref());
-            let labels = stored_labels(stored.as_ref());
+            let days = stored_days(stored_doc(stored.as_ref()));
+            let labels = stored_labels(stored_doc(stored.as_ref()));
             spawn_history_refresh(state, &uid, stored);
             Ok(history_body(days, labels.as_ref()))
         }
@@ -419,6 +461,19 @@ fn history_plan(stored: Option<&Json>, now_ms: i64) -> Plan {
     Plan::ComputeNow
 }
 
+/// [`history_plan`] with the one exception the other games need: a stored series
+/// whose frozen days still miss them is never fresh enough to serve alone, because
+/// serving it is what would keep them missing. The answer is still the stored days,
+/// so this only turns [`Plan::ServeFresh`] into [`Plan::ServeStaleAndRefresh`] and
+/// every document that carries the marker plans exactly as it did.
+fn plan_with_games_coverage(stored: Option<&StoredHistory>, now_ms: i64) -> Plan {
+    let plan = history_plan(stored_doc(stored), now_ms);
+    if plan == Plan::ServeFresh && stored.is_some_and(StoredHistory::needs_games_coverage) {
+        return Plan::ServeStaleAndRefresh;
+    }
+    plan
+}
+
 /// The days of a stored series, in the shape the client reads.
 fn stored_days(stored: Option<&Json>) -> Vec<Json> {
     clean_days(stored.and_then(|doc| doc.get("days")))
@@ -452,11 +507,13 @@ fn history_body(days: Vec<Json>, labels: Option<&Json>) -> Response {
 async fn recompute_series(
     state: &DomainState,
     uid: &str,
-    stored: Option<&Json>,
+    stored: Option<&StoredHistory>,
 ) -> Result<Option<(Vec<Json>, Json)>> {
     let now_ms = state.clock().now().timestamp_millis();
     let today_key = utc_day_key_ms(now_ms);
     let firestore = state.firestore()?;
+    let backfill = stored.is_some_and(StoredHistory::needs_games_coverage);
+    let stored = stored_doc(stored);
 
     let card_book = match state.marketplace_db() {
         Ok(db) => read_card_book(state, &db, uid, GameScope::AllGames).await,
@@ -472,7 +529,14 @@ async fn recompute_series(
     let movements = read_ledger(&firestore, uid).await;
     let balance = read_balance(&firestore, uid).await;
     let wallet = wallet_series(&movements, balance, &today_key);
-    let frozen = frozen_card_days(stored, &today_key);
+    let mut frozen = frozen_card_days(stored, &today_key);
+    if backfill {
+        // The stored days of this one document are the ones that predate the other
+        // games' pricing; they are raised here, once, and the write below marks the
+        // document so no later request repeats it.
+        let (pokemon, other_games) = game_and_other_holdings(&held_segments, POKEMON);
+        add_other_games_to_frozen_days(&mut frozen, &other_games, &pokemon, &book);
+    }
     let frozen_segments = frozen_segment_days(stored, &today_key);
     let days = build_daily_series_with_segments(
         &wallet,
@@ -503,6 +567,10 @@ async fn recompute_series(
                 .string("priceBasis", PRICE_BASIS)
                 .int("seriesRevision", SERIES_REVISION)
                 .int("segmentsRevision", SEGMENTS_REVISION)
+                // Every series this code writes prices all games and has had its
+                // frozen days raised, so the marker goes on with it: a document
+                // that carries it is never backfilled again.
+                .int("gamesCoverage", GAMES_COVERAGE)
                 .string("updatedAt", utc_iso(now_ms)),
             false,
         )
@@ -551,7 +619,7 @@ fn claim_uid<'a>(claims: &'a Mutex<HashSet<String>>, uid: &str) -> Option<Refres
 
 /// Recompute behind the response, at most once per uid at a time. A request
 /// that finds the uid already refreshing just serves its stored series.
-fn spawn_history_refresh(state: &DomainState, uid: &str, stored: Option<Json>) {
+fn spawn_history_refresh(state: &DomainState, uid: &str, stored: Option<StoredHistory>) {
     let Some(claim) = claim_uid(refresh_claims(), uid) else {
         return;
     };
@@ -1644,6 +1712,105 @@ mod tests {
             set["label"],
             json!("Outcast"),
             "the name stored beside the days titles the line"
+        );
+    }
+}
+
+/// [`plan_with_games_coverage`] — the one case where a stored series is not served
+/// just because it was written a minute ago.
+#[cfg(test)]
+mod games_coverage_plan {
+    use super::*;
+    use crate::domain::portfolio_history::OTHER_GAMES_LIVE_MS;
+
+    /// One minute after the other games' pricing went live: the first moment a
+    /// document can be fresh and still hold days its collection stored without them.
+    const NOW: i64 = OTHER_GAMES_LIVE_MS + 60_000;
+
+    /// A series written a minute ago by the current code, created at `created_at_ms`
+    /// and carrying the coverage marker when `covered`.
+    fn stored(covered: bool, created_at_ms: Option<i64>) -> StoredHistory {
+        let mut doc = json!({
+            "priceBasis": PRICE_BASIS,
+            "seriesRevision": SERIES_REVISION,
+            "updatedAt": utc_iso(NOW - 60_000),
+            "days": [{
+                "date": "2026-11-17", "currencyPkn": 100, "cardsValuePkn": 40, "cardsHeld": 2
+            }],
+        });
+        if covered {
+            doc["gamesCoverage"] = json!(GAMES_COVERAGE);
+        }
+        StoredHistory { doc, created_at_ms }
+    }
+
+    const BEFORE: i64 = OTHER_GAMES_LIVE_MS - 1;
+
+    #[test]
+    fn a_fresh_series_from_before_the_other_games_answers_while_it_is_raised() {
+        let stored = stored(false, Some(BEFORE));
+        // Freshness alone would serve the Pokémon-only days on every visit from here
+        // on, which is what keeps them missing the other games.
+        assert_eq!(history_plan(Some(&stored.doc), NOW), Plan::ServeFresh);
+        assert_eq!(
+            plan_with_games_coverage(Some(&stored), NOW),
+            Plan::ServeStaleAndRefresh,
+            "the stored days still answer, and the recompute runs behind them"
+        );
+    }
+
+    #[test]
+    fn a_series_that_carries_the_marker_is_fresh_again() {
+        let stored = stored(true, Some(BEFORE));
+        assert_eq!(
+            plan_with_games_coverage(Some(&stored), NOW),
+            Plan::ServeFresh,
+            "the write that raised the days is also what makes them servable"
+        );
+    }
+
+    #[test]
+    fn a_series_written_after_the_other_games_is_fresh_as_it_was() {
+        for (case, created_at_ms) in [
+            ("at the deploy instant", Some(OTHER_GAMES_LIVE_MS)),
+            ("a day later", Some(OTHER_GAMES_LIVE_MS + 86_400_000)),
+            ("with no create time", None),
+            ("with an unreadable create time", None),
+        ] {
+            let stored = stored(false, created_at_ms);
+            assert_eq!(
+                plan_with_games_coverage(Some(&stored), NOW),
+                history_plan(Some(&stored.doc), NOW),
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_other_plan_moves() {
+        // Nothing stored, so nothing to serve: the recompute is the answer either way.
+        assert_eq!(plan_with_games_coverage(None, NOW), Plan::ComputeNow);
+
+        // A stale document that predates the other games was already refreshing.
+        let stale = {
+            let mut stored = stored(false, Some(BEFORE));
+            stored.doc["updatedAt"] = json!(utc_iso(NOW - 20 * 60_000));
+            stored
+        };
+        assert_eq!(
+            plan_with_games_coverage(Some(&stale), NOW),
+            history_plan(Some(&stale.doc), NOW),
+        );
+
+        // An older revision is not a series this backfill may touch.
+        let outdated = {
+            let mut stored = stored(false, Some(BEFORE));
+            stored.doc["seriesRevision"] = json!(SERIES_REVISION - 1);
+            stored
+        };
+        assert_eq!(
+            plan_with_games_coverage(Some(&outdated), NOW),
+            Plan::ComputeNow
         );
     }
 }

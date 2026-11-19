@@ -2928,8 +2928,13 @@ export function requestWpknExchange({ quoteId, direction, toAddress }, token) {
   });
 }
 
-/** Whole-PKN site balance transfer to another Pokoin username. */
-export function transferAccountBalance({ recipientUsername, amountPkn }, token) {
+/**
+ * Whole-PKN site balance transfer to another Pokoin username.
+ * `requestId` names this intent: sending the same id again answers with the
+ * first request instead of moving the PKN once more, so pass the id of the
+ * intent the user is confirming, not one made per attempt.
+ */
+export function transferAccountBalance({ recipientUsername, amountPkn, requestId }, token) {
   return getJson('/api/transfer-account-balance', {
     method: 'POST',
     headers: {
@@ -2939,12 +2944,16 @@ export function transferAccountBalance({ recipientUsername, amountPkn }, token) 
     body: JSON.stringify({
       recipientUsername: String(recipientUsername || '').trim().toLowerCase(),
       amountPkn: Math.round(Number(amountPkn) || 0),
+      requestId,
     }),
   });
 }
 
-/** Site PKN payout to a 0x address from the bank wallet. */
-export function requestPknWithdraw({ toAddress, amountPkn }, token) {
+/**
+ * Site PKN payout to a 0x address from the bank wallet.
+ * `requestId` names this intent, exactly as in `transferAccountBalance`.
+ */
+export function requestPknWithdraw({ toAddress, amountPkn, requestId }, token) {
   return getJson('/api/request-pkn-withdraw', {
     method: 'POST',
     headers: {
@@ -2954,6 +2963,7 @@ export function requestPknWithdraw({ toAddress, amountPkn }, token) {
     body: JSON.stringify({
       toAddress: String(toAddress || '').trim(),
       amountPkn: Math.round(Number(amountPkn) || 0),
+      requestId,
     }),
   });
 }
