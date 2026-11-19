@@ -21,11 +21,12 @@ use crate::error::ApiError;
 use crate::firestore::{DocData, Document, Firestore, Query as FirestoreQuery, Value};
 
 use super::collection::iso_timestamp;
-use super::marketplace_game::normalize_game;
+use super::marketplace_game::{is_pokemon_ingest_game, normalize_ingest_game};
 use super::portfolio_history::{
     add_utc_days, condition_key, holding_slices, language_key, last_sold_for, num, round2,
     sold_slice_key, value_holdings_on, PricePoint, HISTORY_DAYS, PRICE_BASIS,
 };
+use super::portfolio_segments::POKEMON;
 
 /// `ApiError` is wide, so every fallible function here hands the refusal over
 /// boxed and the handler answers from the unboxed error, as
@@ -119,6 +120,18 @@ fn items_shape_error() -> Box<ApiError> {
     Box::new(
         ApiError::bad_request("The cards of a collection must be a list.")
             .with_code("collection_item_invalid"),
+    )
+}
+
+/// A facet of one card the price book has no slice for. The card is named by its
+/// position, like [`item_error`], because a list of 300 is found line by line.
+fn facet_error(facet: &str, index: usize) -> Box<ApiError> {
+    Box::new(
+        ApiError::bad_request(format!(
+            "Collection card {} has a {facet} the price book has no slice for.",
+            index + 1
+        ))
+        .with_code("collection_item_invalid"),
     )
 }
 
@@ -254,6 +267,62 @@ pub fn is_collection_id(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
+/// Where a card of a collection was read from: a `?action=save` body, named by its
+/// position, or a stored document. A body refuses anything the price book has no
+/// slice for; a document keeps it, so a list written under an older or wider rule
+/// still draws its line — held and unpriced — instead of losing the card.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Where {
+    Body(usize),
+    Stored,
+}
+
+impl Where {
+    /// The refusal of a card that is not a card at all: a body names the position,
+    /// which is the only way a seller finds it in a list of 300; a stored document
+    /// has no position, and [`Item::stored`] drops the refusal either way.
+    fn unusable(self) -> Box<ApiError> {
+        item_error(match self {
+            Where::Body(index) => index,
+            Where::Stored => 0,
+        })
+    }
+
+    /// The refusal this source answers for a facet it cannot use. Only a body
+    /// refuses: a stored card is kept whatever it says.
+    fn refused(self, facet: &str, kept: impl FnOnce() -> String) -> Result<String> {
+        match self {
+            Where::Body(index) => Err(facet_error(facet, index)),
+            Where::Stored => Ok(kept()),
+        }
+    }
+}
+
+/// The game an item is stored, answered and priced by: the id the platform's own
+/// game table carries, so a listing written `one-piece` and one written
+/// `One Piece` find the `one_piece` database, and Pokémon when the client says
+/// nothing. A game the table does not list has no database to price from: a body
+/// is refused, and a stored row is kept because
+/// [`crate::domain::portfolio_segments::game_of`] reads it as `unknown` — held and
+/// unpriced, never looked up in the Pokémon catalog by a card id that only looks
+/// alike.
+fn sanitize_game(value: Option<&Json>, at: Where) -> Result<String> {
+    let raw = text_of(value);
+    if clean_text(&raw).is_empty() {
+        return Ok(POKEMON.to_string());
+    }
+    let game = normalize_ingest_game(&raw);
+    if !game.is_empty() {
+        return Ok(game);
+    }
+    // The compacted alias list folds an accent to an underscore, so the platform's
+    // own game misses its own alias; the name as written still matches.
+    if is_pokemon_ingest_game(&raw.to_ascii_lowercase()) {
+        return Ok(POKEMON.to_string());
+    }
+    at.refused("game", || clean_text(&raw))
+}
+
 // ---------------------------------------------------------------------------
 // Items
 // ---------------------------------------------------------------------------
@@ -276,15 +345,31 @@ pub struct Item {
 }
 
 impl Item {
-    /// A client or stored item, or the error naming which one was refused.
+    /// One card as a `?action=save` body names it, or the error naming which card
+    /// was refused.
     pub fn from_input(value: &Json, index: usize) -> Result<Self> {
         let object = value.as_object().ok_or_else(|| item_error(index))?;
-        let quantity =
-            sanitize_quantity(object.get("quantity")).ok_or_else(|| item_error(index))?;
+        Self::read(object, Where::Body(index))
+    }
+
+    /// One card as a stored document holds it. `None` only for a card that cannot
+    /// be drawn at all — no id, no usable quantity — never for a facet: a list
+    /// written before a rule existed keeps every line it has.
+    pub fn stored(value: &Json) -> Option<Self> {
+        value
+            .as_object()
+            .and_then(|object| Self::read(object, Where::Stored).ok())
+    }
+
+    fn read(object: &Map<String, Json>, at: Where) -> Result<Self> {
+        let card_id = sanitize_card_id(
+            object.get("cardId").or_else(|| object.get("card_id")),
+        )
+        .ok_or_else(|| at.unusable())?;
+        let quantity = sanitize_quantity(object.get("quantity")).ok_or_else(|| at.unusable())?;
         Ok(Self {
-            game: normalize_game(&text_of(object.get("game"))),
-            card_id: sanitize_card_id(object.get("cardId").or_else(|| object.get("card_id")))
-                .ok_or_else(|| item_error(index))?,
+            game: sanitize_game(object.get("game"), at)?,
+            card_id,
             condition: sanitize_facet(object.get("condition"), DEFAULT_CONDITION, condition_key),
             language: sanitize_language(object.get("language")),
             reverse: bool_of(object, "reverse"),
@@ -410,14 +495,17 @@ fn stored_iso(document: &Document, field: &str) -> String {
         .unwrap_or_default()
 }
 
-/// A stored document as a collection. A card the sanitiser refuses is dropped one
-/// by one rather than failing the read: a document written before a limit existed
-/// must still show the seller the cards in it that are fine.
+/// A stored document as a collection. A card with no id or no usable quantity is
+/// dropped one by one rather than failing the read: a document written before a
+/// limit existed must still show the seller the cards in it that are fine. Every
+/// other oddity of a stored card — a game the platform stopped listing, a facet no
+/// slice carries — is kept, so the line stays on the graph at nothing rather than
+/// disappearing.
 pub fn collection_from_document(document: &Document) -> Collection {
     let items = match document.get("items") {
         Some(Value::Array(values)) => values
             .iter()
-            .filter_map(|value| Item::from_input(&value.to_plain_json(), 0).ok())
+            .filter_map(|value| Item::stored(&value.to_plain_json()))
             .collect(),
         _ => Vec::new(),
     };
@@ -844,7 +932,7 @@ pub fn answer_body(
 mod tests {
     use super::*;
     use crate::domain::portfolio_history::sold_price_book;
-    use crate::domain::portfolio_segments::POKEMON;
+    use crate::domain::portfolio_segments::{game_of, POKEMON, UNKNOWN_GAME};
     use crate::firestore::FieldValue;
 
     fn input(card: &str, quantity: i64) -> Json {
@@ -1051,6 +1139,67 @@ mod tests {
             )
             .unwrap()
             .first_edition
+        );
+    }
+
+    #[test]
+    fn a_game_is_the_tables_id_on_a_write_and_kept_verbatim_on_a_read() {
+        // Absent, empty and the Pokémon aliases are all Pokémon.
+        for game in [
+            None,
+            Some(&json!("")),
+            Some(&json!("   ")),
+            Some(&json!("pokemon")),
+            Some(&json!("Pokémon")),
+            Some(&json!("pkmn")),
+        ] {
+            assert_eq!(
+                Item::from_input(&json!({ "cardId": "42", "game": game }), 0)
+                    .unwrap()
+                    .game,
+                POKEMON,
+                "{game:?} is Pokémon"
+            );
+        }
+
+        // An alias of a listed game is the id its database is resolved for.
+        for (written, id) in [("One Piece", "one_piece"), ("ygo", "yugioh")] {
+            assert_eq!(
+                Item::from_input(&json!({ "cardId": "42", "game": written }), 0)
+                    .unwrap()
+                    .game,
+                id,
+                "{written} is {id}"
+            );
+        }
+
+        // A game the platform lists nowhere has no database to price from, so the
+        // write that would store it is refused by card and by facet.
+        for game in ["Not A Game", "keyforge"] {
+            let error = Item::from_input(&json!({ "cardId": "42", "game": game }), 1).unwrap_err();
+            assert_eq!(error.code(), Some("collection_item_invalid"), "{game}");
+            assert!(
+                error.message().contains("game") && error.message().contains("2"),
+                "the card and the facet are named: {}",
+                error.message()
+            );
+        }
+
+        // A stored card of such a game is kept, and its row is `unknown`: held and
+        // unpriced, never looked up in the Pokémon catalog by a card id that only
+        // looks alike.
+        let kept = Item::stored(&json!({ "cardId": "42", "game": "Not A Game" })).unwrap();
+        assert_eq!(kept.game, "Not A Game");
+        assert_eq!(game_of(&kept.row()), UNKNOWN_GAME);
+        let rows = Rows::new(&[collection("c1", "Vault", "2026-09-01T10:00:00", vec![kept])]);
+        let book = book_of(&[sold_row("42", "777", false, "2026-10-01", 50.0)]);
+        assert_eq!(
+            day_segments(&rows, &book, "2026-10-08"),
+            Some(json!({
+                "date": "2026-10-08",
+                "segments": { "collection:c1": [0, 0, 1] },
+            })),
+            "held at nothing, while a Pokémon card of the same id has sold"
         );
     }
 

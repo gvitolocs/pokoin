@@ -229,7 +229,10 @@ An item's facets are keys into that book, so they are stored as the book is file
 `Near Mint`, `nm` and `NM` are the one `NM` slice, `English`, `english` and `en` the
 one `EN` one, `ja` and `Japanese` the one `JP`, and a `game` may be written as its id
 or the display name the marketplace uses. Absent means `NM` / `EN`, Pokémon. A `game`
-the platform does not list is read as Pokémon, as every other route reads it; a
+the platform's own game table does not list is a 400 on the save: it has no database
+to price from, so there is no honest series to draw. A list that stored such a game
+before it left the table keeps its line — the row reads as `unknown`, held at nothing,
+and is never looked up in the Pokémon tables by a card id that only looks alike. A
 `language` it has no code for keys nothing, and that card comes back held and
 unpriced rather than priced off some other card's sales.
 
