@@ -246,7 +246,8 @@ impl Market for DatabaseMarket<'_> {
 /// This is the whole market read of a request: the Pokémon catalog pass and the sold
 /// book that prices it, with every other game's own database through
 /// [`price_other_games`] beside both — the same three steps as the main series, run
-/// against each other. [`POKEMON_READ_TIMEOUT`] bounds the two Pokémon queries
+/// against each other. [`pokemon_card_ids`] is what decides whether the Pokémon half
+/// happens at all: a list of another game's cards asks neither of its queries. [`POKEMON_READ_TIMEOUT`] bounds the two Pokémon queries
 /// together and the other games share their own window, so the wait this route can
 /// add to a request is eight seconds whatever the market is doing. The rows are
 /// returned as they were read: dropping the outliers and keying them into a book is
@@ -262,6 +263,16 @@ async fn read_collection_book(market: &impl Market, rows: &mut Rows) -> PriceRea
     if rows.rows().is_empty() {
         return PriceRead::complete(Vec::new());
     }
+    let ids = pokemon_card_ids(rows.rows());
+    // No Pokémon card among them means no Pokémon query of any kind, and that is not
+    // merely the empty round trip saved: a deployment whose Pokémon pool is down or
+    // unconfigured has nothing to fail here, and a Riftbound seller must not be told
+    // their series is missing because a database they never use was unwell.
+    if ids.is_empty() {
+        let mut sold = Vec::new();
+        market.other_games(rows.rows_mut(), &mut sold).await;
+        return PriceRead::complete(sold);
+    }
     if !market.is_configured() {
         tracing::warn!("portfolio collections have no marketplace database to price from");
         return PriceRead::unavailable();
@@ -276,7 +287,6 @@ async fn read_collection_book(market: &impl Market, rows: &mut Rows) -> PriceRea
     // read waiting on the games the way a join that finishes both does — a game that
     // spent its whole window took part of the Pokémon one with it and expired a market
     // that had answered in time.
-    let ids = pokemon_card_ids(rows.rows());
     let pokemon = async {
         let by_card = match tokio::time::timeout_at(deadline, market.pokemon_blueprints(ids)).await
         {
@@ -973,6 +983,144 @@ mod tests {
         assert!(
             body["days"].as_array().is_some_and(|days| !days.is_empty()),
             "a market that answered draws a series: {body}"
+        );
+    }
+
+    /// The market of a list that holds no Pokémon card at all. It records every call
+    /// it was asked for, fails both Pokémon reads, and prices the other games like
+    /// [`FakeMarket`] does. The failing Pokémon half is the point: an answer that shows
+    /// a price and reports no missing series can only have come from never asking it.
+    struct WatchingMarket {
+        asked: Arc<std::sync::Mutex<Vec<&'static str>>>,
+    }
+
+    impl WatchingMarket {
+        fn new() -> Self {
+            Self {
+                asked: Arc::new(std::sync::Mutex::new(Vec::new())),
+            }
+        }
+
+        fn names(&self) -> Vec<String> {
+            self.asked
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|each| (*each).to_string())
+                .collect()
+        }
+    }
+
+    impl Market for WatchingMarket {
+        fn is_configured(&self) -> bool {
+            true
+        }
+
+        fn pokemon_blueprints(
+            &self,
+            _card_ids: Vec<i64>,
+        ) -> BoxFuture<'_, std::result::Result<HashMap<String, String>, String>> {
+            let asked = self.asked.clone();
+            Box::pin(async move {
+                asked.lock().unwrap().push("blueprints");
+                Err("the Pokémon catalog did not answer".to_string())
+            })
+        }
+
+        fn pokemon_sold(
+            &self,
+            _blueprints: Vec<i64>,
+        ) -> BoxFuture<'_, std::result::Result<Vec<Json>, String>> {
+            let asked = self.asked.clone();
+            Box::pin(async move {
+                asked.lock().unwrap().push("sold");
+                Err("the Pokémon sold book did not answer".to_string())
+            })
+        }
+
+        fn other_games<'a>(
+            &'a self,
+            rows: &'a mut Vec<Json>,
+            sold: &'a mut Vec<Json>,
+        ) -> BoxFuture<'a, ()> {
+            Box::pin(async move {
+                for row in rows.iter_mut() {
+                    if game_of(row) != POKEMON {
+                        set_blueprint(row, "1777");
+                    }
+                }
+                sold.push(json!({
+                    "game": "riftbound",
+                    "blueprint_id": "1777",
+                    "condition": "NM",
+                    "language": "en",
+                    "reverse": false,
+                    "first_edition": false,
+                    "graded": false,
+                    "observed_day": "2026-10-04",
+                    "median_pkn": 40.0,
+                }));
+            })
+        }
+    }
+
+    /// One list of a single card of another game — no Pokémon item for the catalog to
+    /// look up, which is what decides the shape of the read.
+    fn a_riftbound_only() -> Vec<Collection> {
+        vec![Collection {
+            id: "a1".into(),
+            name: "Vault".into(),
+            items: vec![item(json!({ "cardId": "11", "game": "riftbound" }))],
+            created_at: String::new(),
+            updated_at: String::new(),
+        }]
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_list_of_another_game_never_asks_the_pokemon_database() {
+        // Neither of the two Pokémon queries is made for a list that holds no Pokémon
+        // card: not the empty round trip, and — because the window and the failure
+        // reporting hang off them — not the Pokémon database's health either. The
+        // seller's own game is still priced.
+        let market = WatchingMarket::new();
+        let collections = a_riftbound_only();
+        let mut rows = Rows::new(&collections);
+        let started = tokio::time::Instant::now();
+        let read = read_collection_book(&market, &mut rows).await;
+
+        assert_eq!(
+            market.names(),
+            Vec::<String>::new(),
+            "a Pokémon query was asked for a list with no Pokémon card"
+        );
+        assert_eq!(
+            started.elapsed(),
+            std::time::Duration::ZERO,
+            "the Pokémon window was spent on a list that asks nothing of it"
+        );
+        assert!(
+            !read.unavailable,
+            "a market this list never needed was reported as one that failed"
+        );
+        assert_eq!(rows.rows()[0]["blueprint_id"], json!("1777"), "{rows:?}");
+
+        let body = price_body(
+            &rows,
+            &read.sold,
+            &collections,
+            "2026-10-05",
+            read.unavailable,
+            None,
+        );
+        assert_eq!(body["seriesError"], Json::Null, "{body}");
+        assert_eq!(
+            body["collections"][0]["items"][0]["pricePkn"],
+            json!(40),
+            "the seller's own game did not price: {body}"
+        );
+        assert!(
+            body["days"].as_array().is_some_and(|days| !days.is_empty()),
+            "a read that answered drew no series: {body}"
         );
     }
 
