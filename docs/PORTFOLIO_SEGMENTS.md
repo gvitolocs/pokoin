@@ -211,16 +211,28 @@ four echoed in `limits`. A write's `id` is a list this seller already has or the
 of it is a 404, a name another of their lists carries is a 409, a missing name or an
 over-budget list is a 400 that says which limit it hit, and an item whose `cardId` is
 not a positive integer or whose quantity is out of range is a 400 naming its index.
-A `cardId` is canonicalised before anything else reads it: the leading zeros come off,
-so `0012` is stored, answered, merged and looked up as `12` rather than becoming two
-lines of one card that each price. The read of a stored list merges by the same rule a
-write uses: a document written before some rule existed still answers one line per
-slice, with the copies added.
+A `cardId` is canonicalised before anything else reads it: the leading zeros come
+off, so `0012` is stored, answered, merged and looked up as `12` rather than
+becoming two lines of one card that each price. The read of a stored list merges by
+the same rule a write uses: a document written before some rule existed still
+answers one line per slice, with the copies added.
 `?action=` outside those two writes is a 400 too: there is no third verb. An unknown
 id and someone else's id answer byte-identically, so no read of the store can tell a
-list that exists from one that does not. A name the store reserves for its own markers
-— `__` on both ends, as `__namespace__` is spelled — is refused by that same 404 out of
-the id shape, before the store is asked about it at all.
+list that exists from one that does not. A name the store reserves for its own
+markers — `__` on both ends, as `__namespace__` is spelled — is refused by that same
+404 out of the id shape, before the store is asked about it at all.
+
+**A write is one Firestore transaction.** Its reads — the document being replaced
+and every other list of this seller — its checks (ownership, the name, the cap) and
+its write commit together, so two saves that would each be legal alone cannot both
+land: whichever commits second either reads the other's document or has its commit
+aborted for having read a collection that has since moved, and retries from its
+reads. That is also why a replace cannot bring back a list someone deleted in
+between: the read that proved it existed belongs to the transaction that is aborted,
+so the retry reads nothing and answers 404. The answer of a committed save is that
+same read with the write applied in memory — never a second listing read after the
+commit — so a store that fails one call later cannot turn a write that did happen
+into an error the client would retry.
 
 `priceBasis` is `"ct-last-sold"`, the same as `SERIES_REVISION`'s basis: the last
 CardTrader sold median of the exact slice, carried forward, with the 20× outlier

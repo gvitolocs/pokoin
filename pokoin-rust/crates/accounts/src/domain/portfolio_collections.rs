@@ -18,7 +18,9 @@ use std::collections::HashMap;
 use serde_json::{json, Map, Value as Json};
 
 use crate::error::ApiError;
-use crate::firestore::{DocData, Document, Firestore, Query as FirestoreQuery, Value};
+use crate::firestore::{
+    new_document_id, DocData, Document, FieldValue, Firestore, Query as FirestoreQuery, Value,
+};
 
 use super::collection::iso_timestamp;
 use super::marketplace_game::{is_pokemon_ingest_game, normalize_ingest_game};
@@ -33,6 +35,11 @@ use super::portfolio_segments::POKEMON;
 /// boxed and the handler answers from the unboxed error, as
 /// [`crate::handlers::poko_market`]'s boxed tools do.
 type Result<T> = std::result::Result<T, Box<ApiError>>;
+
+/// [`Firestore::run_transaction`] fixes its body's error to an unboxed `ApiError`,
+/// so a write's body and its helpers answer in that and the caller boxes what comes
+/// back. The refusals are moved out of their boxes here, never rebuilt.
+type Tx<T> = std::result::Result<T, ApiError>;
 
 /// Firestore collection of the seller's own card lists: one document per
 /// collection, found by `uid`.
@@ -672,85 +679,216 @@ pub async fn list_collections(firestore: &Firestore, uid: &str) -> Result<Vec<Co
                 .limit(READ_LIMIT),
         )
         .await?;
-    let mut collections: Vec<Collection> = documents
-        .iter()
-        .map(collection_from_document)
+    Ok(sorted_collections(
+        documents.iter().map(collection_from_document),
+    ))
+}
+
+/// The order every answer of this route lists the seller's lists in, and the filter
+/// that drops a document with no id. Both the store read and a write's in-memory
+/// after-state go through it, so a committed save answers the same order a re-read
+/// would.
+fn sorted_collections(items: impl Iterator<Item = Collection>) -> Vec<Collection> {
+    let mut collections: Vec<Collection> = items
         .filter(|collection| !collection.id.is_empty())
         .collect();
+    sort_collections(&mut collections);
+    collections
+}
+
+fn sort_collections(collections: &mut [Collection]) {
     collections.sort_by(|a, b| {
         a.created_at
             .cmp(&b.created_at)
             .then_with(|| a.id.cmp(&b.id))
     });
-    Ok(collections)
 }
 
-/// Write one collection, answering its id. `id` replaces in place, keeping the
-/// creation time it was written with.
+/// The document path of one list — what a transaction reads and writes it at.
+fn doc_path(id: &str) -> String {
+    format!("{COLLECTION}/{id}")
+}
+
+/// Why this save cannot be written, decided from the lists the transaction read.
+/// The replaced document is not compared against itself: a rename keeps one list.
+fn check_save(collections: &[Collection], existing: Option<&Document>, save: &Save) -> Tx<()> {
+    let replaced = existing.map(Document::id);
+    for collection in collections {
+        if replaced.as_deref() == Some(collection.id.as_str()) {
+            continue;
+        }
+        if names_collide(&collection.name, &save.name) {
+            return Err(*name_taken_error());
+        }
+    }
+    if existing.is_none() && collections.len() >= MAX_COLLECTIONS {
+        return Err(*limit_error());
+    }
+    Ok(())
+}
+
+/// The document a write commits, read back as a collection without another trip to
+/// the store: the same [`doc_data`] bytes go to the store and into the answer, so a
+/// committed save answers exactly what a re-read would — same timestamps, same
+/// merged lines, same reader.
+fn written_collection(
+    id: &str,
+    uid: &str,
+    name: &str,
+    items: &[Item],
+    created_at_ms: i64,
+    updated_at_ms: i64,
+) -> Collection {
+    let data = doc_data(uid, name, items, created_at_ms, updated_at_ms);
+    let mut fields = Map::new();
+    for (key, value) in &data.fields {
+        if let FieldValue::Value(value) = value {
+            fields.insert(key.clone(), value.to_json());
+        }
+    }
+    collection_from_document(&Document {
+        name: doc_path(id),
+        create_time: None,
+        update_time: None,
+        fields: Some(fields),
+    })
+}
+
+/// The lists of the transaction's read with this write applied in memory — a
+/// replace in its place, a new list where the creation order puts it.
+fn place_written(collections: &mut Vec<Collection>, written: Collection) {
+    let id = written.id.clone();
+    match collections.iter_mut().find(|slot| slot.id == id) {
+        Some(slot) => *slot = written,
+        None => {
+            collections.push(written);
+            sort_collections(collections);
+        }
+    }
+}
+
+/// Write one collection and answer the seller's lists as they are *after* it, with
+/// the id written. `id` replaces in place, keeping the creation time it was written
+/// with.
+///
+/// The reads (the list being replaced and every other list of this seller), the
+/// checks (ownership, the name, the cap) and the write are **one transaction**, so
+/// two saves that would each fit alone cannot both land: whichever commits second
+/// sees the other's document or has its commit aborted for reading a collection that
+/// moved, retries from the top, and is refused. A replace of a document someone
+/// deleted in between is the same story — its read is inside the transaction, so the
+/// retry finds nothing and answers the 404 rather than resurrecting the list.
+///
+/// Nothing is read again after the commit: the answer is the state the transaction
+/// read, with this write applied to it in memory, so a store that fails one call
+/// later cannot turn a write that did happen into an error the client would retry.
 pub async fn apply_save(
     firestore: &Firestore,
     uid: &str,
     save: &Save,
     now_ms: i64,
-) -> Result<String> {
-    let existing: Option<Document> = match save.id.as_deref() {
-        None => None,
-        Some(id) => Some(
-            owned_document(
-                firestore
-                    .collection_doc(COLLECTION, id)
-                    .get()
-                    .await?
-                    .as_ref(),
-                uid,
-            )
-            .cloned()
-            .ok_or_else(missing_error)?,
-        ),
-    };
-    let collections = list_collections(firestore, uid).await?;
-    let replaced = existing.as_ref().map(Document::id);
-    for collection in &collections {
-        if replaced.as_deref() == Some(collection.id.as_str()) {
-            continue;
-        }
-        if names_collide(&collection.name, &save.name) {
-            return Err(name_taken_error());
-        }
-    }
-    if existing.is_none() && collections.len() >= MAX_COLLECTIONS {
-        return Err(limit_error());
-    }
-    let created_at_ms = existing
-        .as_ref()
-        .and_then(|document| document.get_timestamp_millis("createdAt"))
-        .unwrap_or(now_ms);
-    let data = doc_data(uid, &save.name, &save.items, created_at_ms, now_ms);
-    match existing {
-        Some(document) => {
-            let id = document.id();
-            firestore
-                .collection_doc(COLLECTION, &id)
-                .set(data, false)
-                .await?;
-            Ok(id)
-        }
-        None => Ok(firestore.collection(COLLECTION).add(data).await?.id()),
-    }
+) -> Result<(Vec<Collection>, String)> {
+    let firestore = firestore.clone();
+    let uid = uid.to_string();
+    let save = save.clone();
+    firestore
+        .run_transaction(move |transaction| {
+            let uid = uid.clone();
+            let save = save.clone();
+            Box::pin(async move {
+                let existing = match save.id.as_deref() {
+                    None => None,
+                    Some(id) => {
+                        let reference = transaction.doc(&doc_path(id));
+                        let document = transaction.get_doc(&reference).await?;
+                        Some(
+                            owned_document(document.as_ref(), &uid)
+                                .cloned()
+                                .ok_or_else(|| *missing_error())?,
+                        )
+                    }
+                };
+                let documents = transaction
+                    .get_query(
+                        &FirestoreQuery::collection(COLLECTION)
+                            .where_eq("uid", uid.as_str())
+                            .limit(READ_LIMIT),
+                    )
+                    .await?;
+                let mut collections =
+                    sorted_collections(documents.iter().map(collection_from_document));
+                check_save(&collections, existing.as_ref(), &save)?;
+                let created_at_ms = existing
+                    .as_ref()
+                    .and_then(|document| document.get_timestamp_millis("createdAt"))
+                    .unwrap_or(now_ms);
+                let data = doc_data(&uid, &save.name, &save.items, created_at_ms, now_ms);
+                let id = match &existing {
+                    Some(document) => {
+                        let id = document.id();
+                        let reference = transaction.doc(&doc_path(&id));
+                        transaction.set(&reference, data, false)?;
+                        id
+                    }
+                    None => {
+                        let id = new_document_id();
+                        let reference = transaction.doc(&doc_path(&id));
+                        transaction.create(&reference, data)?;
+                        id
+                    }
+                };
+                place_written(
+                    &mut collections,
+                    written_collection(&id, &uid, &save.name, &save.items, created_at_ms, now_ms),
+                );
+                Ok((collections, id))
+            })
+        })
+        .await
+        .map_err(Box::new)
 }
 
-/// Delete one collection. An id that is not this seller's answers the same 404 as
-/// an id that never was.
-pub async fn delete_collection(firestore: &Firestore, uid: &str, id: &str) -> Result<()> {
+/// Delete one collection and answer the lists that remain. An id that is not this
+/// seller's answers the same 404 as an id that never was, and the read that decides
+/// it is inside the transaction: a list deleted after that read is not quietly
+/// written back, the commit aborts and the retry answers 404.
+pub async fn delete_collection(
+    firestore: &Firestore,
+    uid: &str,
+    id: &str,
+) -> Result<Vec<Collection>> {
     if !is_collection_id(id) {
         return Err(missing_error());
     }
-    let reference = firestore.collection_doc(COLLECTION, id);
-    if owned_document(reference.get().await?.as_ref(), uid).is_none() {
-        return Err(missing_error());
-    }
-    reference.delete().await?;
-    Ok(())
+    let firestore = firestore.clone();
+    let uid = uid.to_string();
+    let id = id.to_string();
+    firestore
+        .run_transaction(move |transaction| {
+            let uid = uid.clone();
+            let id = id.clone();
+            Box::pin(async move {
+                let reference = transaction.doc(&doc_path(&id));
+                let document = transaction.get_doc(&reference).await?;
+                if owned_document(document.as_ref(), &uid).is_none() {
+                    return Err(*missing_error());
+                }
+                let documents = transaction
+                    .get_query(
+                        &FirestoreQuery::collection(COLLECTION)
+                            .where_eq("uid", uid.as_str())
+                            .limit(READ_LIMIT),
+                    )
+                    .await?;
+                let mut collections =
+                    sorted_collections(documents.iter().map(collection_from_document));
+                transaction.delete(&reference);
+                collections.retain(|collection| collection.id != id);
+                Ok(collections)
+            })
+        })
+        .await
+        .map_err(Box::new)
 }
 
 // ---------------------------------------------------------------------------

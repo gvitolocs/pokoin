@@ -171,10 +171,34 @@ fn key_of(name: &str) -> String {
 }
 
 /// A Firestore that holds what it was told, so the list a save answers with is the
-/// list the next read finds.
+/// list the next read finds. It answers the transaction verbs the writes use —
+/// `portfolio_collections_router` scripts the read sets and the aborts, this one is
+/// only the shelf the lists sit on while the prices are checked.
 fn script_firestore() -> (pokoin_accounts::state::DomainState, Store) {
     let store: Store = Arc::new(Mutex::new(HashMap::new()));
     let transport = ScriptedTransport::new();
+
+    transport.on(":beginTransaction", |_| {
+        HttpResponse::json(200, json!({ "transaction": "txn-1" }))
+    });
+    let reads = store.clone();
+    transport.on(":batchGet", move |request| {
+        let asked: Json = serde_json::from_slice(&request.body).unwrap_or(Json::Null);
+        let store = reads.lock().unwrap();
+        let rows: Vec<Json> = asked["documents"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .map(|name| name.as_str().unwrap_or_default())
+            .map(|name| match store.get(&key_of(name)) {
+                Some(document) => json!({ "found": document }),
+                None => json!({}),
+            })
+            .collect();
+        HttpResponse::json(200, Json::Array(rows))
+    });
+    transport.on(":rollback", |_| HttpResponse::json(200, json!({})));
 
     let queries = store.clone();
     transport.on(":runQuery", move |request| {

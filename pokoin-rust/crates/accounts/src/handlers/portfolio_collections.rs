@@ -22,12 +22,11 @@ use serde_json::Value as Json;
 
 use crate::domain::portfolio_collections::{
     answer_body, apply_save, collection_days, delete_body_id, delete_collection, last_day,
-    list_collections, set_blueprint, Book, Rows, Save,
+    list_collections, set_blueprint, Book, Collection, Rows, Save,
 };
 use crate::domain::portfolio_history::{sold_price_book, utc_day_key_ms, SOLD_BY_BLUEPRINT_SQL};
 use crate::domain::portfolio_segments::{game_of, POKEMON};
 use crate::error::ApiError;
-use crate::firestore::Firestore;
 use crate::sql::{row_text, SqlParam};
 use crate::state::DomainState;
 
@@ -177,22 +176,23 @@ async fn read_collection_book(state: &DomainState, rows: &mut Rows) -> Book {
 }
 
 /// The answer of every method of this route: the seller's lists, each card priced
-/// as of the last day of its series, and the series of every list.
+/// as of the last day of its series, and the series of every list. The lists are the
+/// ones the caller read — or, after a write, the ones its own transaction read with
+/// the write applied — because a store that fails after a committed write must not
+/// turn a 200 into an error.
 async fn answer(
     state: &DomainState,
-    firestore: &Firestore,
-    uid: &str,
+    collections: &[Collection],
     saved: Option<&str>,
 ) -> Result<Response> {
-    let collections = list_collections(firestore, uid).await?;
-    let mut rows = Rows::new(&collections);
+    let mut rows = Rows::new(collections);
     let book = read_collection_book(state, &mut rows).await;
     let today = utc_day_key_ms(state.clock().now().timestamp_millis());
     let days = collection_days(&rows, &book, &today);
     let day = last_day(&days, &today);
     Ok(json_cached(
         StatusCode::OK,
-        answer_body(&collections, &rows, &book, &days, &day, saved),
+        answer_body(collections, &rows, &book, &days, &day, saved),
         "private, no-store",
     ))
 }
@@ -210,31 +210,29 @@ async fn collections_inner(
     let action = query.get("action").map(String::as_str).unwrap_or("");
     // Only a POST writes, and only these two actions do; a read — HEAD included,
     // which axum routes to the GET handler as the history route does — carries no
-    // action at all.
-    let saved = match (method.as_str(), action) {
-        ("GET" | "HEAD", "") => None,
+    // action at all. A write answers from the state its transaction read, so the
+    // list the seller just stored is in the answer without a second read of the
+    // store after the commit.
+    let (collections, saved) = match (method.as_str(), action) {
+        ("GET" | "HEAD", "") => (list_collections(&firestore, uid).await?, None),
         ("POST", "save") => {
             let save = Save::from_body(&parse_body(body))?;
-            Some(
-                apply_save(
-                    &firestore,
-                    uid,
-                    &save,
-                    state.clock().now().timestamp_millis(),
-                )
-                .await?,
+            let (collections, id) = apply_save(
+                &firestore,
+                uid,
+                &save,
+                state.clock().now().timestamp_millis(),
             )
+            .await?;
+            (collections, Some(id))
         }
         ("POST", "delete") => {
             let id = delete_body_id(&parse_body(body))?;
-            delete_collection(&firestore, uid, &id).await?;
-            None
+            (delete_collection(&firestore, uid, &id).await?, None)
         }
         _ => return Err(unknown_action_error()),
     };
-    // The answer is built *after* the write, so a save shows the list the seller
-    // just stored rather than the one before it. Nothing of the series is stored.
-    answer(state, &firestore, uid, saved.as_deref()).await
+    answer(state, &collections, saved.as_deref()).await
 }
 
 /// `GET /api/marketplace-portfolio-collections` reads; `POST ?action=save` and
