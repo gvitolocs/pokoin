@@ -400,7 +400,7 @@ pub async fn portfolio_collections_other() -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::portfolio_collections::{Collection, Item};
+    use crate::domain::portfolio_collections::{collections_json, Collection, Item};
     use crate::domain::portfolio_history::holding_slices;
     use serde_json::json;
 
@@ -461,6 +461,71 @@ mod tests {
                 "a card with no blueprint files no price: {key}"
             );
         }
+    }
+
+    /// The resolution of point 17's weak test, run through the function the route
+    /// actually calls: the catalog answered one card of this list and not the other,
+    /// and the Riftbound card of a resolved public id is not in its answer at all.
+    /// What the three cards then do — in the series and in the list — is the claim
+    /// that used to be made by a test that wrote the blueprints out by hand.
+    #[test]
+    fn the_catalogs_answer_prices_the_series_and_nothing_else() {
+        let collections = vec![Collection {
+            id: "a1".into(),
+            name: "Vault".into(),
+            items: vec![
+                item(json!({ "cardId": "11" })),
+                item(json!({ "cardId": "12" })),
+                item(json!({ "cardId": "11", "game": "riftbound" })),
+            ],
+            created_at: String::new(),
+            updated_at: String::new(),
+        }];
+        let mut rows = Rows::new(&collections);
+        let by_card = pokemon_blueprints(&[json!({ "card_id": "11", "blueprint_id": "500" })]);
+        apply_pokemon_blueprints(rows.rows_mut(), &by_card);
+        let book = sold_price_book(&[json!({
+            "game": "pokemon",
+            "card_id": "11",
+            "blueprint_id": "500",
+            "condition": "NM",
+            "language": "en",
+            "reverse": false,
+            "first_edition": false,
+            "graded": false,
+            "observed_day": "2026-10-04",
+            "median_pkn": 30.0,
+        })]);
+
+        let days = collection_days(&rows, &book, "2026-10-05");
+        assert_eq!(
+            days[0]["segments"]["collection:a1"],
+            json!([30, 1, 3]),
+            "the two cards no catalog named are held beside the one that prices: {days:?}"
+        );
+
+        let answered = collections_json(&collections, &rows, &book, "2026-10-05");
+        let items = answered[0]["items"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(items.len(), 3, "{answered:?}");
+        assert_eq!(items[0]["pricePkn"], json!(30));
+        assert_eq!(
+            items[1]["pricePkn"],
+            Json::Null,
+            "a card the catalog does not know is unpriced, not free"
+        );
+        assert_eq!(
+            items[2]["pricePkn"],
+            Json::Null,
+            "and a Riftbound card never takes the Pokémon price of its colliding id"
+        );
+        assert_eq!(
+            pokemon_card_ids(rows.rows()),
+            vec![11, 12],
+            "the Pokémon catalog is asked for both of its cards and not for the third"
+        );
     }
 
     #[tokio::test]

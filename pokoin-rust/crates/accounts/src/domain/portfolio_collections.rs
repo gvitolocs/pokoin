@@ -2168,8 +2168,11 @@ mod tests {
 
     #[test]
     fn an_unresolved_game_card_holds_without_pricing() {
-        // A card of another game whose own database failed: its blueprint is
-        // cleared, so a Pokémon sold price of the same public id cannot reach it.
+        // The domain's half: a row whose blueprint is empty is filed under a key no
+        // sold price reaches, so it is held and unpriced rather than priced off the
+        // card of another game that shares its public id. Which rows are empty, and
+        // why, is the route's decision and is tested through the function that makes
+        // it — `portfolio_collections`' own `handlers` test.
         let foreign = Item::from_input(&json!({ "cardId": "11", "game": "riftbound" }), 0).unwrap();
         let collections = vec![collection("a", "A", "", vec![foreign, item("11")])];
         let mut rows = Rows::new(&collections);

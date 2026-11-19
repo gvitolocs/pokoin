@@ -469,6 +469,59 @@ async fn post_raw(
     )
 }
 
+/// A request whose bearer is the exact token a test built, because the claim that is
+/// being refused is inside it. `body` is sent verbatim.
+async fn call_with_bearer(
+    app: &axum::Router,
+    method: Method,
+    uri: &str,
+    body: Option<&str>,
+    bearer: &str,
+) -> (StatusCode, Json, HashMap<String, String>) {
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::AUTHORIZATION, format!("Bearer {bearer}"));
+    let request = match body {
+        Some(body) => {
+            builder = builder.header(header::CONTENT_TYPE, "application/json");
+            builder
+                .body(Body::from(body.to_string()))
+                .expect("a test request is well formed")
+        }
+        None => builder
+            .body(Body::empty())
+            .expect("a test request is well formed"),
+    };
+    let response = app
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the router answers");
+    let status = response.status();
+    let headers = response
+        .headers()
+        .iter()
+        .map(|(name, value)| {
+            (
+                name.as_str().to_lowercase(),
+                String::from_utf8_lossy(value.as_bytes()).to_string(),
+            )
+        })
+        .collect();
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("the body reads")
+        .to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Json::Null),
+        headers,
+    )
+}
+
 /// The names the answer lists, in the order it lists them.
 fn names_of(body: &Json) -> Vec<String> {
     body["collections"]
@@ -811,6 +864,62 @@ async fn a_list_you_do_not_own_is_not_there() {
         names_of(&answer),
         ["Vault"],
         "answer={answer}: a refused save stores nothing"
+    );
+}
+
+/// A token whose signature this project trusts and whose claims name no account, on
+/// all three verbs: the answer is the verifier's 401, and the store is never reached.
+/// A list stored under the empty uid would belong to the next subject-less token to
+/// ask for it.
+#[tokio::test]
+async fn a_token_that_names_no_account_is_refused_before_the_store() {
+    // A list stored under the empty uid would belong to the next subject-less token to
+    // ask for it, so such a token is refused instead of listed. What the test pins is
+    // *who* refuses it: the verifier rejects a token with no subject before
+    // [`pokoin_accounts::handlers::portfolio_collections`] ever sees the claims, which
+    // is why the route's own `owner_uid` guard is the second door rather than the only
+    // one. Both are tested; only the verifier's is reachable from a request.
+    let (state, _store, transport) = store_state(vec![stored("mine", "", "Vault", "2026-09-01T10:00:00Z")]);
+    let app = router(state);
+    let mut claims = id_token_claims(SELLER, "ash@pokoin.com", chrono::Utc::now().timestamp());
+    claims["sub"] = json!("");
+    claims["user_id"] = json!("");
+    let nameless = sign_id_token(claims);
+
+    for (case, method, body) in [
+        ("read", Method::GET, None),
+        (
+            "save",
+            Method::POST,
+            Some(r#"{"name":"Vault","items":[{"cardId":"11","quantity":1}]}"#),
+        ),
+        ("delete", Method::POST, Some(r#"{"id":"mine"}"#)),
+    ] {
+        let uri = match method {
+            Method::POST if case == "save" => "/api/marketplace-portfolio-collections?action=save",
+            Method::POST => "/api/marketplace-portfolio-collections?action=delete",
+            _ => "/api/marketplace-portfolio-collections",
+        };
+        let (status, answer, headers) = call_with_bearer(&app, method, uri, body, &nameless).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{case} answer={answer}");
+        assert_eq!(
+            answer["error"],
+            "Invalid or expired sign-in token.",
+            "{case}: the verifier refuses it, not this route's uid guard"
+        );
+        assert_eq!(
+            headers.get("cache-control").map(String::as_str),
+            Some("private, no-store"),
+            "{case}"
+        );
+    }
+
+    // Neither the seeded nameless document nor any list of anyone else was read, and
+    // nothing was written: a token of no subject reaches no document.
+    assert_eq!(
+        store_calls(&transport),
+        Vec::<String>::new(),
+        "a uid-less token reaches no document"
     );
 }
 
