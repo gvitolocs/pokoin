@@ -44,6 +44,9 @@ pub(crate) struct AppState {
     pub(crate) meili_ms: Arc<AtomicU64>,
     pub(crate) sql_ms: Arc<AtomicU64>,
     pub(crate) errors: Arc<AtomicU64>,
+    /// How much of the catalogue pool search-page may hold at once, and what it
+    /// counted while waiting (`search_page::default_slots`).
+    pub(crate) search_page_gate: Arc<pokoin_db::Gate>,
     pub(crate) booted: Instant,
 }
 
@@ -175,6 +178,14 @@ async fn serve_listener(
 }
 
 fn new_state(config: Config, booted: Instant) -> anyhow::Result<AppState> {
+    // 0 in the setting means "derive it": half the catalogue pool per statement
+    // one search-page request can run at once.
+    let slots = if config.search_page_slots == 0 {
+        search_page::default_slots(config.db_pool_max)
+    } else {
+        config.search_page_slots
+    };
+    let wait = Duration::from_millis(config.search_page_wait_ms);
     Ok(AppState {
         config,
         commerce: Arc::new(RwLock::new(None)),
@@ -188,6 +199,7 @@ fn new_state(config: Config, booted: Instant) -> anyhow::Result<AppState> {
         meili_ms: Arc::new(AtomicU64::new(0)),
         sql_ms: Arc::new(AtomicU64::new(0)),
         errors: Arc::new(AtomicU64::new(0)),
+        search_page_gate: Arc::new(pokoin_db::Gate::new(slots, wait)),
         booted,
     })
 }
@@ -337,6 +349,9 @@ async fn metrics(State(state): State<AppState>) -> Json<Value> {
         "gameDbPoolSize": game_size,
         "gameDbPoolIdle": game_idle,
         "gameDbPoolMax": pokoin_db::satellite_budget().max_connections,
+        "searchPageSlots": state.search_page_gate.slots(),
+        "searchPageWaited": state.search_page_gate.waited(),
+        "searchPageShed": state.search_page_gate.shed(),
     }))
 }
 
@@ -788,6 +803,112 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 
+    /// The core router over a catalogue pool that cannot be reached: every
+    /// database route fails on its own, so a 503 that answers at once and
+    /// carries `retry-after` can only have come from the gate.
+    async fn dead_pool_router(slots: u32) -> (Router, AppState) {
+        let mut state = new_state(Config::from_env(), Instant::now()).unwrap();
+        state.search_page_gate = Arc::new(pokoin_db::Gate::new(slots, Duration::from_millis(50)));
+        *state.db.write().await = Some(lazy_pool("postgres://test@127.0.0.1:1/test", 1).unwrap());
+        (router(state.clone()), state)
+    }
+
+    async fn send_get(app: &Router, path: &str) -> axum::response::Response {
+        use axum::body::Body;
+        use axum::extract::Request;
+        use tower::ServiceExt;
+        app.clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+    }
+
+    /// The gate sheds search-page only, and says so in a way the other routes
+    /// never answer with.
+    #[tokio::test]
+    async fn a_full_gate_sheds_search_page_and_touches_nothing_else() {
+        let (app, state) = dead_pool_router(1).await;
+        let held = state.search_page_gate.hold().await;
+        let shed = send_get(&app, "/api/marketplace-search-page?query=charizard&limit=3").await;
+        assert_eq!(shed.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(shed.headers()["retry-after"], "2");
+        assert_eq!(shed.headers()["cache-control"], "no-store");
+        let body = axum::body::to_bytes(shed.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert!(body["error"].is_string(), "{body}");
+        // Card-page is not the gate's to answer: it reaches its own handler,
+        // which reports what the dead pool said without a `retry-after`.
+        for path in [
+            "/api/marketplace-card-page?cardId=12",
+            "/api/marketplace-card-tiles?ids=12",
+            "/api/marketplace-list?kind=set&key=base-set",
+        ] {
+            let response = send_get(&app, path).await;
+            assert!(
+                response.headers().get("retry-after").is_none(),
+                "{path} answered {status} with a gate retry-after",
+                status = response.status(),
+            );
+        }
+        // One shed request, waited for one slot, counted once on /metrics.
+        assert_eq!(state.search_page_gate.shed(), 1);
+        assert_eq!(state.search_page_gate.waited(), 1);
+        let metrics = send_get(&app, "/metrics").await;
+        let body = axum::body::to_bytes(metrics.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let metrics: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(metrics["searchPageSlots"], 1);
+        assert_eq!(metrics["searchPageWaited"], 1);
+        assert_eq!(metrics["searchPageShed"], 1);
+        drop(held);
+        // The gate admits again as soon as the slot comes back.
+        let again = send_get(&app, "/api/marketplace-search-page?query=charizard&limit=3").await;
+        assert!(
+            again.headers().get("retry-after").is_none(),
+            "{}",
+            again.status()
+        );
+    }
+
+    #[test]
+    fn only_search_page_holds_a_gate_slot() {
+        // The gate is the search-page route's own door: no other read path may
+        // take or shed on it, or a slow search would hide behind someone
+        // else's 503.
+        for (file, gated) in [
+            ("src/search_page.rs", true),
+            ("src/catalog_api.rs", false),
+            ("src/lists.rs", false),
+            ("src/suggest.rs", false),
+            ("src/read_cache.rs", false),
+            ("src/rails.rs", false),
+        ] {
+            let path = format!("{}/{}", env!("CARGO_MANIFEST_DIR"), file);
+            let text =
+                std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{path}: {error}"));
+            assert_eq!(
+                text.contains("search_page_gate"),
+                gated,
+                "{file} gate reference"
+            );
+        }
+    }
+
+    #[test]
+    fn half_the_pool_per_parallel_statement_is_the_gate() {
+        assert_eq!(search_page::default_slots(16), 2, "the Pi's catalogue pool");
+        assert_eq!(search_page::default_slots(6), 1, "an overflow pod");
+        assert_eq!(
+            search_page::default_slots(0),
+            1,
+            "never a gate that admits nothing"
+        );
+        assert_eq!(search_page::default_slots(32), 4);
+    }
+
     #[tokio::test]
     async fn full_router_builds() {
         let read = lazy_pool("postgres://test@127.0.0.1:1/test", 6).unwrap();
@@ -815,6 +936,10 @@ mod tests {
             meili_ms: Arc::new(AtomicU64::new(0)),
             sql_ms: Arc::new(AtomicU64::new(0)),
             errors: Arc::new(AtomicU64::new(0)),
+            search_page_gate: Arc::new(pokoin_db::Gate::new(
+                search_page::default_slots(Config::from_env().db_pool_max),
+                Duration::from_millis(1500),
+            )),
             booted: Instant::now(),
         })
         .merge(pokoin_accounts::router(

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use pokoin_search::{
     clean_print_language, clean_text, page_body, rank_rows,
@@ -58,12 +58,123 @@ pub async fn search_page(
     let Some(pool)=crate::catalog_api::game_pool(&state,&game).await else {
         return crate::catalog_api::response(StatusCode::SERVICE_UNAVAILABLE,json!({"error":"Marketplace database unavailable."}),"no-store")
     };
-    if game!="pokemon" || product_search_only || product_type=="jumbo" || query.is_empty() {
-        return sql_search_page(wanted,&pool,&query,&game,&product_type,product_search_only,&lang,limit,offset,include_facets).await
+    // One gate slot per request, held for the whole database section. It sits
+    // behind `read_cache`, so a Redis hit or a coalesced follower never reaches
+    // it. Satellite games are not gated: they search their own small pool
+    // (`catalog_api::game_pool`), not the catalogue pool the gate protects.
+    let work = database_work(
+        &state,
+        &pool,
+        wanted,
+        &query,
+        &game,
+        &product_type,
+        product_search_only,
+        &lang,
+        limit,
+        offset,
+        include_facets,
+        &print_language,
+    );
+    if game != "pokemon" {
+        return work.await;
+    }
+    match state.search_page_gate.run(work).await {
+        Ok(response) => response,
+        Err(busy) => shed(busy.waited_ms, state.search_page_gate.slots()),
+    }
+}
+
+/// The peak number of statements one search-page request runs at once on
+/// `state.db`: `catalog_api::cards` fans four reads out in one `tokio::join!`
+/// (`catalog_api.rs:71-76` — `cache_prices` plus the three `optional_rows` for
+/// art shades, visual themes and language scans). `catalog_api::localize` joins
+/// three (`catalog_api.rs:395-399`), `sql_search_page`'s id list is one
+/// (`search_page.rs:390`) and `facets` is one (`search_page.rs:428-430`), so
+/// four is the most this route can hold at a time.
+pub(crate) const PARALLEL_STATEMENTS: u32 = 4;
+
+/// What the gate sizes itself with when `POKOIN_RUST_SEARCH_PAGE_SLOTS` is 0 or
+/// unset: half the catalogue pool divided by the statements one request runs at
+/// once, so search-page can never take more than half the pool no matter how
+/// many of it arrive together. The Pi's pool of 16 gives 2 slots, an overflow pod
+/// with pool 6 gives 1, and a pool too small to divide gives one rather than a
+/// door that admits nothing.
+pub(crate) const fn default_slots(pool_max: u32) -> u32 {
+    let slots = pool_max / 2 / PARALLEL_STATEMENTS;
+    if slots == 0 {
+        1
+    } else {
+        slots
+    }
+}
+
+/// A shed request: `catalog_api::failure`'s shape, never stored anywhere, and
+/// told when to come back. `catalog query failed` is not logged here — that
+/// line means the database refused, and this request never reached it.
+fn shed(waited_ms: u64, slots: u32) -> Response {
+    tracing::warn!(
+        route = "search-page",
+        waited_ms,
+        slots,
+        "search-page shed: gate full"
+    );
+    let mut response = crate::catalog_api::response(
+        StatusCode::SERVICE_UNAVAILABLE,
+        json!({"error":"Marketplace search temporarily unavailable."}),
+        "no-store",
+    );
+    response
+        .headers_mut()
+        .insert(header::RETRY_AFTER, HeaderValue::from_static("2"));
+    response
+}
+
+/// Everything after the pool is chosen: the SQL-only path, then the Redis
+/// candidate fetch and every statement that follows it. One function so the gate
+/// takes one slot per request and two slots are never held by the same request.
+async fn database_work(
+    state: &AppState,
+    pool: &sqlx::PgPool,
+    wanted: pokoin_api_common::compact::Wanted,
+    query: &str,
+    game: &str,
+    product_type: &str,
+    product_only: bool,
+    lang: &str,
+    limit: i64,
+    offset: i64,
+    include_facets: bool,
+    print_language: &str,
+) -> Response {
+    if game != "pokemon" || product_only || product_type == "jumbo" || query.is_empty() {
+        return sql_search_page(
+            wanted,
+            pool,
+            query,
+            game,
+            product_type,
+            product_only,
+            lang,
+            limit,
+            offset,
+            include_facets,
+        )
+        .await;
     }
     let started = Instant::now();
     let fetch_limit = (limit + 1).clamp(1, 101);
-    let found = match filtered_candidates(&state,&pool,&query,&print_language,&product_type,fetch_limit,offset).await {
+    let found = match filtered_candidates(
+        state,
+        pool,
+        query,
+        print_language,
+        product_type,
+        fetch_limit,
+        offset,
+    )
+    .await
+    {
         Ok(found) => found,
         Err(error) => {
             tracing::error!(%error, "redis search page failed");
@@ -75,10 +186,30 @@ pub async fn search_page(
         std::sync::atomic::Ordering::Relaxed,
     );
     let sql_started = Instant::now();
-    let ids=found.hits.iter().map(|h|h.card_id).collect::<Vec<_>>();
-    let raw=match crate::catalog_api::cards(&pool,&ids,&game).await {Ok(r)=>r,Err(e)=>return crate::catalog_api::failure(&e)};
-    let raw_map:HashMap<i64,serde_json::Value>=raw.into_iter().filter_map(|r|Some((crate::catalog_api::positive_id(&pokoin_catalog::card::text(&r,&["card_id"]))?,r))).collect();
-    let mut rows=found.hits.iter().enumerate().filter_map(|(index,hit)|raw_map.get(&hit.card_id).map(|r|rank_record(r,hit.weight,index))).collect::<Vec<_>>();
+    let ids = found.hits.iter().map(|h| h.card_id).collect::<Vec<_>>();
+    let raw = match crate::catalog_api::cards(pool, &ids, game).await {
+        Ok(r) => r,
+        Err(e) => return crate::catalog_api::failure(&e),
+    };
+    let raw_map: HashMap<i64, serde_json::Value> = raw
+        .into_iter()
+        .filter_map(|r| {
+            Some((
+                crate::catalog_api::positive_id(&pokoin_catalog::card::text(&r, &["card_id"]))?,
+                r,
+            ))
+        })
+        .collect();
+    let mut rows = found
+        .hits
+        .iter()
+        .enumerate()
+        .filter_map(|(index, hit)| {
+            raw_map
+                .get(&hit.card_id)
+                .map(|r| rank_record(r, hit.weight, index))
+        })
+        .collect::<Vec<_>>();
     state.sql_ms.fetch_add(
         sql_started.elapsed().as_millis() as u64,
         std::sync::atomic::Ordering::Relaxed,
@@ -91,23 +222,35 @@ pub async fn search_page(
     // page, and push one of this page's rows out of both.
     let fetched = rows.len();
     rows.truncate(limit as usize);
-    rank_rows(&mut rows, &query);
-    let mut page_rows=rows.into_iter().take(limit as usize).filter_map(|row|raw_map.get(&row.card_id).cloned()).collect::<Vec<_>>();
-    if let Err(error)=crate::catalog_api::localize(&pool,&mut page_rows,&lang,&game).await {return crate::catalog_api::failure(&error)}
-    let cards=page_rows.iter().map(pokoin_catalog::react_record).collect::<Vec<_>>();
+    rank_rows(&mut rows, query);
+    let mut page_rows = rows
+        .into_iter()
+        .take(limit as usize)
+        .filter_map(|row| raw_map.get(&row.card_id).cloned())
+        .collect::<Vec<_>>();
+    if let Err(error) = crate::catalog_api::localize(pool, &mut page_rows, lang, game).await {
+        return crate::catalog_api::failure(&error);
+    }
+    let cards = page_rows
+        .iter()
+        .map(pokoin_catalog::react_record)
+        .collect::<Vec<_>>();
     let mut body = page_body(
-        &query,
-        &game,
-        &product_type,
+        query,
+        game,
+        product_type,
         false,
-        &lang,
+        lang,
         limit,
         offset,
         found.total,
         cards,
     );
     if include_facets {
-        match facets(&pool,&query,&lang).await {Ok(products)=>body["facets"]["products"]=serde_json::json!(products),Err(e)=>return crate::catalog_api::failure(&e)}
+        match facets(pool, query, lang).await {
+            Ok(products) => body["facets"]["products"] = serde_json::json!(products),
+            Err(e) => return crate::catalog_api::failure(&e),
+        }
     }
     if let Some(flag) = body.get_mut("hasMore") {
         *flag = serde_json::json!(fetched as i64 > limit);
