@@ -1831,8 +1831,8 @@ function mergeExpansionPayload(base, page) {
 }
 
 /** The URL of a prebuilt list snapshot, or '' without a key.
- * `dictId` appends `&dict=` for set, artist and name. Seller books have no
- * dcb copy, so a dict id on `kind=seller` is ignored. */
+ * `dictId` appends `&dict=` for set, artist, name and species. Seller books
+ * have no dcb copy, so a dict id on `kind=seller` is ignored. */
 export function listSnapshotPath(kind, key, dictId = '') {
   const k = String(key || '').trim().toLowerCase();
   if (!k) return '';
@@ -1875,9 +1875,9 @@ export async function readSnapshotUrls(urls, read) {
 }
 
 /**
- * Prebuilt list snapshot (`kind` set, artist or name): the whole desk with
- * prices, built on nezopt every 15 min / daily and served from one key read as
- * c1 format 2 (template columns; a snapshot built before format 2 answers c1),
+ * Prebuilt list snapshot (`kind` set, artist, name or species): the whole desk
+ * with prices, built on nezopt every 15 min / daily and served from one key read
+ * as c1 format 2 (template columns; a snapshot built before format 2 answers c1),
  * pre-compressed with brotli 11. Read local-first (getJsonLocal options).
  * Null when that list is not built yet; callers then use the live routes.
  * With the dictionary flag on, Chromium tries `&dict=<id>` first and, if that
