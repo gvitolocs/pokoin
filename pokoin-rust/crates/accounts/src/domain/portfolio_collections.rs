@@ -24,7 +24,7 @@ use crate::firestore::{
 
 use super::collection::iso_timestamp;
 use super::marketplace_game::{is_pokemon_ingest_game, normalize_ingest_game};
-use super::poko_market_math::{normalize_language, CONDITIONS};
+use super::poko_market_math::{normalize_language, CONDITIONS, LANGUAGES};
 use super::portfolio_history::{
     add_utc_days, condition_key, holding_slices, language_key, last_sold_for, num, round2,
     sold_slice_key, value_holdings_on, Holding, PricePoint, HISTORY_DAYS, PRICE_BASIS,
@@ -273,9 +273,10 @@ fn sanitize_condition(value: Option<&Json>, at: Where) -> Result<String> {
 /// The language an item is stored and answered with, as the code the sold book is
 /// filed under: `English`, `english`, `en` and `EN` are the one `EN` slice, `ja` and
 /// `Japanese` the one `JP`, `zh-tw` the one `ZHT`. The marketplace's own normalizer is
-/// the accept-list, and a code that is not two or three ASCII letters keys no slice at
-/// all — so a body is refused rather than filed under a key no sale has, and a stored
-/// card keeps its line at nothing.
+/// the accept-list, as `CONDITIONS` is the condition's: a body whose code is not one of
+/// the fourteen codes the vocabulary carries — whatever its shape, so `vi` and `fi` are
+/// refused for all that they are two letters — is refused rather than filed under a key
+/// no sale has, and a stored card keeps its line at nothing.
 fn sanitize_language(value: Option<&Json>, at: Where) -> Result<String> {
     let raw = text_of(value);
     if clean_text(&raw).is_empty() {
@@ -290,11 +291,10 @@ fn sanitize_language(value: Option<&Json>, at: Where) -> Result<String> {
     } else {
         language_key(&raw)
     };
-    let letters = code.bytes().all(|byte| byte.is_ascii_alphabetic());
-    if !letters || code.len() < 2 || code.len() > 3 {
-        return at.refused("language", || kept_facet(&raw));
+    match LANGUAGES.iter().find(|known| **known == code) {
+        Some(known) => Ok((*known).to_string()),
+        None => at.refused("language", || kept_facet(&raw)),
     }
-    Ok(code)
 }
 
 /// What [`crate::firestore::new_document_id`] writes: an id outside that shape
@@ -702,6 +702,18 @@ fn sort_collections(collections: &mut [Collection]) {
     });
 }
 
+/// The lists one answer values: at most [`MAX_COLLECTIONS`], oldest first.
+///
+/// The store read and a write's after-state already hand the lists over in that
+/// order, so this is only the cut. A read reaches further than the allowance on
+/// purpose — the write check has to count what it would overwrite or evict — but
+/// pricing a seller's whole history on every request is not a thing the answer does:
+/// the ceiling is the same one a save refuses at, and what goes past it is the
+/// newest, never a hole in the middle.
+pub fn valued_collections(collections: &[Collection]) -> &[Collection] {
+    &collections[..collections.len().min(MAX_COLLECTIONS)]
+}
+
 /// The document path of one list — what a transaction reads and writes it at.
 fn doc_path(id: &str) -> String {
     format!("{COLLECTION}/{id}")
@@ -784,6 +796,12 @@ fn place_written(collections: &mut Vec<Collection>, written: Collection) {
 /// Nothing is read again after the commit: the answer is the state the transaction
 /// read, with this write applied to it in memory, so a store that fails one call
 /// later cannot turn a write that did happen into an error the client would retry.
+///
+/// The two write forms are the two cases, not one form with a flag: a replace
+/// `update`s and a create `create`s, so the commit itself carries the precondition
+/// the read only checked — `exists` for the one, `!exists` for the other. A replace
+/// then cannot write a list back from nothing even if the store had answered the
+/// read differently from the commit.
 pub async fn apply_save(
     firestore: &Firestore,
     uid: &str,
@@ -829,7 +847,7 @@ pub async fn apply_save(
                     Some(document) => {
                         let id = document.id();
                         let reference = transaction.doc(&doc_path(&id));
-                        transaction.set(&reference, data, false)?;
+                        transaction.update(&reference, data)?;
                         id
                     }
                     None => {
@@ -1564,6 +1582,54 @@ mod tests {
     }
 
     #[test]
+    fn a_language_outside_the_marketplaces_own_vocabulary_is_refused() {
+        // The rule used to be the *shape* of a code — two or three ASCII letters —
+        // which is a weaker thing than the vocabulary it was supposed to describe:
+        // `vi` and `fi` are that shape, are not one of the fourteen codes the
+        // marketplace files a slice under, and so were stored as a line that can only
+        // ever read zero. Membership in `LANGUAGES` is the rule now, and the spelling
+        // that reaches a code stays the normalizer's and `language_key`'s own.
+        for language in ["vi", "fi", "th", "ms", "en-GB", "englishish", "sv"] {
+            let error =
+                Item::from_input(&json!({ "cardId": "42", "language": language }), 0).unwrap_err();
+            assert_eq!(error.code(), Some("collection_item_invalid"), "{language}");
+            assert!(
+                error.message().contains("language") && error.message().contains("card 1"),
+                "the card and the facet are named: {}",
+                error.message()
+            );
+        }
+
+        for (named, code) in [
+            ("en", "EN"),
+            ("English", "EN"),
+            ("it", "IT"),
+            ("fr", "FR"),
+            ("de", "DE"),
+            ("es", "ES"),
+            ("Spanish", "ES"),
+            ("ja", "JP"),
+            ("Japanese", "JP"),
+            ("pt", "PT"),
+            ("nl", "NL"),
+            ("pl", "PL"),
+            ("ru", "RU"),
+            ("ko", "KO"),
+            ("Korean", "KO"),
+            ("kr", "KO"),
+            ("zh", "ZH"),
+            ("zh-cn", "ZH"),
+            ("zh-tw", "ZHT"),
+            ("traditional chinese", "ZHT"),
+            ("id", "ID"),
+            ("Indonesian", "ID"),
+        ] {
+            let item = Item::from_input(&json!({ "cardId": "42", "language": named }), 0).unwrap();
+            assert_eq!(item.language, code, "{named} is the {code} slice");
+        }
+    }
+
+    #[test]
     fn bad_items_are_refused_by_position() {
         let cases = vec![
             json!({}),
@@ -2062,15 +2128,16 @@ mod tests {
 
     #[test]
     fn a_day_is_drawn_from_keyed_holdings_and_never_from_a_row() {
-        // Not a timing test: `day_segments_on` has no way to ask what a slice key is,
-        // because its arguments hold no row. A key is a fact about a card and is built
-        // once per collection, so a series of a hundred days is a hundred lookups of
-        // the same keys rather than a hundred rebuilds of them.
+        // The claim is that a day is read off keys built once per collection, so the
+        // test has to be able to tell that from a series that walks the rows again
+        // every day: the rows move *after* the keys were built, and what the keys say
+        // does not follow them. `day_segments_on` takes no rows at all, which is how
+        // the hoisted path keeps being blind to the change.
         let collections = vec![
             collection("a", "A", "", vec![item("11")]),
             collection("b", "B", "", vec![item("11"), item("12")]),
         ];
-        let rows = resolved(&collections, &[("11", "500"), ("12", "600")]);
+        let mut rows = resolved(&collections, &[("11", "500"), ("12", "600")]);
         let book = book_of(&[
             sold_row("11", "500", false, "2026-10-01", 100.0),
             sold_row("12", "600", false, "2026-10-02", 60.0),
@@ -2091,14 +2158,31 @@ mod tests {
         );
 
         let whole = collection_days(&rows, &book, "2026-10-03");
-        drop(rows);
-        let one_by_one = (1..=3)
-            .map(|day| format!("2026-10-0{day}"))
-            .filter_map(|day| day_segments_on(&holdings, &book, &day))
-            .collect::<Vec<_>>();
+        let draw = || -> Vec<Json> {
+            (1..=3)
+                .map(|day| format!("2026-10-0{day}"))
+                .filter_map(|each| day_segments_on(&holdings, &book, &each))
+                .collect()
+        };
         assert_eq!(
-            one_by_one, whole,
+            draw(),
+            whole,
             "the days drawn from keyed holdings, with no row left in hand, are the series"
+        );
+
+        // Move list `a`'s card to the other blueprint. A series drawn from the rows
+        // follows it — that is the second assertion, and it is what makes the first
+        // one mean something rather than being two ways of computing the same thing.
+        set_blueprint(&mut rows.rows_mut()[0], "600");
+        assert_eq!(
+            draw(),
+            whole,
+            "the keyed holdings were built with the rows and keep their answer"
+        );
+        assert_ne!(
+            collection_days(&rows, &book, "2026-10-03"),
+            whole,
+            "a day rebuilt from the rows would have moved: the two paths are not the same"
         );
     }
 
@@ -2163,35 +2247,6 @@ mod tests {
             answered[0]["items"][1]["pricePkn"],
             json!(null),
             "a card that never sold answers unpriced, not zero"
-        );
-    }
-
-    #[test]
-    fn an_unresolved_game_card_holds_without_pricing() {
-        // The domain's half: a row whose blueprint is empty is filed under a key no
-        // sold price reaches, so it is held and unpriced rather than priced off the
-        // card of another game that shares its public id. Which rows are empty, and
-        // why, is the route's decision and is tested through the function that makes
-        // it — `portfolio_collections`' own `handlers` test.
-        let foreign = Item::from_input(&json!({ "cardId": "11", "game": "riftbound" }), 0).unwrap();
-        let collections = vec![collection("a", "A", "", vec![foreign, item("11")])];
-        let mut rows = Rows::new(&collections);
-        for row in rows.rows_mut() {
-            let pokemon = row.get("game").and_then(Json::as_str) == Some(POKEMON);
-            set_blueprint(row, if pokemon { "500" } else { "" });
-        }
-        let book = book_of(&[sold_row("11", "500", false, "2026-10-04", 30.0)]);
-        let days = collection_days(&rows, &book, "2026-10-05");
-        assert_eq!(
-            days[0]["segments"]["collection:a"],
-            json!([30, 1, 2]),
-            "the Riftbound card is held and unpriced beside the Pokémon one"
-        );
-        let answered = collections_json(&collections, &rows, &book, "2026-10-05");
-        assert_eq!(
-            answered[0]["items"][0]["pricePkn"],
-            json!(null),
-            "and it answers unpriced too, not at the Pokémon price"
         );
     }
 

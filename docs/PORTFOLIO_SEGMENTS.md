@@ -211,6 +211,11 @@ four echoed in `limits`. A write's `id` is a list this seller already has or the
 of it is a 404, a name another of their lists carries is a 409, a missing name or an
 over-budget list is a 400 that says which limit it hit, and an item whose `cardId` is
 not a positive integer or whose quantity is out of range is a 400 naming its index.
+The read asks for more documents than it answers — 64, because a write's check has to
+count every list it would overwrite or evict — and the answer then values and names
+only the 20 oldest of what it got: pricing a seller's whole stored history on every
+request is not a thing this route does, and what falls past the ceiling is the newest,
+never a hole in the middle.
 A `cardId` is canonicalised before anything else reads it: the leading zeros come
 off, so `0012` is stored, answered, merged and looked up as `12` rather than
 becoming two lines of one card that each price. The read of a stored list merges by
@@ -263,9 +268,10 @@ Language is answered as the code the sold rows carry: `English`, `english`, `en`
 A `game` may be written as its id or the display name the marketplace uses. Absent
 means `NM` / `EN`, Pokémon.
 
-The two vocabularies are closed: a `condition` outside those five, a `language` that
-does not come back as the two or three ASCII letters of a code, and either written
-past 24 characters — counted before anything is normalised — is a
+The two vocabularies are closed: a `condition` outside those five, a `language` that is
+not one of the fourteen codes the marketplace's vocabulary carries (`vi` and `fi` are
+refused for all that they are two letters — the shape of a code is not its membership),
+and either written past 24 characters — counted before anything is normalised — is a
 `collection_item_invalid` that names the card and the facet, because such a slice has
 no sales to carry a series and a save that quietly stored it would draw a line that
 can only ever read zero. A `game` the platform's own game table does not list is a 400
@@ -292,10 +298,21 @@ priced would be read as the seller's worth having collapsed to zero, and a clien
 keeps the last good graph is the correct response to a market it cannot see. `days: []`
 *without* that key still means what it always meant: nothing is held.
 
+Half a market is not a market. When one game answered its sales and the Pokémon did not,
+the rows that came back are dropped rather than used: the book prices a Riftbound card
+from a Riftbound sale and a Pokémon card from nothing, which is the same collapsed line
+in one colour instead of the whole list. So `seriesError` and `pricePkn` are mutually
+exclusive — with the key present every card of every game answers unpriced, whatever the
+request did manage to read. The same answer covers the maths dying rather than the read:
+the series is computed on the blocking pool, and a task that goes down there after the
+write committed would otherwise turn a save that *did* happen into a 500 the client
+retries into a duplicate. It is logged, and the lists are answered without prices.
+
 **What the reads may cost.** The two Pokémon queries of one request share a single
-eight-second deadline; the other games are asked **at the same time**, each inside its own
-four-second window, so a seller who collects several games waits on their slowest card
-server rather than on all of them. A game that runs out keeps its cards held and unpriced,
+eight-second deadline; the other games are asked **beside them**, never between them, each
+inside its own four-second window, so a seller who collects several games waits on their
+slowest card server rather than on all of them and the whole market read costs at most
+those eight seconds. A game that runs out keeps its cards held and unpriced,
 its rows losing the blueprint the Pokémon join matched on their card ids. The day-by-day
 maths — every list against every day of the window, at the full allowance of 20 lists and
 300 cards — runs on the blocking pool, and a slice key, being a fact about a row rather

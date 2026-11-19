@@ -157,6 +157,15 @@ fn card(id: &str, quantity: i64) -> Json {
     })
 }
 
+/// One card of one list, of a game other than Pokémon: the same map shape with its own
+/// `game`, which is the only thing that decides whose catalog prices it and whose sales
+/// its price comes out of.
+fn card_of(id: &str, quantity: i64, game: &str) -> Json {
+    let mut item = card(id, quantity);
+    item["mapValue"]["fields"]["game"]["stringValue"] = json!(game);
+    item
+}
+
 /// A Firestore whose answers come from what it was last told, so a save really is
 /// read back and a foreign document really is another seller's — and whose commits
 /// really do fail when the state a transaction read has moved, which is the only
@@ -1161,6 +1170,19 @@ fn commits(transport: &ScriptedTransport) -> usize {
     transport.requests_to(":commit").len()
 }
 
+/// The document writes of every commit the route sent, in the wire shape the store
+/// was handed: this fake does not enforce `currentDocument`, so the precondition a
+/// commit carries is only observable here.
+fn committed_writes(transport: &ScriptedTransport) -> Vec<Json> {
+    transport
+        .requests_to(":commit")
+        .iter()
+        .filter_map(|request| serde_json::from_slice::<Json>(&request.body).ok())
+        .flat_map(|body| body["writes"].as_array().cloned().unwrap_or_default())
+        .filter(|write| write.get("currentDocument").is_some())
+        .collect()
+}
+
 /// The list names a seller's store holds, whatever order they were written in.
 fn stored_names(store: &Arc<Mutex<Db>>) -> Vec<String> {
     let mut names: Vec<String> = store
@@ -1512,5 +1534,142 @@ async fn a_price_read_that_failed_answers_the_lists_and_says_the_series_is_missi
         body["seriesError"],
         json!("prices_unavailable"),
         "a committed save reports the outage it could not price around"
+    );
+}
+
+#[tokio::test]
+async fn an_unanswered_market_leaves_every_card_of_a_two_game_list_unpriced() {
+    // The other games' sales are filed in the same book as the Pokémon's, so "the
+    // series is missing" and "this card is worth 40" are two halves of one answer that
+    // must never appear together. Through the route this is what a client must never
+    // see; which half of the market failed to keep it that way is the handler's test.
+    let (state, _store, _transport) = store_state(vec![document(
+        "mine",
+        SELLER,
+        "Vault",
+        "2026-09-01T10:00:00Z",
+        vec![card("11", 3), card_of("11", 1, "riftbound")],
+    )]);
+    let state = state.with_marketplace_db(Some(
+        pokoin_accounts::sql::MarketplaceDb::connect_lazy(
+            "postgres://pokoin:pokoin@127.0.0.1:1/pokoin_test",
+            1,
+        )
+        .expect("a lazy pool never connects"),
+    ));
+    let app = router(state);
+
+    let (status, body, _) = get(&app, Some(SELLER)).await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    assert_eq!(names_of(&body), ["Vault"], "the seller keeps their lists");
+    assert_eq!(
+        body["seriesError"],
+        json!("prices_unavailable"),
+        "body={body}"
+    );
+    assert_eq!(body["days"], Json::Array(Vec::new()), "body={body}");
+    let items = body["collections"][0]["items"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(items.len(), 2, "body={body}");
+    for item in &items {
+        assert_eq!(
+            item["pricePkn"],
+            Json::Null,
+            "a price beside a reported seriesError: {item}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn twenty_one_stored_lists_answer_the_twenty_oldest() {
+    // The read reaches further than the valuation ceiling on purpose — sixty-four
+    // documents, because the write check has to count every list a save would
+    // overwrite or evict — and this store answers a `limit` by ignoring it, so all
+    // twenty-one really do arrive at the answer. What it values is the twenty oldest:
+    // twenty lists of up to three hundred cards, priced against four hundred days, is
+    // already the work one request is held to.
+    let seed = (0..=20)
+        .map(|day| {
+            document(
+                &format!("c{day:02}"),
+                SELLER,
+                &format!("list {day:02}"),
+                &format!("2026-08-{day_plus:02}T10:00:00Z", day_plus = day + 1),
+                vec![card("11", 1)],
+            )
+        })
+        .collect();
+    let (state, _store, _transport) = store_state(seed);
+    let app = router(state);
+
+    let (status, body, _) = get(&app, Some(SELLER)).await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    let expected: Vec<String> = (0..20).map(|day| format!("list {day:02}")).collect();
+    assert_eq!(names_of(&body), expected, "body={body}");
+    assert_eq!(
+        body["segmentDefs"].as_array().map(Vec::len),
+        Some(20),
+        "the defs are for the lists that were valued, not for the lists stored"
+    );
+    assert_eq!(
+        body["collections"].as_array().map(Vec::len),
+        body["limits"]["collections"].as_u64().map(|n| n as usize),
+        "the answer holds to the ceiling it publishes"
+    );
+}
+
+#[tokio::test]
+async fn a_replace_commits_an_update_and_a_new_list_a_create() {
+    // The read check refuses a replace of a list that is not there, which is the half
+    // a client can be told. The commit has to say it too: a `set` of an id would write
+    // that list back from nothing on a store that answers the read and the commit
+    // differently. This fake enforces no preconditions — a create mints a fresh id
+    // every attempt — so what is proven here is the wire the store was handed.
+    let (state, _store, transport) = store_state(vec![document(
+        "mine",
+        SELLER,
+        "Vault",
+        "2026-09-01T10:00:00Z",
+        vec![card("11", 3)],
+    )]);
+    let app = router(state);
+
+    let (status, body, _) = post(
+        &app,
+        "save",
+        json!({ "id": "mine", "name": "Vault", "items": [ { "cardId": "11", "quantity": 4 } ] }),
+        SELLER,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    let replaced = committed_writes(&transport);
+    assert_eq!(replaced.len(), 1, "body={body}");
+    assert_eq!(
+        replaced[0]["currentDocument"],
+        json!({ "exists": true }),
+        "a replace updates a document that is there: {body}"
+    );
+    assert!(
+        replaced[0].get("updateMask").is_none(),
+        "and it writes the whole document, not only the fields it names: {body}"
+    );
+
+    transport.clear_requests();
+    let (status, body, _) = post(
+        &app,
+        "save",
+        json!({ "name": "Second", "items": [ { "cardId": "12", "quantity": 1 } ] }),
+        SELLER,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    let created = committed_writes(&transport);
+    assert_eq!(created.len(), 1, "body={body}");
+    assert_eq!(
+        created[0]["currentDocument"],
+        json!({ "exists": false }),
+        "a new list is a create, so it cannot land on top of one already there"
     );
 }
