@@ -1,7 +1,8 @@
 # Price dumps: every market feed in one place
 
 Where each price feed comes from, which host runs it, when, where the data lands and how a
-failure is reported. Written 2026-11-11 from the live units and status files; the detail for each
+failure is reported. Written 2026-11-11 from the live units and status files; the TCGplayer row
+and its freshness check were re-read on 2026-11-19. The detail for each
 feed stays in its own document, linked in the last column.
 
 ## Map
@@ -10,17 +11,23 @@ feed stays in its own document, linked in the last column.
 |---|---|---|---|---|---|---|---|
 | CardTrader listings | Raw listing book of every expansion of every live game | nezopt (user unit) | `pokoin-all-cardtrader-daily.timer` | daily 23:00 UTC | `/home/nez/data/pokoin-catalog-refresh/daily/<UTC date>/listing-books/`, then each game's price caches | `pokoin-ops hc-ping` at start and end (drop-in `alerts.conf`) | [CARDTRADER_DAILY_DUMP.md](CARDTRADER_DAILY_DUMP.md) |
 | CardTrader market refresh | Listing snapshots and inferred sales in the marketplace writer | Oracle `pokoin-marketplace` (system unit) | `pokoin-cardtrader-daily-market-refresh.timer` | daily 01:00 UTC | `pokoin_marketplace` on nezopt, through the writer tunnel | not read for this document | project `ct-pkn_pricedump` |
-| TCGplayer (TCGCSV) | Every product and price row of all TCGplayer categories, USD | Oracle `pokoin-marketplace` downloads; nezopt imports | `tcgcsv-daily.timer` (Oracle), tunnel `tcgcsv-oracle-storage-tunnel.service` (nezopt) | hourly check 10:10–21:10 Europe/Copenhagen, one real pull per 24 h | snapshots in `/home/nez/mnt/mybook/tcgprices/tcgcsv/snapshots/`, database `tcgprices` (container `tcgprices-postgres-15t`, localhost 27432) | `tcgcsv-notify-failure.service` (Flareon Telegram notifier) | [TCGCSV_PRICES.md](TCGCSV_PRICES.md), project `tcgprices` |
+| TCGplayer (TCGCSV) | Every product and price row of all TCGplayer categories, USD; TCGCSV publishes one dump per day at about 20:05 UTC and serves only the newest day (dated archives suspended 2026-09-16) | Oracle `pokoin-marketplace` downloads; nezopt imports | `tcgcsv-daily.timer` (Oracle), tunnel `tcgcsv-oracle-storage-tunnel.service` (nezopt) | hourly tick 10:40–23:40 Europe/Copenhagen (`OnCalendar=*-*-* 10..23:40:00`); downloads only once `last-updated.txt` is newer than the last transfer, so day D is on the site at about 21:30 UTC on day D | snapshots in `/home/nez/mnt/mybook/tcgprices/tcgcsv/snapshots/`, database `tcgprices` (container `tcgprices-postgres-15t`, localhost 27432) | `tcgcsv-notify-failure.service` (Flareon Telegram notifier) — has not delivered since about 2026-10-21, see Gaps | [TCGCSV_PRICES.md](TCGCSV_PRICES.md), project `tcgprices` |
 | Cardmarket price guide | Cardmarket's public guide: one global low/avg/trend per product, every game | nezopt (user unit) | `pokoin-cardmarket-guides.timer` | daily 02:45 UTC | `pokoin_marketplace.cardmarket_price_guide` | mail, `OnFailure=pokoin-notify@%n.service` | [PRICING.md](PRICING.md) "Price sources" |
 | Cardmarket seller prices | Cheapest professional and cheapest private offer per product, language and condition | nezopt (user units) | `pokoin-cm-price-collector.service` (the walk), `pokoin-cm-price-ingest.timer`, `pokoin-cm-price-publish.timer` | walk continuous on a 7-day cycle; load hourly; publish Monday 03:00 UTC | schema `cm_prices` in `pokoin_marketplace`; readers use the view `cm_prices.current_minimums` | mail, `OnFailure=pokoin-notify@%n.service` on all three | project `cm-price-engine` |
 | Cardmarket watchlist | The products the seller-price walk should visit that day, capped: one JSON line per `idProduct` with a reason and a rank. `viewed_member` and `scanned` lead, then `listed` and `viewed` alternate through the cut (`--viewed-share`, default 50%) | nezopt (user unit) | `pokoin-cm-watchlist.timer` | daily 02:35 UTC, ahead of the guide load | `%h/scratch/cm-watchlist/watchlist.jsonl`; `pokoin_marketplace` is read only and nothing is written. The collector that consumes it lives in the price-engine project, not this repository | mail, `OnFailure=pokoin-notify@%n.service` | [site-side.md](../reports/cm-conditions/site-side.md) §6 W2 |
 | Cardmarket offer minima, per day | What the seller-price walk saw each day, kept as a series: one row per product facet (language, condition floor, reverse holo/foil, first edition, seller type) per UTC day, EUR cents, with `asked` saying whether the walk aimed at that facet or the price only rode along on a wider page. Written by the collector (`cm-price-engine`, another repository) as `<state-dir>/daily/daily-minimums-YYYY-MM-DD.jsonl`; loaded by `pokoin-cardmarket-catalog cm-daily --file <that file> --apply` | nezopt (user unit) | `pokoin-cm-daily-load.timer` + `.service` (not installed yet; the lead enables them) | daily 03:20 UTC, after the watchlist and the guides | `pokoin_marketplace.cardmarket_offer_daily` (migration 145), read on the Pi replica; `GET /api/marketplace-card-price-history` now reads it too, as the card-desk graph's `cardmarketOffers` leg (one grade floor and language per request, answered in PKN) | mail, `OnFailure=pokoin-notify@%n.service` | [site-side.md](../reports/cm-conditions/site-side.md) §4 (schema), §6 W1/W3 |
 | eBay | not built | — | — | — | — | — | [PRICING.md](PRICING.md) lists it as the owner's call |
 
-## State on 2026-11-11
+## State
 
-- TCGplayer: last snapshot `2026-11-10T20:05:49Z`, 637,426 rows, import complete
-  (`/home/nez/mnt/mybook/tcgprices/tcgcsv/postgres-status.json`).
+The TCGplayer bullet says how to read that feed live; the rest is as read on 2026-11-11.
+
+- TCGplayer: the newest day is `select max(day) from all_daily_prices where category_id = 3` in the
+  `tcgprices` database. On the Oracle host `systemctl list-timers tcgcsv-daily.timer` names the next
+  tick, and `journalctl -u tcgcsv-daily.service` with
+  `/home/ubuntu/tcgprices/state/oracle-status.json` carries the failing stage, the attempt number
+  and the error. TCGCSV serves only the newest day, so a day that was never pulled cannot be
+  recovered: 2026-11-12 and 2026-11-15 are missing.
 - CardTrader listings: last run 2026-11-10 23:00 UTC.
 - Cardmarket guide: last run 2026-11-11 02:47 UTC.
 - Cardmarket seller prices: snapshot 1 published 2026-11-11 from the 2026-11-10 scan (4,095 prices,
@@ -54,7 +61,9 @@ feed stays in its own document, linked in the last column.
 
 ## Gaps
 
-- Alerts differ: TCGplayer reports through Telegram, the others through mail or hc-ping.
+- Alerts differ: TCGplayer reports through Telegram, the others through mail or hc-ping. The
+  TCGplayer notifier (`notify_flareon.py` on nezopt) has not been able to deliver since about
+  2026-10-21; 48 notices are queued and undelivered (finding PRICE-10).
 - The `pokoin-cm-price-*` units and `pokoin-cm-watchlist.timer` are not in
   `~/.config/pokoin/expected-active.txt`, so a Cardmarket day in which one of them never runs is
   silent: only a run that *starts and fails* raises the `OnFailure` mail.

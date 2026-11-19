@@ -1,10 +1,83 @@
 # TCGplayer daily prices
 
-The lossless all-game store lives on Nezopt's 15 TB disk. Its updater is
-`/home/nez/Projects/tcgprices/daily_update.py`; it archives complete TCGCSV
-snapshots, imports every price row and refreshes explicit CardTrader TCGplayer
-links from all local Pokoin game catalogs. Full operational instructions are
-in that project's README.md. Neither CardTrader prices nor public IDs change.
+The source is TCGCSV's daily dump of every TCGplayer category, in USD. TCGCSV
+publishes one dump per day at about 20:05 UTC and carries its timestamp in
+`last-updated.txt`. It serves only the newest day: its dated archives were
+suspended on 2026-09-16, so a day that was never pulled cannot be recovered.
+
+The pull is a system unit on the Oracle host. `tcgcsv-daily.timer`
+(`OnCalendar=*-*-* 10..23:40:00 Europe/Copenhagen`, one tick every hour from
+10:40 to 23:40 Copenhagen) fires `tcgcsv-daily.service`, which runs
+`/home/ubuntu/tcgprices/current/oracle_daily_update.py`. `current` is a symlink
+into `/home/ubuntu/tcgprices/releases/`; since 2026-11-19 it points at release
+`20261119-publication-gate-2`. The host runs Python 3.10 and a release's tests
+are run on the host before the symlink is switched. The source repository is
+`tcgprices` on nezopt (`/home/nez/mnt/mybook/Projects/tcgprices`, no remote);
+full operational instructions are in that project's README.md.
+
+The downloaded snapshot is copied to nezopt
+(`/home/nez/mnt/mybook/tcgprices/tcgcsv/snapshots/`) and imported there into the
+`tcgprices` database (container `tcgprices-postgres-15t`). The pipeline
+archives complete TCGCSV snapshots, imports every price row and refreshes
+explicit CardTrader TCGplayer links from all local Pokoin game catalogs.
+Neither CardTrader prices nor public IDs change. The API reads the views
+`all_daily_prices` and `latest_prices`
+(`pokoin-rust/crates/catalog-api/src/sales/tcgcsv.rs`).
+
+## The gate: when a day's prices appear
+
+Every tick answers `idle`, `probe` or `download`. It is idle while the last
+transferred snapshot is younger than 20 hours; after that it probes
+`last-updated.txt` once per tick and downloads only when the upstream stamp is
+newer than the stamp of the last transferred snapshot. The gate keys on the
+publication, not on the previous run.
+
+Publication at about 20:05 UTC is followed by the first tick at 20:40 UTC
+(21:40 Copenhagen in winter, 22:40 in summer). Download and import take about
+45 minutes, so day D's prices are on the site at about 21:30 UTC on day D.
+Before 2026-11-19 the job pulled at most once per 24 hours from the last check,
+so the pull drifted an hour later every day — 10:10 to 15:10 Copenhagen in ten
+days — and a day's prices appeared the next afternoon.
+
+## When a pull fails
+
+A failed download does not move the gate; it is retried at the next hourly tick,
+at most 3 download attempts per publication. A snapshot that was downloaded but
+cannot be transferred or imported is retried at most 6 times per stage and then
+set aside, so the next publication is still fetched. Corrupt state files are
+moved aside as `<name>.corrupt-<stamp>`. The journal
+(`journalctl -u tcgcsv-daily.service` on the Oracle host) and
+`/home/ubuntu/tcgprices/state/oracle-status.json` carry the failing stage, the
+attempt number and the error's type and message.
+
+## Missing days
+
+2026-11-12 and 2026-11-15 are missing. The pulls of 2026-11-13 and 2026-11-16
+failed and, under the old gate, the next run fetched the next day instead. The
+cause was a race in the downloader: worker threads changed a set's record while
+the main thread was writing the manifest (`dictionary changed size during
+iteration`). It was fixed on 2026-11-19 — workers return their result and only
+the main thread writes the manifest. Those two days cannot be recovered.
+
+## Alerts (not working)
+
+The job's notices go through `notify_flareon.py` on nezopt. Since about
+2026-10-21 that notifier cannot deliver: it depended on a container that no
+longer exists. 48 notices are queued and undelivered. This is open as finding
+PRICE-10.
+
+## Checking freshness by hand
+
+Read-only, in the `tcgprices` database, the newest day is
+`select max(day) from all_daily_prices where category_id = 3`. On the Oracle
+host, `systemctl list-timers tcgcsv-daily.timer` names the next tick, and
+`journalctl -u tcgcsv-daily.service` with
+`/home/ubuntu/tcgprices/state/oracle-status.json` show the last runs. The card
+page's graph thins long ranges to one point per week, so the last plotted
+TCGplayer point can be a few days before the newest day in the table: that is
+the graph, not the feed.
+
+## Configuration and readers
 
 Configure `TCGCSV_DATABASE_URL` for the separate `tcgprices` database using the
 restricted `tcgcsv_pokoin_reader` account through the private Nezopt/Pi tunnel.
