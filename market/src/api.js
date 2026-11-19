@@ -458,6 +458,34 @@ export async function fetchExactNameCards(name, {
   return collected;
 }
 
+/**
+ * Every single of one species, chosen by National Dex number: the `kind=species`
+ * snapshot (Rust `build_species`), which holds the printings an exact-name read
+ * cannot — a hub titled "All Giratina" is 25 cards named "Giratina" and 86 cards
+ * of dex 487 (Giratina V, VSTAR, EX, LV.X, the Lv. printings). The builder stores
+ * the whole list under one key, so this one response is the complete species:
+ * nothing here is cut at a page size.
+ *
+ * Rows are the same objects a `name` list carries, so `cardFromCatalogRow` reads
+ * both. Until the job has built the species lists — or when this read fails —
+ * the exact-name path answers: a hub must never show fewer cards than it did.
+ */
+export async function fetchSpeciesCards(dex, { name = '', lang, signal } = {}) {
+  const number = Number(dex);
+  // Species snapshots are English titles, like the `name` lists; a page in
+  // another title language keeps the localized live search.
+  if (Number.isInteger(number) && number > 0 && (!lang || lang === 'en')) {
+    const snapshot = await fetchListSnapshot('species', String(number), { signal });
+    const cards = (Array.isArray(snapshot?.cards) ? snapshot.cards : [])
+      .map(cardFromCatalogRow)
+      .filter((card) => card.id);
+    if (cards.length) {
+      return cards;
+    }
+  }
+  return fetchExactNameCards(name, { lang, signal });
+}
+
 /** SQL-backed candidate pool for ambiguous early set prefixes. The endpoint's
  * 1,000-row bound keeps hydration finite; the shared scorer chooses the popup. */
 export const fetchNamePrintings = createNamePrintingsFetcher({
