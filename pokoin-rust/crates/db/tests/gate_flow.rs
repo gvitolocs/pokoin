@@ -18,7 +18,9 @@
 //! must not notice the flood — still answers each of its 20 statements in well
 //! under a second, never on `PoolTimedOut`. The same flood with the gate open is
 //! the control: it queues behind itself, and that queue is what the production
-//! pool turned into `pool timed out while waiting for an open connection`.
+//! pool turned into `pool timed out while waiting for an open connection` — the
+//! same probe beside it must therefore break its budget or time out there, or the
+//! gated phase below proved nothing about contention.
 //!
 //! This binary holds exactly one test: both phases share one database and one
 //! pool, and a second test running alongside would be the flood.
@@ -189,16 +191,36 @@ async fn one_slot_keeps_a_connection_free_for_every_other_route() {
     );
     assert_eq!(gate.shed() as usize, gated.busy);
 
-    // The control: the same flood with the door open. Nothing is shed, so the
-    // 4 connections carry it and the rest waits — which is the state that made
-    // every other route time out on production.
-    let control = flood(pool.clone(), None).await;
+    // The control: the same flood with the door open, and the same card-page
+    // probe beside it. Nothing is shed, so the 4 connections carry it and the
+    // rest waits — which is the state that made every other route time out on
+    // production. The probe is the point: the gate is only worth having if the
+    // very read that stays inside its budget under the gate breaks it without.
+    let (control, control_probe) = tokio::join!(
+        flood(pool.clone(), None),
+        card_page(pool.clone(), PROBE_ROUNDS),
+    );
     assert_eq!(control.busy, 0, "an ungated flood is not refused by a gate");
     assert!(
         control.pool_timeouts > 0 || control.slow_acquire > 0,
         "4 connections carrying {FLOOD} requests of two {SLEEP:?} statements must queue: {control:?}",
     );
+    let (control_times, control_timeouts) = control_probe;
+    assert!(
+        control_timeouts > 0 || control_times.iter().any(|took| *took >= SLOW_ACQUIRE),
+        "the same card-page probe must break its {SLOW_ACQUIRE:?} budget with the gate open, \
+         or the gated phase proved nothing: {control_timeouts} timed out, {control_times:?}",
+    );
     // The numbers the assertions above are made of, for whoever reads the log.
-    eprintln!("gated {gated:?}\ncontrol {control:?}");
+    eprintln!(
+        "gated {gated:?}\ncontrol {control:?}\ncontrol probe {control_timeouts} timed out of \
+         {} rounds, slowest {:?}: {control_times:?}",
+        control_times.len() + control_timeouts,
+        control_times
+            .iter()
+            .max()
+            .copied()
+            .unwrap_or(Duration::ZERO),
+    );
     drop(pool);
 }
