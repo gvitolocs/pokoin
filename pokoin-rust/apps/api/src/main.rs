@@ -177,15 +177,60 @@ async fn serve_listener(
     }
 }
 
+/// The longest a search-page request waits for a gate slot. Past this the gate
+/// is not shedding anything: callers queue behind a saturated pool instead of
+/// being told to come back, which is the only thing it can do for them.
+const MAX_SEARCH_PAGE_WAIT_MS: u64 = 10_000;
+
+/// The search-page gate's (slots, wait ms) as the settings ask for them, bounded
+/// by what the pool can carry.
+///
+/// `POKOIN_RUST_SEARCH_PAGE_SLOTS` above half the catalogue pool is clamped to
+/// `max(1, pool_max / 2)` and said once: it admits exactly the crawler
+/// concurrency the gate exists to limit, and the shed arrives too late to
+/// protect the pool it is sharing. 0 still means "derive it"
+/// ([`search_page::default_slots`]). `POKOIN_RUST_SEARCH_PAGE_WAIT_MS` is
+/// clamped to 0..=[`MAX_SEARCH_PAGE_WAIT_MS`] for the same reason.
+///
+/// Neither setting can be asked for an unusable number by accident:
+/// [`Config::from_env`] reads each with `parse`, so an unparsable, negative or
+/// overflowing value is not a huge one — it is the default it stands for.
+fn bounded_gate(pool_max: u32, asked_slots: u32, asked_wait_ms: u64) -> (u32, u64) {
+    let reserve = (pool_max / 2).max(1);
+    let slots = if asked_slots == 0 {
+        search_page::default_slots(pool_max)
+    } else {
+        asked_slots.min(reserve)
+    };
+    if asked_slots > reserve {
+        tracing::warn!(
+            asked_slots,
+            slots,
+            pool_max,
+            "search-page gate slots above half the catalogue pool are clamped to it"
+        );
+    }
+    let wait_ms = asked_wait_ms.min(MAX_SEARCH_PAGE_WAIT_MS);
+    if asked_wait_ms > MAX_SEARCH_PAGE_WAIT_MS {
+        tracing::warn!(
+            asked_wait_ms,
+            wait_ms,
+            "search-page gate wait above ten seconds queues callers instead of shedding them, so it is clamped"
+        );
+    }
+    (slots, wait_ms)
+}
+
 fn new_state(config: Config, booted: Instant) -> anyhow::Result<AppState> {
     // 0 in the setting means "derive it": half the catalogue pool per statement
-    // one search-page request can run at once.
-    let slots = if config.search_page_slots == 0 {
-        search_page::default_slots(config.db_pool_max)
-    } else {
-        config.search_page_slots
-    };
-    let wait = Duration::from_millis(config.search_page_wait_ms);
+    // one search-page request can run at once. What the settings do ask for is
+    // bounded by the pool they share ([`bounded_gate`]).
+    let (slots, wait_ms) = bounded_gate(
+        config.db_pool_max,
+        config.search_page_slots,
+        config.search_page_wait_ms,
+    );
+    let wait = Duration::from_millis(wait_ms);
     Ok(AppState {
         config,
         commerce: Arc::new(RwLock::new(None)),
@@ -907,6 +952,66 @@ mod tests {
             "never a gate that admits nothing"
         );
         assert_eq!(search_page::default_slots(32), 4);
+        // What those slots are worth against the pool, which is the sentence the
+        // `default_slots` comment is allowed to make: from a pool of 8 the floor
+        // of one is also a share of at most half, and below it the floor is one
+        // request of four statements, which is more than half of six.
+        for pool in [8, 9, 12, 16, 32] {
+            assert!(
+                search_page::default_slots(pool) * search_page::PARALLEL_STATEMENTS <= pool / 2,
+                "a pool of {pool} keeps half of it in reserve"
+            );
+        }
+        for pool in [1, 2, 3, 4, 6, 7] {
+            assert_eq!(search_page::default_slots(pool), 1, "the floor of one");
+            assert!(
+                search_page::PARALLEL_STATEMENTS * search_page::default_slots(pool) > pool / 2,
+                "a pool of {pool} has more than half of it held by the request the floor admits"
+            );
+        }
+    }
+
+    /// A setting cannot ask past what the pool it shares has: slots above half of
+    /// it are clamped, and a wait long enough to become a queue is bounded.
+    #[test]
+    fn a_gate_setting_is_bounded_by_the_pool_it_shares() {
+        assert_eq!(
+            bounded_gate(16, 4_294_967_295, 1_500),
+            (8, 1_500),
+            "the Pi's pool of 16 admits at most half of itself"
+        );
+        assert_eq!(
+            bounded_gate(16, 9, 1_500),
+            (8, 1_500),
+            "one above the reserve"
+        );
+        assert_eq!(
+            bounded_gate(16, 8, 1_500),
+            (8, 1_500),
+            "at the reserve it stays"
+        );
+        assert_eq!(
+            bounded_gate(16, 5, 1_500),
+            (5, 1_500),
+            "below it nothing moves"
+        );
+        assert_eq!(
+            bounded_gate(1, 64, 1_500),
+            (1, 1_500),
+            "a pool of 1 has no half: the floor is one slot"
+        );
+        assert_eq!(bounded_gate(16, 0, 1_500), (2, 1_500), "0 stays derived");
+        assert_eq!(
+            bounded_gate(16, 2, 600_000),
+            (2, 10_000),
+            "a wait that queues callers instead of shedding them"
+        );
+        assert_eq!(
+            bounded_gate(16, 2, 10_000),
+            (2, 10_000),
+            "the bound is allowed"
+        );
+        assert_eq!(bounded_gate(16, 2, 0), (2, 0), "and so is no wait at all");
     }
 
     #[tokio::test]

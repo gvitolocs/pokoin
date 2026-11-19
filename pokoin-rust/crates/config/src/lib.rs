@@ -11,8 +11,11 @@ pub struct Config {
     pub search_engine: String,
     pub db_pool_max: u32,
     /// search-page gate slots. 0 means "derive it from `db_pool_max`".
+    /// More than half that pool is not a setting the API honours: it is clamped
+    /// where the gate is built (`apps/api/src/main.rs`, `bounded_gate`).
     pub search_page_slots: u32,
-    /// How long a search-page request waits for a slot before it is shed.
+    /// How long a search-page request waits for a slot before it is shed. Past
+    /// ten seconds it is a queue, not a shed, so it is clamped there too.
     pub search_page_wait_ms: u64,
 }
 

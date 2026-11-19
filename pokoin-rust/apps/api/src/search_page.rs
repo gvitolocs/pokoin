@@ -96,10 +96,17 @@ pub(crate) const PARALLEL_STATEMENTS: u32 = 4;
 
 /// What the gate sizes itself with when `POKOIN_RUST_SEARCH_PAGE_SLOTS` is 0 or
 /// unset: half the catalogue pool divided by the statements one request runs at
-/// once, so search-page can never take more than half the pool no matter how
-/// many of it arrive together. The Pi's pool of 16 gives 2 slots, an overflow pod
-/// with pool 6 gives 1, and a pool too small to divide gives one rather than a
-/// door that admits nothing.
+/// once, with a floor of one slot rather than a door that admits nothing.
+///
+/// The floor is what leaves the reserve exact only from a pool of 8 up. The Pi's
+/// pool of 16 gives 2 slots: two search-page requests hold 8 of its 16
+/// connections between them, and a third waits at the gate instead of opening
+/// more. An overflow pod with pool 6 gets the floor of 1 slot, and that one
+/// request holds 4 statements at once — four of six connections, more than half.
+/// So a pool of 8 or more is never more than half taken by search-page; a smaller
+/// one is bounded by "one search-page request at a time", which with pool 6 or
+/// below is a bigger share than the reserve asks. The floor stays: a gate of 0
+/// slots sheds every search.
 pub(crate) const fn default_slots(pool_max: u32) -> u32 {
     let slots = pool_max / 2 / PARALLEL_STATEMENTS;
     if slots == 0 {
