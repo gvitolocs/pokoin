@@ -26,6 +26,7 @@ import {
   startQrScanner,
 } from '@market/wallet-feed.js';
 import { buildReceiveQr, parseWalletSendLink } from '@market/wallet-qr.js';
+import { createRequestIds, walletIntent } from '@market/wallet-request-id.js';
 import { POKOIN_CHAIN_ID, sendPkn, switchToPokoin } from '@market/wallet-tx.js';
 import { accountProfile, availablePkn, refreshAccount } from '../stores/account.js';
 import { authUser, getBearer, signedIn } from '../stores/auth.js';
@@ -767,6 +768,9 @@ export default function Wallet() {
   const [activityLoading, setActivityLoading] = createSignal(false);
   const [showAllActivity, setShowAllActivity] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
+  // The id of the intent being sent: a Send that never got its answer is sent
+  // again under the same id, so the server applies that intent once.
+  const requestIds = createRequestIds();
 
   onSettled(() => {
     document.title = 'Wallet · Pokoin';
@@ -1018,8 +1022,14 @@ export default function Wallet() {
             onConnect={() => run(connectWallet)}
             onRequireSignIn={requireSignIn}
             onTransfer={(recipient, amount) => run(async () => {
+              const requestId = requestIds.idFor(walletIntent('transfer', recipient, amount));
               const token = await getBearer();
-              await transferAccountBalance({ recipientUsername: recipient, amountPkn: Math.round(Number(amount)) }, token);
+              await transferAccountBalance({
+                recipientUsername: recipient,
+                amountPkn: Math.round(Number(amount)),
+                requestId,
+              }, token);
+              requestIds.settle();
             }, { okMessage: `Sent ${Math.round(Number(amount))} PKN to ${recipient}.` })}
             onChainSend={(to, amount) => run(async () => {
               const hash = await sendPkn({ from: untrack(address), to, amount });
@@ -1049,8 +1059,14 @@ export default function Wallet() {
             payoutAddress={linkedAddress() || address()}
             onRequireSignIn={requireSignIn}
             onWithdraw={(to, amount) => run(async () => {
+              const requestId = requestIds.idFor(walletIntent('withdraw', to, amount));
               const token = await getBearer();
-              const result = await requestPknWithdraw({ toAddress: to, amountPkn: Math.round(Number(amount)) }, token);
+              const result = await requestPknWithdraw({
+                toAddress: to,
+                amountPkn: Math.round(Number(amount)),
+                requestId,
+              }, token);
+              requestIds.settle();
               setFlash(result.payoutTxHash
                 ? 'Withdraw sent from the bank wallet.'
                 : result.warning || 'Withdraw request created for manual bank payout.');

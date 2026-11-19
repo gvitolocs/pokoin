@@ -214,3 +214,8 @@ scripts/deploy-web.sh
 Every shared API handler is native Rust in `pokoin-rust/`; the per-handler
 Node overlay scripts were removed with the Node backend (`deploy-scan-api.sh`
 stays as a pokoin-scanner wrapper).
+
+A change that makes an endpoint require a new client field runs in the opposite
+order to that example: the web client that sends the field is deployed first,
+while the server still answers requests that carry no field, and only the
+follow-up server change makes the field required.

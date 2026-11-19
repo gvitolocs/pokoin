@@ -14,6 +14,8 @@ pub mod money;
 pub mod notify;
 pub mod money_request;
 pub mod order_refund;
+/// The wallet request id: one client-generated intent name, applied once.
+pub mod request_id;
 pub mod shipping;
 pub mod settlement;
 pub mod stock_csv;
