@@ -401,8 +401,15 @@ enum Flight {
     /// The leader's 5xx: followers replay it, nothing is stored.
     Error(Arc<CacheEntry>),
     /// The leader's answer came from the cache's last good copy while the
-    /// origin failed: followers replay that copy too, never the error.
-    StaleError(Arc<CacheEntry>),
+    /// origin failed: a follower of the same game replays that copy, and one of
+    /// another game is answered by `status` — the failure the leader met.
+    /// The leader's answer came from the cache's last good copy while the
+    /// origin failed: a follower of the same game replays that copy, and one of
+    /// another game is answered by `status` — the failure the leader met.
+    StaleError {
+        copy: Arc<CacheEntry>,
+        status: StatusCode,
+    },
     /// Personal or not storable: each follower forwards its own request.
     Uncacheable,
     /// The leader went away without an answer (client disconnect): elect a new one.
@@ -594,22 +601,30 @@ impl Edge {
         map.insert(pathname.to_owned(), Instant::now() + Duration::from_millis(UNCACHEABLE_MS));
     }
 
+    /// `parse_game_from_request`'s answer for a request. Only a copy of the same
+    /// game may answer it: the cache key does not carry what [`request_game`]
+    /// makes of `Host` and its friends, so the two would otherwise disagree
+    /// silently — and a follower of a stale-error flight is compared the same
+    /// way as the direct lookup, or a satellite would be handed the Pokémon page
+    /// that shares its key.
+    fn copy_answers(entry: &CacheEntry, game: &str) -> bool {
+        entry.game == game
+    }
+
     /// The cache's last good copy of `key`, when its stale window closed no more
     /// than `stale_if_error` ago: what answers an origin that is answering
     /// errors rather than being slow. A copy past that is a copy about a page
     /// nobody has seen in ten minutes, and the error is the truer answer.
     /// Reading a copy leaves its `fresh_until` and `stale_until` as they were.
     /// Only a path in [`STALE_ERROR_PATHS`] is answered from a copy at all, and
-    /// only by a copy of the same game: the key does not carry what [`request_game`]
-    /// makes of `Host` and its friends, so a satellite's failing read must not be
-    /// answered with the Pokémon page that shares its key.
+    /// only by a copy of the same game ([`copy_answers`]).
     fn last_good(&self, pathname: &str, game: &str, key: &str) -> Option<Arc<CacheEntry>> {
         if !is_stale_error_path(pathname) {
             return None;
         }
         let mut cache = self.inner.cache.lock().unwrap_or_else(|e| e.into_inner());
         let entry = cache.get(key)?;
-        if entry.game != game {
+        if !Self::copy_answers(&entry, game) {
             return None;
         }
         let overdue = Instant::now().saturating_duration_since(entry.stale_until);
@@ -637,7 +652,10 @@ impl Edge {
     ) -> Response {
         match self.last_good(pathname, game, &flight.key) {
             Some(entry) => {
-                flight.finish(Flight::StaleError(entry.clone()));
+                flight.finish(Flight::StaleError {
+                    copy: entry.clone(),
+                    status,
+                });
                 self.send_last_good(&entry)
             }
             None => {
@@ -693,9 +711,18 @@ impl Edge {
         };
         match outcome {
             Flight::Entry(entry) | Flight::Error(entry) => send_entry(&entry, "COALESCED"),
-            // The leader answered the failing origin out of the cache; this
-            // follower is the same request, so it gets the same copy.
-            Flight::StaleError(entry) => self.send_last_good(&entry),
+            // The leader answered the failing origin out of the cache. This
+            // follower is the same request when it is the same game, and gets
+            // the same copy; of another game it must not be answered with that
+            // copy, and it does not fetch behind the leader either — the failure
+            // the leader met is its own answer.
+            Flight::StaleError { copy, status } => {
+                if Self::copy_answers(&copy, &game) {
+                    self.send_last_good(&copy)
+                } else {
+                    gateway_error(status)
+                }
+            }
             Flight::Failed(status) => match self.last_good(pathname, &game, &key) {
                 Some(entry) => self.send_last_good(&entry),
                 None => gateway_error(status),
@@ -773,7 +800,10 @@ impl Edge {
             // the page, so nothing replaces it — the cookie has to arrive.
             if !headers.contains_key(header::SET_COOKIE) {
                 if let Some(entry) = self.last_good(pathname, game, &flight.key) {
-                    flight.finish(Flight::StaleError(entry.clone()));
+                    flight.finish(Flight::StaleError {
+                        copy: entry.clone(),
+                        status,
+                    });
                     return self.send_last_good(&entry);
                 }
             }
@@ -1878,6 +1908,38 @@ mod tests {
         )
     }
 
+    /// How long the failing half of [`slow_sick_by_game_api`] takes to answer:
+    /// long enough that a second request joins the first one's flight instead of
+    /// starting its own.
+    const SLOW_ORIGIN: Duration = Duration::from_millis(300);
+
+    /// [`sick_by_game_api`]'s answers, failing slowly enough that a second
+    /// request joins the first one's flight instead of starting its own. The
+    /// caller hands in the counter of every origin request, so it can see that a
+    /// follower is answered without one.
+    fn slow_sick_by_game_api(calls: Arc<AtomicU64>) -> Router {
+        Router::new().route(
+            "/api/marketplace-expansion-page",
+            get(move |headers: HeaderMap, uri: Uri| {
+                let calls = calls.clone();
+                async move {
+                    let query = pokoin_api_common::http::Query::from_uri(&uri);
+                    let game = pokoin_api_common::game::parse_game_from_request(
+                        &pokoin_api_common::http::header_pairs(&headers),
+                        query.first("game"),
+                        query.first("marketplaceGame"),
+                    );
+                    let first = calls.fetch_add(1, Ordering::SeqCst) == 0;
+                    if game == "pokemon" && first {
+                        return good_page();
+                    }
+                    tokio::time::sleep(SLOW_ORIGIN).await;
+                    failed_page(StatusCode::INTERNAL_SERVER_ERROR, &[])
+                }
+            }),
+        )
+    }
+
     /// `/api/marketplace-card-page`: each of its two URLs answers one cacheable
     /// 200 first, then a 503 — and `?cookie=1` a 503 that also hands the client a
     /// `Set-Cookie`. Two counters, because a test warms both and each key needs
@@ -1970,6 +2032,100 @@ mod tests {
             "STALE-ERROR",
             "the copy is worth serving to the game it is a copy of"
         );
+    }
+
+    /// The same bound one step further: a follower does not look in the cache at
+    /// all, it takes what the leader published — and the leader publishes a copy
+    /// for the key, which `Host`, `x-forwarded-host` and `x-marketplace-game`
+    /// share. So a follower of another game is answered by the failure the leader
+    /// met, never by another game's page, and it does not fetch behind the leader
+    /// to find out: one answer per follower.
+    #[tokio::test]
+    async fn a_follower_of_another_game_is_not_answered_with_the_leaders_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let calls = Arc::new(AtomicU64::new(0));
+        let edge = Edge::new(
+            config(dir.path().to_path_buf(), Duration::from_secs(30)),
+            slow_sick_by_game_api(calls.clone()),
+            Router::new(),
+        );
+        let get = |edge: &Edge, headers: &'static [(&'static str, &'static str)]| {
+            let edge = edge.clone();
+            async move {
+                proxy(
+                    State(edge),
+                    req("GET", "/api/marketplace-expansion-page", headers),
+                )
+                .await
+            }
+        };
+        let warm = get(&edge, &[("host", "pokoin.com")]).await;
+        assert_eq!(warm.headers()["x-pokoin-edge-cache"], "MISS");
+        drop(warm);
+        tokio::time::sleep(PAST_SHORT_GOOD).await;
+        let body_of = |response: Response| async move {
+            String::from_utf8(
+                to_bytes(response.into_body(), 1 << 16)
+                    .await
+                    .unwrap()
+                    .to_vec(),
+            )
+            .unwrap()
+        };
+        for follower in [
+            &[("host", "magic.pokoin.com")][..],
+            &[
+                ("host", "pokoin.com"),
+                ("x-forwarded-host", "magic.pokoin.com"),
+            ][..],
+            &[("host", "pokoin.com"), ("x-marketplace-game", "magic")][..],
+        ] {
+            let (asked, stale) = (
+                calls.load(Ordering::SeqCst),
+                edge.inner.stats.stale_error.load(Ordering::Relaxed),
+            );
+            let (leader, other) =
+                tokio::join!(get(&edge, &[("host", "pokoin.com")]), get(&edge, follower),);
+            assert_eq!(
+                leader.headers()["x-pokoin-edge-cache"],
+                "STALE-ERROR",
+                "the Pokémon read is answered from the Pokémon copy: {follower:?}"
+            );
+            assert_eq!(
+                body_of(leader).await,
+                GOOD_BODY,
+                "and with the page it is a copy of: {follower:?}"
+            );
+            let leader_copy = edge.inner.stats.stale_error.load(Ordering::Relaxed);
+            assert_eq!(leader_copy, stale + 1, "{follower:?}");
+            assert_eq!(
+                other.status(),
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "the same failure the leader met is this follower's answer: {follower:?}"
+            );
+            assert_ne!(
+                other
+                    .headers()
+                    .get("x-pokoin-edge-cache")
+                    .and_then(|value| value.to_str().ok()),
+                Some("STALE-ERROR"),
+                "a satellite is never labelled as answered from a copy: {follower:?}"
+            );
+            assert_eq!(
+                other.headers()["cache-control"],
+                "no-store",
+                "and it is answered by the synthetic refusal, not by a cached page: {follower:?}"
+            );
+            assert!(
+                !body_of(other).await.contains(GOOD_BODY),
+                "the Pokémon page is not the satellite's body: {follower:?}"
+            );
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                asked + 1,
+                "the follower was answered from the leader's flight, not a second origin request: {follower:?}"
+            );
+        }
     }
 
     /// Point 2: 500, 502, 503 and 504 are a failing origin; 501 and 505 are the
