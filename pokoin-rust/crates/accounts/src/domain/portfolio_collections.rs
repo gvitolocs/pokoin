@@ -711,18 +711,22 @@ fn doc_path(id: &str) -> String {
 
 /// Why this save cannot be written, decided from the lists the transaction read.
 /// The replaced document is not compared against itself: a rename keeps one list.
-fn check_save(collections: &[Collection], existing: Option<&Document>, save: &Save) -> Tx<()> {
+///
+/// It refuses in the module's boxed [`Result`] rather than the transaction body's
+/// unboxed one — a fallible function returning a wide `ApiError` by value is the
+/// thing [`crate::error`] exists to avoid — and the body unboxes what it gets.
+fn check_save(collections: &[Collection], existing: Option<&Document>, save: &Save) -> Result<()> {
     let replaced = existing.map(Document::id);
     for collection in collections {
         if replaced.as_deref() == Some(collection.id.as_str()) {
             continue;
         }
         if names_collide(&collection.name, &save.name) {
-            return Err(*name_taken_error());
+            return Err(name_taken_error());
         }
     }
     if existing.is_none() && collections.len() >= MAX_COLLECTIONS {
-        return Err(*limit_error());
+        return Err(limit_error());
     }
     Ok(())
 }
@@ -817,7 +821,7 @@ pub async fn apply_save(
                     .await?;
                 let mut collections =
                     sorted_collections(documents.iter().map(collection_from_document));
-                check_save(&collections, existing.as_ref(), &save)?;
+                check_save(&collections, existing.as_ref(), &save).map_err(|error| *error)?;
                 let created_at_ms = existing
                     .as_ref()
                     .and_then(|document| document.get_timestamp_millis("createdAt"))
