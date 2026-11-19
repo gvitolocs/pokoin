@@ -24,7 +24,7 @@ use crate::firestore::{
 
 use super::collection::iso_timestamp;
 use super::marketplace_game::{is_pokemon_ingest_game, normalize_ingest_game};
-use super::poko_market_math::{normalize_language, CONDITIONS, LANGUAGES};
+use super::poko_market_math::{normalize_language, CONDITIONS};
 use super::portfolio_history::{
     add_utc_days, condition_key, holding_slices, language_key, last_sold_for, num, round2,
     sold_slice_key, value_holdings_on, Holding, PricePoint, HISTORY_DAYS, PRICE_BASIS,
@@ -273,10 +273,17 @@ fn sanitize_condition(value: Option<&Json>, at: Where) -> Result<String> {
 /// The language an item is stored and answered with, as the code the sold book is
 /// filed under: `English`, `english`, `en` and `EN` are the one `EN` slice, `ja` and
 /// `Japanese` the one `JP`, `zh-tw` the one `ZHT`. The marketplace's own normalizer is
-/// the accept-list, as `CONDITIONS` is the condition's: a body whose code is not one of
-/// the fourteen codes the vocabulary carries — whatever its shape, so `vi` and `fi` are
-/// refused for all that they are two letters — is refused rather than filed under a key
-/// no sale has, and a stored card keeps its line at nothing.
+/// the accept-list, and a code that is not two or three ASCII letters keys no slice at
+/// all — so a body is refused rather than filed under a key no sale has, and a stored
+/// card keeps its line at nothing.
+///
+/// The rule is the *shape* of the code, deliberately, and not membership in the
+/// normalizer's `LANGUAGES`: that list is what *it* can answer, which is narrower than
+/// what the marketplace files sales under. The seller's own picker offers `TH` and `VI`
+/// (`market/src/card-desk.js`, `LIST_LANGS`) and the sold writer files a Thai listing
+/// under `TH` (`apps/cardtrader-sold/src/listing.rs`), so a closed list would answer
+/// `collection_item_invalid` to a card its own database prices, and lock a list that
+/// already stores one out of ever being saved again.
 fn sanitize_language(value: Option<&Json>, at: Where) -> Result<String> {
     let raw = text_of(value);
     if clean_text(&raw).is_empty() {
@@ -291,10 +298,11 @@ fn sanitize_language(value: Option<&Json>, at: Where) -> Result<String> {
     } else {
         language_key(&raw)
     };
-    match LANGUAGES.iter().find(|known| **known == code) {
-        Some(known) => Ok((*known).to_string()),
-        None => at.refused("language", || kept_facet(&raw)),
+    let letters = code.bytes().all(|byte| byte.is_ascii_alphabetic());
+    if !letters || code.len() < 2 || code.len() > 3 {
+        return at.refused("language", || kept_facet(&raw));
     }
+    Ok(code)
 }
 
 /// What [`crate::firestore::new_document_id`] writes: an id outside that shape
@@ -1453,6 +1461,23 @@ mod tests {
         })
     }
 
+    /// The same row of blueprint 777 filed under one language instead of the other
+    /// facet: what `cardtrader_sold_daily` holds for a print of that language.
+    fn sold_language(language: &str, day: &str, pkn: f64) -> Json {
+        json!({
+            "game": "pokemon",
+            "card_id": "42",
+            "blueprint_id": "777",
+            "condition": "NM",
+            "language": language,
+            "reverse": false,
+            "first_edition": false,
+            "graded": false,
+            "observed_day": day,
+            "median_pkn": pkn,
+        })
+    }
+
     #[test]
     fn the_five_conditions_are_the_scale_the_sold_book_is_filed_in() {
         for (spelled, name) in [
@@ -1582,24 +1607,11 @@ mod tests {
     }
 
     #[test]
-    fn a_language_outside_the_marketplaces_own_vocabulary_is_refused() {
-        // The rule used to be the *shape* of a code — two or three ASCII letters —
-        // which is a weaker thing than the vocabulary it was supposed to describe:
-        // `vi` and `fi` are that shape, are not one of the fourteen codes the
-        // marketplace files a slice under, and so were stored as a line that can only
-        // ever read zero. Membership in `LANGUAGES` is the rule now, and the spelling
-        // that reaches a code stays the normalizer's and `language_key`'s own.
-        for language in ["vi", "fi", "th", "ms", "en-GB", "englishish", "sv"] {
-            let error =
-                Item::from_input(&json!({ "cardId": "42", "language": language }), 0).unwrap_err();
-            assert_eq!(error.code(), Some("collection_item_invalid"), "{language}");
-            assert!(
-                error.message().contains("language") && error.message().contains("card 1"),
-                "the card and the facet are named: {}",
-                error.message()
-            );
-        }
-
+    fn a_language_is_kept_as_the_code_the_sold_book_is_filed_under() {
+        // The accept rule is the shape of the code, so every spelling that reaches one
+        // lands on the key its sales are filed under — and the two codes the seller's
+        // picker offers that the normalizer's own list does not name (`TH`, `VI`) are
+        // kept like the rest, because their sales really are filed under them.
         for (named, code) in [
             ("en", "EN"),
             ("English", "EN"),
@@ -1623,10 +1635,81 @@ mod tests {
             ("traditional chinese", "ZHT"),
             ("id", "ID"),
             ("Indonesian", "ID"),
+            ("th", "TH"),
+            ("TH", "TH"),
+            ("vi", "VI"),
+            ("VI", "VI"),
         ] {
             let item = Item::from_input(&json!({ "cardId": "42", "language": named }), 0).unwrap();
             assert_eq!(item.language, code, "{named} is the {code} slice");
+            assert_eq!(
+                language_key(&item.language),
+                item.language,
+                "the stored code is its own slice key, so the book is read at it"
+            );
         }
+    }
+
+    #[test]
+    fn a_thai_and_a_vietnamese_card_are_stored_and_answered_as_themselves() {
+        let items = [
+            Item::from_input(&json!({ "cardId": "42", "language": "th" }), 0).unwrap(),
+            Item::from_input(&json!({ "cardId": "42", "language": "VI" }), 0).unwrap(),
+        ];
+        for item in items {
+            // What the route wrote is what the store hands back and what a save may
+            // send again: a list that stored a Thai card once refusing to be saved a
+            // second time would trap the seller in their own collection.
+            let round = Item::stored(&item.to_json()).unwrap();
+            assert_eq!(round, item, "{item:?}");
+        }
+
+        let collections = vec![collection(
+            "c1",
+            "Vault",
+            "2026-09-01T10:00:00",
+            [
+                Item::from_input(&json!({ "cardId": "42", "language": "th" }), 0).unwrap(),
+                Item::from_input(&json!({ "cardId": "43", "language": "vi" }), 0).unwrap(),
+            ]
+            .to_vec(),
+        )];
+        let rows = Rows::new(&collections);
+        let answered = collections_json(&collections, &rows, &Book::new(), "2026-10-08");
+        let languages: Vec<String> = answered[0]["items"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|item| item["language"].as_str().map(str::to_string))
+            .collect();
+        assert_eq!(languages, ["TH", "VI"], "{answered:?}");
+    }
+
+    #[test]
+    fn a_thai_card_prices_from_the_sales_filed_under_thai() {
+        let thai = Item::from_input(&json!({ "cardId": "42", "language": "th" }), 0).unwrap();
+        let collections = vec![collection("c1", "Vault", "2026-09-01T10:00:00", vec![thai])];
+        let rows = resolved(&collections, &[("42", "777")]);
+
+        // The English slice of the very same blueprint does not price it: the code is
+        // the slice, and a Thai print is not an English sale.
+        let english = book_of(&[sold_language("EN", "2026-10-01", 50.0)]);
+        assert_eq!(
+            day_segments(&rows, &english, "2026-10-08").unwrap()["segments"]["collection:c1"],
+            json!([0, 0, 1]),
+            "held and unpriced beside an English book, not priced off it"
+        );
+
+        // And the row the sold writer files a Thai listing as (`listing.rs`,
+        // `default_language_for_nationality("thai")`) is the row that prices it — the
+        // reason the picker's `TH` was never a code to refuse.
+        let book = book_of(&[sold_language("TH", "2026-10-01", 50.0)]);
+        assert_eq!(
+            day_segments(&rows, &book, "2026-10-08").unwrap()["segments"]["collection:c1"],
+            json!([50, 1, 1]),
+            "a TH slice the marketplace files sales under priced at nothing"
+        );
     }
 
     #[test]

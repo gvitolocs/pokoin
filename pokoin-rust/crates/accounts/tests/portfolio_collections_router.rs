@@ -166,6 +166,15 @@ fn card_of(id: &str, quantity: i64, game: &str) -> Json {
     item
 }
 
+/// One card of one list in a language the seller picked: `LIST_LANGS`
+/// (`market/src/card-desk.js`) offers `TH` and `VI`, which is what their sales are
+/// filed under and what their line has to be priced from.
+fn card_in(id: &str, quantity: i64, language: &str) -> Json {
+    let mut item = card(id, quantity);
+    item["mapValue"]["fields"]["language"]["stringValue"] = json!(language);
+    item
+}
+
 /// A Firestore whose answers come from what it was last told, so a save really is
 /// read back and a foreign document really is another seller's — and whose commits
 /// really do fail when the state a transaction read has moved, which is the only
@@ -1580,6 +1589,58 @@ async fn an_unanswered_market_leaves_every_card_of_a_two_game_list_unpriced() {
             "a price beside a reported seriesError: {item}"
         );
     }
+}
+
+/// `LIST_LANGS` (`market/src/card-desk.js`) offers `TH` and `VI`, and the sold writer
+/// files those listings under those two codes — neither of which is one of the fourteen
+/// `normalize_language` can answer. Through the route that is one claim: the code the
+/// seller picked is what the list stores, answers, and accepts back.
+#[tokio::test]
+async fn a_thai_and_a_vietnamese_card_are_answered_and_saved_again_as_written() {
+    let (state, _store, _transport) = store_state(vec![document(
+        "mine",
+        SELLER,
+        "Vault",
+        "2026-09-01T10:00:00Z",
+        vec![card_in("11", 2, "TH"), card_in("12", 1, "vi")],
+    )]);
+    let app = router(state);
+
+    let (status, body, _) = get(&app, Some(SELLER)).await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    let stored = body["collections"][0]["items"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let languages: Vec<String> = stored
+        .iter()
+        .filter_map(|item| item["language"].as_str().map(str::to_string))
+        .collect();
+    assert_eq!(languages, ["TH", "VI"], "body={body}");
+
+    // The exact items the answer handed out, saved again: a list that stored a Thai
+    // card once and then refused its own output could never be edited.
+    let (status, body, _) = post(
+        &app,
+        "save",
+        json!({ "id": "mine", "name": "Vault", "items": stored }),
+        SELLER,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a list holding a Thai card refused to be saved again: body={body}"
+    );
+    let items = body["collections"][0]["items"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let languages: Vec<String> = items
+        .iter()
+        .filter_map(|item| item["language"].as_str().map(str::to_string))
+        .collect();
+    assert_eq!(languages, ["TH", "VI"], "body={body}");
 }
 
 #[tokio::test]
