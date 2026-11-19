@@ -46,10 +46,13 @@ How the API sizes its pools:
 | Domain read + write (api-common), commerce read + write | 12 each; read and write become one pool when the URLs are equal | `POKOIN_RUST_DOMAIN_DB_POOL_MAX` |
 | Accounts read model + Card Rails writer | 4 + 2 | fixed |
 | **Each satellite game database** | **2**, idle-closed after **45 s**, recycled after 30 min | `POKOIN_RUST_GAME_DB_POOL_MAX` (clamped 1–4), `POKOIN_RUST_GAME_DB_IDLE_SECS` (clamped 5–300) |
+| Search-page gate on the catalogue pool | `pool_max / 2 / 4` concurrent requests: 2 on the Pi, 1 on an overflow pod; a later one waits 1.5 s for a slot | `POKOIN_RUST_SEARCH_PAGE_SLOTS` (0 or unset = derived), `POKOIN_RUST_SEARCH_PAGE_WAIT_MS` |
 
 Startup: the catalog pool (`pokoin_db::pool`) connects eagerly with a 3 s acquire timeout (it was 200 ms, too short for TLS verify-full + SCRAM; sqlx retries "too many clients" every 10–40 ms inside that window). `warm_dependencies` gives it 5 s and retries with backoff: 2 s doubling to 30 s, ±25 % jitter. On 2026-10-14 one new overflow pod logged about 95 `phase=postgres` "pool timed out" retries against the full writer; a healthy rollout opens about 16 connections per new pod. `/readyz` is unchanged.
 
 Satellite pools come from `pokoin_db::satellite_pool(url)`, one pool per database URL for the whole process. Catalog, api-common, commerce, accounts and external all share it; before this, each of those crates kept its own pool, so one process could reach about 44 connections per game. Batch jobs close a game's pool with `pokoin_db::close_satellite` once that game is done. `GET /metrics` reports `gameDbPools`, `gameDbPoolSize`, `gameDbPoolIdle` and `gameDbPoolMax`. The admin ingest (`external/src/game_ingest.rs`) still opens its own pool per run, with 4–20 connections, and closes it afterwards.
+
+A `Gate` (`pokoin_db::Gate`) stands in front of the catalogue pool for one route: a `marketplace-search-page` read-cache miss runs its SQL inside a door of `slots` requests, a later one waits `POKOIN_RUST_SEARCH_PAGE_WAIT_MS` for a slot and is then shed with `503` and `retry-after: 2`, so a slow search page no longer makes every other route meet `pool timed out` (142 of the API's 177 errors on 2026-11-19). When the edge cache holds a copy of a URL whose stale window ended at most `STALE_IF_ERROR` (600 s) ago and the origin answers 5xx, it replays that copy as `x-pokoin-edge-cache: STALE-ERROR` instead of the error, and never stores the error itself. `GET /metrics` reports the gate as `searchPageSlots`, `searchPageWaited` and `searchPageShed`.
 
 Ceilings on the writer (sums of caps, not typical use):
 
