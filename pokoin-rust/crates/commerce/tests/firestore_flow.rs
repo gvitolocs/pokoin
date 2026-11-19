@@ -744,6 +744,93 @@ async fn lock_then_unlock_burn_models_a_withdrawal() {
     assert_eq!(balance.locked_pkn, 0);
 }
 
+/// A release gives back what the lock holds and no more: an amount larger than
+/// the lock is refused with its own error, reported to the caller as `409
+/// release_exceeds_lock`, and the wallet and the ledger stay as they were.
+#[tokio::test]
+async fn a_release_returns_no_more_pkn_than_the_lock_holds() {
+    use pokoin_commerce::error::StoreError;
+
+    let (_, firestore, mock) = state_harness_with_store(|_| {}).await;
+    store::apply(&firestore, &LedgerOp::mint("u1", 500, "account_top_up"))
+        .await
+        .unwrap();
+    store::apply(
+        &firestore,
+        &LedgerOp::lock("u1", 200, "order_discount_held").with_ref("release-bound"),
+    )
+    .await
+    .expect("lock");
+    let entries = mock.keys_with_prefix("ledger_entries/").len();
+
+    let error = store::apply(
+        &firestore,
+        &LedgerOp::unlock("u1", 201, "order_discount_released", true).with_ref("release-bound"),
+    )
+    .await
+    .expect_err("a release larger than the lock is refused");
+    assert!(matches!(error, StoreError::ReleaseExceedsLock), "{error:?}");
+    let report = pokoin_commerce::error::ApiError::from(error);
+    assert_eq!(report.status.as_u16(), 409);
+    assert_eq!(report.code.as_deref(), Some("release_exceeds_lock"));
+    let balance = store::balance(&firestore, "u1").await.unwrap();
+    assert_eq!(balance.available_pkn, 300);
+    assert_eq!(balance.locked_pkn, 200);
+    assert_eq!(
+        mock.keys_with_prefix("ledger_entries/").len(),
+        entries,
+        "a refused release writes no ledger entry"
+    );
+
+    // What the lock holds goes back, and the total is what the mint made it.
+    store::apply(
+        &firestore,
+        &LedgerOp::unlock("u1", 200, "order_discount_released", true).with_ref("release-bound"),
+    )
+    .await
+    .expect("release");
+    let balance = store::balance(&firestore, "u1").await.unwrap();
+    assert_eq!(balance.available_pkn, 500);
+    assert_eq!(balance.locked_pkn, 0);
+}
+
+/// A payout that settled outside the ledger burns what the lock holds. The
+/// difference is never taken from the buyer's available balance; it is written
+/// on the entry as `lockedShortfallPkn` for a reconciliation to find.
+#[tokio::test]
+async fn a_settled_payout_burns_no_more_pkn_than_the_lock_holds() {
+    let (_, firestore, mock) = state_harness_with_store(|_| {}).await;
+    store::apply(&firestore, &LedgerOp::mint("u1", 500, "account_top_up"))
+        .await
+        .unwrap();
+    store::apply(
+        &firestore,
+        &LedgerOp::lock("u1", 120, "withdraw_requested").with_ref("wr-shortfall"),
+    )
+    .await
+    .expect("lock");
+    store::apply(
+        &firestore,
+        &LedgerOp::unlock("u1", 200, "withdraw_paid", false).with_ref("wr-shortfall"),
+    )
+    .await
+    .expect("a settled payout is never refused");
+
+    let balance = store::balance(&firestore, "u1").await.unwrap();
+    assert_eq!(balance.available_pkn, 380, "the lock alone was burned");
+    assert_eq!(balance.locked_pkn, 0);
+    let entry = mock
+        .keys_with_prefix("ledger_entries/")
+        .into_iter()
+        .find_map(|key| {
+            let entry = mock.get(&key)?;
+            (entry["type"] == "withdraw_paid").then_some(entry)
+        })
+        .expect("the settled payout entry");
+    assert_eq!(entry["amountPkn"], json!(200));
+    assert_eq!(entry["lockedShortfallPkn"], json!(80));
+}
+
 #[tokio::test]
 async fn an_insufficient_transfer_is_refused_and_changes_nothing() {
     let (_, firestore) = harness().await;
@@ -2981,6 +3068,331 @@ async fn versioned_paid_webhook_preserves_discount_economics_and_consumes_intege
     assert_eq!(stored["pknDiscount"]["pkn"], json!(200));
     assert_eq!(stored["pknDiscount"]["eurCents"], json!(100));
     assert_eq!(stored["pknDiscount"]["state"], json!("consumed"));
+    let balance = store::balance(&firestore, "buyer-1").await.unwrap();
+    assert_eq!(balance.available_pkn, 300);
+    assert_eq!(balance.locked_pkn, 0);
+}
+
+/// Ledger entries that consumed one order's PKN discount.
+fn discount_consumes(mock: &MockStore, order_id: &str) -> usize {
+    mock.keys_with_prefix("ledger_entries/")
+        .iter()
+        .filter(|key| {
+            mock.get(key).is_some_and(|entry| {
+                entry["type"] == "order_discount_consumed" && entry["ref"] == order_id
+            })
+        })
+        .count()
+}
+
+/// Give the buyer PKN to spend.
+async fn top_up_buyer(firestore: &FirestoreClient, pkn: i64) {
+    store::apply(firestore, &LedgerOp::mint("buyer-1", pkn, "account_top_up"))
+        .await
+        .unwrap();
+}
+
+/// Hold PKN against an order, the way checkout does.
+async fn hold_for_order(firestore: &FirestoreClient, order_id: &str, pkn: i64) {
+    store::apply(
+        firestore,
+        &LedgerOp::lock("buyer-1", pkn, "order_discount_held").with_ref(order_id),
+    )
+    .await
+    .unwrap();
+}
+
+/// The order document as it is stored now.
+async fn stored_order(firestore: &FirestoreClient, order_id: &str) -> Value {
+    firestore
+        .get_document(&firestore.document_path("orders", order_id).unwrap())
+        .await
+        .unwrap()
+        .expect("order")
+}
+
+/// An order written before the settlement model, with a 200 PKN / EUR 1.00
+/// discount on a EUR 10.30 total, in the state a paid report is checked against.
+async fn put_unversioned_discount_order(
+    firestore: &FirestoreClient,
+    order_id: &str,
+    order_status: &str,
+    payment_status: &str,
+    discount: Value,
+) {
+    firestore
+        .create_document(
+            "orders",
+            order_id,
+            &json!({
+                "buyerUid":"buyer-1", "channel":"eur", "currency":"EUR",
+                "paymentMethod":"stripe", "paymentStatus":payment_status,
+                "status":order_status,
+                "stripeCheckoutSessionId":format!("cs_{order_id}"),
+                "totalEURCents":1030,
+                "pknDiscount":discount,
+                "shipments":[{"sellerId":"seller-1","itemsSubtotalCents":1000,
+                    "shippingAmountEURCents":0,"sellerGrossCents":1000,
+                    "sellerTransferCents":null}],
+                "items":[{"sellerUid":"seller-1","quantity":1,
+                    "unitPriceEURCents":1000}],
+                "inventory":{"state":"committed","lines":[]},
+                "fulfillment":{"state":"done","steps":{}}
+            }),
+        )
+        .await
+        .expect("order");
+}
+
+/// The same order as an order written on the settlement model: EUR 10.30
+/// including EUR 0.30 of buyer markup, so its money part is EUR 9.30 once the
+/// EUR 1.00 discount is taken off.
+async fn put_versioned_discount_order(
+    firestore: &FirestoreClient,
+    order_id: &str,
+    order_status: &str,
+    payment_status: &str,
+    discount: Value,
+) {
+    firestore
+        .create_document(
+            "orders",
+            order_id,
+            &json!({
+                "buyerUid":"buyer-1", "channel":"eur", "currency":"EUR",
+                "paymentMethod":"stripe", "paymentStatus":payment_status,
+                "status":order_status, "settlementModel":"buyer_markup_processor_costs_v1",
+                "stripeCheckoutSessionId":format!("cs_{order_id}"),
+                "totalEURCents":1030,
+                "buyerMarkupCents":30, "shippingEURCents":0, "insuranceEURCents":0,
+                "pknDiscount":discount,
+                "shipments":[{"sellerId":"seller-1","itemsSubtotalCents":1000,
+                    "shippingAmountEURCents":0,"sellerGrossCents":1000,
+                    "sellerTransferCents":null}],
+                "items":[{"sellerUid":"seller-1","quantity":1,
+                    "unitPriceEURCents":1000}],
+                "inventory":{"state":"committed","lines":[]},
+                "fulfillment":{"state":"done","steps":{}}
+            }),
+        )
+        .await
+        .expect("order");
+}
+
+/// Stripe's report that the EUR 9.30 money part of such an order was paid.
+fn paid_report(order_id: &str) -> Value {
+    json!({
+        "id":format!("evt_{order_id}"), "type":"checkout.session.completed",
+        "data":{"object":{
+            "id":format!("cs_{order_id}"), "mode":"payment", "payment_status":"paid",
+            "currency":"eur", "amount_total":930,
+            "payment_intent":format!("pi_{order_id}"),
+            "metadata":{"kind":"marketplace_order_eur",
+                "pokoinOrderId":order_id, "pokoinUid":"buyer-1"}
+        }}
+    })
+}
+
+/// Orders written before the settlement model are read from their own fields: an
+/// order that has ended keeps its discount with the buyer, the money is recorded
+/// and the discount line is marked for review. Here it is the order state itself
+/// that says the hold came back.
+#[tokio::test]
+async fn a_paid_report_on_an_ended_unversioned_order_leaves_its_discount_with_the_buyer() {
+    use pokoin_commerce::handlers::stripe::process_verified_event;
+
+    let (state, firestore, mock) = state_harness_with_store(|_| {}).await;
+    top_up_buyer(&firestore, 500).await;
+    put_unversioned_discount_order(
+        &firestore,
+        "order-report-ended",
+        "cancelled",
+        "expired",
+        json!({ "pkn": 200, "eurCents": 100, "state": "held" }),
+    )
+    .await;
+    process_verified_event(&state, &paid_report("order-report-ended"))
+        .await
+        .unwrap();
+
+    let stored = stored_order(&firestore, "order-report-ended").await;
+    assert_eq!(stored["paymentStatus"], json!("paid"));
+    assert_eq!(
+        stored["pknDiscount"]["state"],
+        json!("released_before_payment")
+    );
+    assert!(stored["pknDiscount"]["reviewAt"].is_string());
+    assert_eq!(stored["pknDiscount"]["pkn"], json!(200));
+    assert_eq!(stored["pknDiscount"]["eurCents"], json!(100));
+    assert_eq!(
+        discount_consumes(&mock, "order-report-ended"),
+        0,
+        "an ended order does not take the discount again"
+    );
+    let balance = store::balance(&firestore, "buyer-1").await.unwrap();
+    assert_eq!(balance.available_pkn, 500);
+    assert_eq!(balance.locked_pkn, 0);
+}
+
+/// On an order written before the settlement model the order state and the
+/// discount line each say on their own that the hold came back: a discount
+/// recorded as released is the buyer's, and a payment report that arrives
+/// afterwards leaves it there.
+#[tokio::test]
+async fn a_paid_report_after_an_unversioned_discount_release_leaves_it_with_the_buyer() {
+    use pokoin_commerce::handlers::stripe::process_verified_event;
+
+    let (state, firestore, mock) = state_harness_with_store(|_| {}).await;
+    top_up_buyer(&firestore, 500).await;
+    put_unversioned_discount_order(
+        &firestore,
+        "order-report-released",
+        "pending",
+        "unpaid",
+        json!({ "pkn": 200, "eurCents": 100, "state": "released" }),
+    )
+    .await;
+    process_verified_event(&state, &paid_report("order-report-released"))
+        .await
+        .unwrap();
+
+    let stored = stored_order(&firestore, "order-report-released").await;
+    assert_eq!(stored["paymentStatus"], json!("paid"));
+    assert_eq!(
+        stored["pknDiscount"]["state"],
+        json!("released_before_payment")
+    );
+    assert!(stored["pknDiscount"]["reviewAt"].is_string());
+    assert_eq!(discount_consumes(&mock, "order-report-released"), 0);
+    let balance = store::balance(&firestore, "buyer-1").await.unwrap();
+    assert_eq!(balance.available_pkn, 500);
+    assert_eq!(balance.locked_pkn, 0);
+}
+
+/// An order written before the settlement model consumes the discount it still
+/// holds when the money arrives.
+#[tokio::test]
+async fn a_paid_report_consumes_an_unversioned_held_discount() {
+    use pokoin_commerce::handlers::stripe::process_verified_event;
+
+    let (state, firestore, mock) = state_harness_with_store(|_| {}).await;
+    top_up_buyer(&firestore, 500).await;
+    hold_for_order(&firestore, "order-report-held", 200).await;
+    put_unversioned_discount_order(
+        &firestore,
+        "order-report-held",
+        "pending",
+        "pending_stripe",
+        json!({ "pkn": 200, "eurCents": 100, "state": "held" }),
+    )
+    .await;
+    process_verified_event(&state, &paid_report("order-report-held"))
+        .await
+        .unwrap();
+
+    let stored = stored_order(&firestore, "order-report-held").await;
+    assert_eq!(stored["paymentStatus"], json!("paid"));
+    assert_eq!(stored["pknDiscount"]["state"], json!("consumed"));
+    assert_eq!(discount_consumes(&mock, "order-report-held"), 1);
+    let balance = store::balance(&firestore, "buyer-1").await.unwrap();
+    assert_eq!(balance.available_pkn, 300);
+    assert_eq!(balance.locked_pkn, 0);
+}
+
+/// On an order written before the settlement model, a release that never reached
+/// the ledger left its PKN on the lock, so that discount is still the order's to
+/// consume: the discount line alone does not decide, the recorded release does.
+#[tokio::test]
+async fn a_paid_report_consumes_an_unversioned_discount_whose_release_was_never_recorded() {
+    use pokoin_commerce::handlers::stripe::process_verified_event;
+
+    let (state, firestore, mock) = state_harness_with_store(|_| {}).await;
+    top_up_buyer(&firestore, 500).await;
+    hold_for_order(&firestore, "order-report-unrecorded", 200).await;
+    put_unversioned_discount_order(
+        &firestore,
+        "order-report-unrecorded",
+        "cancelled",
+        "expired",
+        json!({ "pkn": 200, "eurCents": 100, "state": "released",
+                "restoreError": "ledger write refused" }),
+    )
+    .await;
+    process_verified_event(&state, &paid_report("order-report-unrecorded"))
+        .await
+        .unwrap();
+
+    let stored = stored_order(&firestore, "order-report-unrecorded").await;
+    assert_eq!(stored["pknDiscount"]["state"], json!("consumed"));
+    assert_eq!(
+        discount_consumes(&mock, "order-report-unrecorded"),
+        1,
+        "PKN still on its lock is consumed by the order that holds it"
+    );
+    let balance = store::balance(&firestore, "buyer-1").await.unwrap();
+    assert_eq!(balance.available_pkn, 300);
+    assert_eq!(balance.locked_pkn, 0);
+}
+
+/// An order written on the settlement model is checked against that model first,
+/// and an ended order is refused there: nothing is taken from the buyer and the
+/// order is left exactly as its cancellation wrote it.
+#[tokio::test]
+async fn a_versioned_order_that_ended_answers_a_paid_report_with_a_conflict() {
+    use pokoin_commerce::handlers::stripe::process_verified_event;
+
+    let (state, firestore, mock) = state_harness_with_store(|_| {}).await;
+    top_up_buyer(&firestore, 500).await;
+    hold_for_order(&firestore, "order-report-versioned", 200).await;
+    put_versioned_discount_order(
+        &firestore,
+        "order-report-versioned",
+        "cancelled",
+        "expired",
+        json!({ "pkn": 200, "eurCents": 100, "state": "released" }),
+    )
+    .await;
+    let report = process_verified_event(&state, &paid_report("order-report-versioned"))
+        .await
+        .unwrap_err();
+    assert_eq!(report.status, StatusCode::CONFLICT);
+    assert_eq!(report.code.as_deref(), Some("stripe_order_mismatch"));
+
+    assert_eq!(discount_consumes(&mock, "order-report-versioned"), 0);
+    let stored = stored_order(&firestore, "order-report-versioned").await;
+    assert_eq!(stored["paymentStatus"], json!("expired"));
+    assert_eq!(stored["pknDiscount"]["state"], json!("released"));
+    let balance = store::balance(&firestore, "buyer-1").await.unwrap();
+    assert_eq!(balance.available_pkn, 300);
+    assert_eq!(balance.locked_pkn, 200);
+}
+
+/// The same order on the same model with the very same report, and the order not
+/// ended: the checks pass and the discount is consumed. What refused the report
+/// above was the state the order had reached, not the model it was written on.
+#[tokio::test]
+async fn a_versioned_order_that_has_not_ended_accepts_the_same_paid_report() {
+    use pokoin_commerce::handlers::stripe::process_verified_event;
+
+    let (state, firestore, mock) = state_harness_with_store(|_| {}).await;
+    top_up_buyer(&firestore, 500).await;
+    hold_for_order(&firestore, "order-report-open", 200).await;
+    put_versioned_discount_order(
+        &firestore,
+        "order-report-open",
+        "pending",
+        "pending_stripe",
+        json!({ "pkn": 200, "eurCents": 100, "state": "held" }),
+    )
+    .await;
+    process_verified_event(&state, &paid_report("order-report-open"))
+        .await
+        .unwrap();
+
+    let stored = stored_order(&firestore, "order-report-open").await;
+    assert_eq!(stored["paymentStatus"], json!("paid"));
+    assert_eq!(stored["pknDiscount"]["state"], json!("consumed"));
+    assert_eq!(discount_consumes(&mock, "order-report-open"), 1);
     let balance = store::balance(&firestore, "buyer-1").await.unwrap();
     assert_eq!(balance.available_pkn, 300);
     assert_eq!(balance.locked_pkn, 0);
