@@ -519,19 +519,31 @@ const ERROR_MESSAGES = {
  *
  * A limit quoted in a sentence is the one the answer carried (`limits`),
  * because the server may raise it and tell the seller 20 anyway; the defaults
- * stand only for an answer that said nothing. `fallback` is the line for a code
- * this table does not know.
+ * stand only for an answer that said nothing.
+ *
+ * A code this table does not know — the 400 of a body the desk never expected,
+ * an `unknown_action`, a 500 — is one plain sentence, never the server's own
+ * text and never a half-read field of it. Only the desk's words are shown, so
+ * the seller sees the same line whatever the shape of the answer, and the draft
+ * they typed stays where it is: this says only why the write did not go.
  */
 export function collectionErrorMessage(code, { fallback = 'Could not save the collection.', limits = DEFAULT_LIMITS } = {}) {
   const clean = normalizeLimits(limits);
+  // A code is data from the network: `toString` and `constructor` must not be
+  // answered with whatever the prototype happens to hold.
   const key = text(code).toLowerCase();
   if (key === '401') return ERROR_MESSAGES.unauthorized;
   if (key === 'collection_limit') return `You can keep up to ${clean.collections} collections. Delete one first.`;
   if (key === 'collection_items_limit') return `A collection holds up to ${clean.items} cards.`;
-  return ERROR_MESSAGES[key] || fallback;
+  return Object.hasOwn(ERROR_MESSAGES, key) ? ERROR_MESSAGES[key] : fallback;
 }
 
-/** The code of a thrown request: the body's, else its status. */
+/**
+ * The code of a thrown request: the body's `code`, else its status as text,
+ * else nothing. A body that carries a human `error` sentence and no code is
+ * read by its status, because the sentence is the server's and only the code is
+ * something this desk knows how to answer.
+ */
 export function errorCode(error) {
   const code = text(error?.body?.code ?? error?.code);
   if (code) return code;

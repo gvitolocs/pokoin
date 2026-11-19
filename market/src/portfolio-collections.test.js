@@ -510,6 +510,17 @@ test('every error code reads as a sentence', () => {
     collectionErrorMessage('collection_items_limit', { limits: { items: 0 } }),
     'A collection holds up to 300 cards.',
   );
+  // A code this desk does not know is one plain sentence, whatever its shape —
+  // the 400 of a body nobody expected, a code from another service, a word that
+  // happens to name something every object inherits.
+  for (const unknown of ['400', '405', '500', 'unknown_action', 'bad_request', 'price_service_down', 'toString', 'constructor', '__proto__', 'hasOwnProperty', ' valueOf ', '🏳️‍🌈']) {
+    assert.equal(collectionErrorMessage(unknown), 'Could not save the collection.', `${unknown} is not a code this desk knows`);
+  }
+  assert.equal(
+    collectionErrorMessage('400', { fallback: 'Could not load your collections.' }),
+    'Could not load your collections.',
+    'a load says what was being loaded, and nothing else',
+  );
 });
 
 test('the code of a thrown request is the body code, else its status', () => {
@@ -518,6 +529,17 @@ test('the code of a thrown request is the body code, else its status', () => {
   assert.equal(errorCode({ status: 0 }), '');
   assert.equal(errorCode(null), '');
   assert.equal(collectionErrorMessage(errorCode({ body: { code: 'collection_limit' } })), 'You can keep up to 20 collections. Delete one first.');
+  // The server's 400 of a body it could not read carries a human sentence and
+  // no code: the status is the code, so the desk answers with its own plain
+  // line rather than repeating a sentence written for a log.
+  const malformed = new Error('Invalid JSON body.');
+  malformed.status = 400;
+  malformed.body = { error: 'Invalid JSON body.' };
+  assert.equal(errorCode(malformed), '400');
+  assert.equal(collectionErrorMessage(errorCode(malformed)), 'Could not save the collection.');
+  const noShape = new Error('The network request failed.');
+  assert.equal(errorCode(noShape), '');
+  assert.equal(collectionErrorMessage(errorCode(noShape)), 'Could not save the collection.');
 });
 
 test('the model it hands over is a segments model the table can read', () => {
