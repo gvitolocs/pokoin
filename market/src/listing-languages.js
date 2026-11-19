@@ -84,11 +84,11 @@ export function releaseLanguagesForSet(setName) {
  * nationality, then a game with its own print languages (GAME_SELL_LANGS) uses
  * theirs; anything else is Pokémon: the core EN/IT/FR/DE/ES/PT, plus NL, PL and
  * RU only when release data names them. A set with no release row and no
- * `releaseLanguages` gets the core alone — of the 703 rows of the release table
- * Dutch sits on 6, Polish on 4 and Russian on 13, so they are exceptions and
- * never a default: Mega Golurk ex of Delta Reign has no Dutch, Polish or Russian
- * listing. A printing really released in them keeps them, and deskLanguageChips
- * still adds a language the caller has real data for.
+ * `releaseLanguages` gets the core alone — Dutch sits on 6, Polish on 4 and
+ * Russian on 13 of the few hundred rows of the release table, so they are
+ * exceptions and never a default: Mega Golurk ex of Delta Reign has no Dutch,
+ * Polish or Russian listing. A printing really released in them keeps them, and
+ * deskLanguageChips still adds a language the caller has real data for.
  */
 export function sellLanguages({ game, nationality, setName, releaseLanguages } = {}) {
   const printed = PRINT_LANG[String(nationality || '').toLowerCase()];
