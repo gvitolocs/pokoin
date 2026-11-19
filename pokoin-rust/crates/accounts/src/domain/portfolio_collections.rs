@@ -24,7 +24,7 @@ use crate::firestore::{
 
 use super::collection::iso_timestamp;
 use super::marketplace_game::{is_pokemon_ingest_game, normalize_ingest_game};
-use super::poko_market_math::{normalize_language, CONDITIONS};
+use super::poko_market_math::{normalize_language, CONDITIONS, LANGUAGES};
 use super::portfolio_history::{
     add_utc_days, condition_key, holding_slices, language_key, last_sold_for, num, round2,
     sold_slice_key, value_holdings_on, Holding, PricePoint, HISTORY_DAYS, PRICE_BASIS,
@@ -273,9 +273,10 @@ fn sanitize_condition(value: Option<&Json>, at: Where) -> Result<String> {
 /// The language an item is stored and answered with, as the code the sold book is
 /// filed under: `English`, `english`, `en` and `EN` are the one `EN` slice, `ja` and
 /// `Japanese` the one `JP`, `zh-tw` the one `ZHT`. The marketplace's own normalizer is
-/// the accept-list, and a code that is not two or three ASCII letters keys no slice at
-/// all — so a body is refused rather than filed under a key no sale has, and a stored
-/// card keeps its line at nothing.
+/// the accept-list, as `CONDITIONS` is the condition's: a body whose code is not one of
+/// the fourteen codes the vocabulary carries — whatever its shape, so `vi` and `fi` are
+/// refused for all that they are two letters — is refused rather than filed under a key
+/// no sale has, and a stored card keeps its line at nothing.
 fn sanitize_language(value: Option<&Json>, at: Where) -> Result<String> {
     let raw = text_of(value);
     if clean_text(&raw).is_empty() {
@@ -290,11 +291,10 @@ fn sanitize_language(value: Option<&Json>, at: Where) -> Result<String> {
     } else {
         language_key(&raw)
     };
-    let letters = code.bytes().all(|byte| byte.is_ascii_alphabetic());
-    if !letters || code.len() < 2 || code.len() > 3 {
-        return at.refused("language", || kept_facet(&raw));
+    match LANGUAGES.iter().find(|known| **known == code) {
+        Some(known) => Ok((*known).to_string()),
+        None => at.refused("language", || kept_facet(&raw)),
     }
-    Ok(code)
 }
 
 /// What [`crate::firestore::new_document_id`] writes: an id outside that shape
@@ -1579,6 +1579,54 @@ mod tests {
             })),
             "held at nothing rather than priced off the NM sales"
         );
+    }
+
+    #[test]
+    fn a_language_outside_the_marketplaces_own_vocabulary_is_refused() {
+        // The rule used to be the *shape* of a code — two or three ASCII letters —
+        // which is a weaker thing than the vocabulary it was supposed to describe:
+        // `vi` and `fi` are that shape, are not one of the fourteen codes the
+        // marketplace files a slice under, and so were stored as a line that can only
+        // ever read zero. Membership in `LANGUAGES` is the rule now, and the spelling
+        // that reaches a code stays the normalizer's and `language_key`'s own.
+        for language in ["vi", "fi", "th", "ms", "en-GB", "englishish", "sv"] {
+            let error =
+                Item::from_input(&json!({ "cardId": "42", "language": language }), 0).unwrap_err();
+            assert_eq!(error.code(), Some("collection_item_invalid"), "{language}");
+            assert!(
+                error.message().contains("language") && error.message().contains("card 1"),
+                "the card and the facet are named: {}",
+                error.message()
+            );
+        }
+
+        for (named, code) in [
+            ("en", "EN"),
+            ("English", "EN"),
+            ("it", "IT"),
+            ("fr", "FR"),
+            ("de", "DE"),
+            ("es", "ES"),
+            ("Spanish", "ES"),
+            ("ja", "JP"),
+            ("Japanese", "JP"),
+            ("pt", "PT"),
+            ("nl", "NL"),
+            ("pl", "PL"),
+            ("ru", "RU"),
+            ("ko", "KO"),
+            ("Korean", "KO"),
+            ("kr", "KO"),
+            ("zh", "ZH"),
+            ("zh-cn", "ZH"),
+            ("zh-tw", "ZHT"),
+            ("traditional chinese", "ZHT"),
+            ("id", "ID"),
+            ("Indonesian", "ID"),
+        ] {
+            let item = Item::from_input(&json!({ "cardId": "42", "language": named }), 0).unwrap();
+            assert_eq!(item.language, code, "{named} is the {code} slice");
+        }
     }
 
     #[test]

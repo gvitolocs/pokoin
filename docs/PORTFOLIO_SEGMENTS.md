@@ -268,9 +268,10 @@ Language is answered as the code the sold rows carry: `English`, `english`, `en`
 A `game` may be written as its id or the display name the marketplace uses. Absent
 means `NM` / `EN`, Pokémon.
 
-The two vocabularies are closed: a `condition` outside those five, a `language` that
-does not come back as the two or three ASCII letters of a code, and either written
-past 24 characters — counted before anything is normalised — is a
+The two vocabularies are closed: a `condition` outside those five, a `language` that is
+not one of the fourteen codes the marketplace's vocabulary carries (`vi` and `fi` are
+refused for all that they are two letters — the shape of a code is not its membership),
+and either written past 24 characters — counted before anything is normalised — is a
 `collection_item_invalid` that names the card and the facet, because such a slice has
 no sales to carry a series and a save that quietly stored it would draw a line that
 can only ever read zero. A `game` the platform's own game table does not list is a 400
