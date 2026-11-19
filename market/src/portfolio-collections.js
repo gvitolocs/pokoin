@@ -119,9 +119,12 @@ export function itemIdOf(item = {}) {
 }
 
 /**
- * Which of its four lines an item row shows for a price — the decision only;
+ * Which of its lines an item row shows for a price — the decision only;
  * the words and the formatting are the form's.
  *
+ * - `unavailable` — the answer said the price service is out (`seriesError`), so
+ *   nothing is priced, this row included. It comes before every other question:
+ *   a null that is the whole desk's does not mean this slice sold nothing.
  * - `later` — nothing answers for this slice: the row came straight from the
  *   search, or a facet has moved it off the slice the server priced.
  * - `pending` — the server priced this slice, but the desk does not yet know
@@ -129,7 +132,8 @@ export function itemIdOf(item = {}) {
  * - `amount` — the server's sold price for exactly this slice.
  * - `sold` — the server answered this slice and said nothing had sold on it.
  */
-export function itemPriceLine(item, { currencyPending = false } = {}) {
+export function itemPriceLine(item, { currencyPending = false, pricesUnavailable = false } = {}) {
+  if (pricesUnavailable) return 'unavailable';
   const slice = text(item?.id);
   if (!slice || text(item?.pricedId) !== slice) return 'later';
   if (currencyPending) return 'pending';
@@ -228,6 +232,11 @@ function normalizeCollection(row, limits) {
  * The raw answer as `{ limits, collections, model }`. `model` is a `{defs, days}`
  * the segment helpers accept, and it always carries one def per saved
  * collection — a list with no card yet still gets its row.
+ *
+ * `pricesUnavailable` is the answer's `seriesError: "prices_unavailable"`: the
+ * seller's lists came back, the prices did not, and `days` is empty with it.
+ * Since no day can count a list any more, each collection def carries its card
+ * count itself (`held`), so the level still states how big each list is.
  */
 export function normalizeCollections(data) {
   const limits = normalizeLimits(data?.limits);
@@ -239,7 +248,8 @@ export function normalizeCollections(data) {
     seen.add(collection.id);
     collections.push(collection);
   }
-  const defs = normalizeSegmentDefs(data?.segmentDefs).filter((def) => def.group === COLLECTION_GROUP);
+  const pricesUnavailable = pricesUnavailableOf(data);
+  let defs = normalizeSegmentDefs(data?.segmentDefs).filter((def) => def.group === COLLECTION_GROUP);
   const keys = new Set(defs.map((def) => def.key));
   for (const collection of collections) {
     const key = collectionKey(collection.id);
@@ -247,13 +257,30 @@ export function normalizeCollections(data) {
     keys.add(key);
     defs.push({ key, group: COLLECTION_GROUP, game: '', label: collection.name, years: undefined });
   }
+  if (pricesUnavailable) {
+    const counts = new Map();
+    for (const collection of collections) {
+      counts.set(collectionKey(collection.id), collection.items.reduce((sum, card) => sum + card.quantity, 0));
+    }
+    defs = defs.map((def) => (counts.has(def.key) ? { ...def, held: counts.get(def.key) } : def));
+  }
   const normalized = normalizeSegments({ segmentDefs: defs, days: data?.days });
-  return { limits, collections, model: { defs, days: normalized?.days || [] } };
+  return { limits, collections, pricesUnavailable, model: { defs, days: normalized?.days || [] } };
+}
+
+/** The one `seriesError` this desk knows: the lists are there, the prices are not. */
+function pricesUnavailableOf(data) {
+  return text(data?.seriesError ?? data?.series_error) === 'prices_unavailable';
 }
 
 /** The empty state: nothing saved, nothing answered, the server's own limits. */
 export function emptyCollections(limits = DEFAULT_LIMITS) {
-  return { limits: normalizeLimits(limits), collections: [], model: { defs: [], days: [] } };
+  return {
+    limits: normalizeLimits(limits),
+    collections: [],
+    pricesUnavailable: false,
+    model: { defs: [], days: [] },
+  };
 }
 
 /** A card straight from the search, as the draft wants it: 1 copy, NM, EN. */

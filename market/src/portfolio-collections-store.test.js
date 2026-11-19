@@ -22,6 +22,18 @@ function item(cardId = '129552') {
   return { game: 'pokemon', cardId, condition: 'NM', language: 'EN', quantity: 1, name: 'Charizard' };
 }
 
+/**
+ * What the desk gets while the price service is out: the seller's own lists
+ * with every price nulled, not one day, and the field that says why.
+ */
+function pricesOut(collections) {
+  const out = answer(collections.map((row) => ({
+    ...row,
+    items: row.items.map((card) => ({ ...card, pricePkn: null })),
+  })), []);
+  return { ...out, seriesError: 'prices_unavailable' };
+}
+
 function binder(items = [{ game: 'pokemon', cardId: '129552', condition: 'NM', language: 'EN', quantity: 1, name: 'Charizard', pricePkn: 480 }]) {
   return { id: 'c1', name: 'Charizard binder', items };
 }
@@ -157,6 +169,70 @@ test('a retry keeps the level on screen while it is out', async () => {
   assert.deepEqual(store.get().collections.map((row) => row.name), ['Charizard binder']);
   assert.equal(store.get().pending, false);
   assert.ok(store.model());
+});
+
+test('the answer that prices nothing is a level with its counts, not a failed load', async () => {
+  const list = {
+    id: 'c1',
+    name: 'Charizard binder',
+    items: [
+      { ...item(), pricePkn: null },
+      { ...item('13'), quantity: 3, pricePkn: null },
+    ],
+  };
+  const { store, calls } = engine({
+    read: () => Promise.resolve(pricesOut([list])),
+    save: () => Promise.resolve(pricesOut([{ ...list, name: 'Binder' }])),
+    drop: () => Promise.resolve(pricesOut([])),
+  });
+  const state = await store.load('u1');
+  assert.equal(calls.read, 1);
+  assert.equal(state.error, '', 'nothing failed: the seller is who they are and the lists came back');
+  assert.equal(state.settled, true);
+  assert.equal(state.pricesUnavailable, true);
+  assert.equal(store.pricesUnavailable(), true);
+  assert.deepEqual(state.levelModel.days, [], 'the graph has nothing to plot');
+  assert.deepEqual(
+    state.levelModel.defs.map((def) => [def.key, def.label, def.held]),
+    [['collection:c1', 'Charizard binder', 4]],
+    'and the list counts its own cards, since no day can do it',
+  );
+  assert.equal(state.collections[0].items.length, 2, 'every card of the list is still there to edit');
+  // A write whose answer is the same shape says the same thing: the desk does
+  // not start promising numbers it does not have.
+  const saved = await store.save({ id: 'c1', name: 'Binder', items: store.get().collections[0].items });
+  assert.equal(saved.ok, true);
+  assert.equal(store.get().error, '');
+  assert.equal(store.get().pricesUnavailable, true);
+  assert.deepEqual(store.get().collections.map((row) => row.name), ['Binder']);
+  // Deleting the last list ends the level's prices as it ends its rows.
+  await store.remove('c1');
+  assert.equal(store.get().pricesUnavailable, true);
+  assert.deepEqual(store.get().collections, []);
+});
+
+test('a day-less answer is not, by itself, the prices being out', async () => {
+  const { store } = engine({ read: () => Promise.resolve(answer([binder()], [])) });
+  await store.load('u1');
+  // Only the field says the service is out. An answer that happens to carry no
+  // day — a seller whose cards have never sold — leaves the prices the rows do
+  // have, and the rows say what they said before.
+  assert.equal(store.get().pricesUnavailable, false);
+  assert.equal(store.get().collections[0].items[0].pricePkn, 480);
+});
+
+test('a load that failed is a sentence, and leaves the prices it did not touch', async () => {
+  let fail = false;
+  const { store } = engine({
+    read: () => (fail ? Promise.reject(err(500, '')) : Promise.resolve(answer([binder()]))),
+  });
+  await store.load('u1');
+  fail = true;
+  await store.reload();
+  assert.equal(store.get().error, 'Could not load your collections.');
+  assert.equal(store.get().pricesUnavailable, false, 'the desk does not claim the service is out');
+  assert.deepEqual(store.get().collections.map((row) => row.name), ['Charizard binder'], 'the lists it was given stay');
+  assert.equal(store.get().collections[0].items[0].pricePkn, 480, 'and so do their prices');
 });
 
 test('a save answer is the state: no second read after a write', async () => {

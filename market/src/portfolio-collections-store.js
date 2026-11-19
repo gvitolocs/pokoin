@@ -60,6 +60,10 @@ export function createCollectionsStore(deps = {}) {
     // The two questions the table asks of every state — is there a Collections
     // level to draw, and is the New button dead — are answered here, so the
     // wrapper mirrors values instead of re-deriving them outside the signals.
+    // Whether the level's prices are out is not derived here: it is what the
+    // answer said (`seriesError`, read once in `normalizeCollections`), and a
+    // failed load keeps whatever the desk was last given rather than blanking
+    // prices that are still on screen.
     state = {
       ...next,
       // A level exists once the seller's own lists have been asked for and the
@@ -299,6 +303,8 @@ export function createCollectionsStore(deps = {}) {
     get,
     load,
     model,
+    /** Whether the level's prices are out — see `publish`. */
+    pricesUnavailable: () => state.pricesUnavailable,
     reload,
     remove,
     save,

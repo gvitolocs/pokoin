@@ -100,7 +100,11 @@ function PlainCells(props) {
   const empty = () => props.row.state === 'empty';
   // A saved list with nothing in it is not a slice the seller happens not to
   // hold, so the Collections level names its empty row for what it is.
-  const note = () => (empty() ? props.emptyNote || 'None held' : 'No price data yet');
+  // With the prices out the level says so once, in its own bar: a row that
+  // repeated it on every line would only shout the same sentence down the page.
+  const note = () => (empty()
+    ? props.emptyNote || 'None held'
+    : (props.pricesUnavailable ? '' : 'No price data yet'));
   return (
     <>
       <Label row={props.row} />
@@ -120,7 +124,13 @@ function PlainCells(props) {
  */
 function PlainRow(props) {
   const empty = () => props.row.state === 'empty';
-  const cells = () => <PlainCells row={props.row} emptyNote={props.emptyNote} />;
+  const cells = () => (
+    <PlainCells
+      row={props.row}
+      emptyNote={props.emptyNote}
+      pricesUnavailable={props.pricesUnavailable}
+    />
+  );
   return (
     <Show
       when={props.onToggle}
@@ -189,6 +199,8 @@ function CollectionsBar(props) {
   const limit = () => Number(book()?.limits().collections) || 0;
   const saved = () => (book()?.collections() || []).length;
   const full = () => Boolean(book()?.atLimit());
+  // The answer said the price service is out, or a write left no prices behind.
+  const pricesOut = () => Boolean(book()?.pricesUnavailable());
   const reason = () => {
     if (!book()) return 'The saved collections are not loaded yet.';
     if (full()) return `You can keep up to ${limit()} collections. Delete one first.`;
@@ -219,6 +231,16 @@ function CollectionsBar(props) {
             <button type="button" disabled={Boolean(book().pending())} data-testid="segment-collections-retry" onClick={() => book()?.reload()}>Try again</button>
           </span>
         )}
+      </Show>
+      {/* Prices out is not the lists failing to come back: every row below is
+          still there, still editable, and only its numbers are missing. So the
+          level says it once, here, and its button is a plain new GET. It steps
+          aside while a retry loads, since that line already asks the question. */}
+      <Show when={pricesOut() && !book()?.error() && !book()?.pending()}>
+        <span class="segment-collections-prices" data-testid="segment-collections-prices">
+          Prices are unavailable right now
+          <button type="button" data-testid="segment-collections-prices-retry" onClick={() => book()?.reload()}>Try again</button>
+        </span>
       </Show>
     </div>
   );
@@ -359,10 +381,16 @@ export default function SegmentTable(props) {
   // would not be in `levels()` at all.
   const book = () => props.collections || null;
   const isCollections = () => levelId() === COLLECTIONS_LEVEL;
+  // What the answer said about its own prices: the service is out, so nothing
+  // on this level is priced and the seller's lists are all the table has. The
+  // rows and their buttons are untouched by it.
+  const pricesOut = () => Boolean(book()?.pricesUnavailable());
   // What the row states when it is open: the two counts the value is built
   // from, for the day the window ends on.
   const collectionsMeta = (row) => (row.held > 0
-    ? `Priced ${cards(row.priced)} of ${cards(row.held)} cards`
+    ? (pricesOut()
+      ? `${cards(row.held)} cards in this list. Nothing is priced right now.`
+      : `Priced ${cards(row.priced)} of ${cards(row.held)} cards`)
     : 'No card in this list yet. Edit adds one.');
 
   const groups = createMemo(() => segmentGroups(model(), levelId(), windowRange()));
@@ -562,6 +590,7 @@ export default function SegmentTable(props) {
                           <PlainRow
                             row={row()}
                             emptyNote={isCollections() ? 'No cards yet' : ''}
+                            pricesUnavailable={isCollections() && pricesOut()}
                             isOpen={isOpen(row().key)}
                             onToggle={isCollections() ? () => toggleRow(row().key) : undefined}
                           />
@@ -599,7 +628,10 @@ export default function SegmentTable(props) {
                             <Show when={isCollections()}>
                               <p class="segment-collections-meta" data-testid={`segment-collection-meta-${row().key}`}>
                                 <span>{collectionsMeta(row())}</span>
-                                <Show when={row().held > row().priced}>
+                                {/* With the prices out every card counts as not
+                                  priced, and that is the bar's sentence, not a
+                                  fact about this list's cards. */}
+                              <Show when={row().held > row().priced && !pricesOut()}>
                                   <em> A card that never sold counts in the list and adds nothing to the value.</em>
                                 </Show>
                               </p>

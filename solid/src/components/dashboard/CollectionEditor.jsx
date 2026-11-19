@@ -38,15 +38,17 @@ function reducedMotion() {
   return window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
 }
 
-/** What the price cell says for the three lines that are not an amount. */
+/** What the price cell says for the lines that are not an amount. */
 const PRICE_TEXT = {
   pending: '—',
+  unavailable: '—',
   later: 'Priced after saving',
   sold: 'No sold price',
 };
 const PRICE_TITLE = {
   amount: 'What this exact printing last sold for, as the server answered it for this saved list.',
   pending: 'The server has priced this card; the currency the desk writes amounts in is still being read.',
+  unavailable: 'Prices are unavailable right now. This card, and the list it is in, are saved as you left them.',
   later: 'The server prices a card with the list: this row is new to the list, or a facet has changed since the last answer.',
   sold: 'The server answered this list and nothing had sold on this exact printing.',
 };
@@ -226,9 +228,14 @@ function ItemRow(props) {
     if (value !== item().quantity) patch({ quantity: value });
   }
   // An amount is only an amount in the currency the desk shows, and only ever
-  // the server's own price for this exact slice: the module decides which of the
-  // four lines the cell says, this only writes it.
-  const line = createMemo(() => itemPriceLine(item(), { currencyPending: Boolean(props.currencyPending) }));
+  // the server's own price for this exact slice: the module decides which of
+  // the lines the cell says, this only writes it. With the prices out the cell
+  // is a dash — the same one the level states above the rows, not the one that
+  // waits for a currency.
+  const line = createMemo(() => itemPriceLine(item(), {
+    currencyPending: Boolean(props.currencyPending),
+    pricesUnavailable: Boolean(props.pricesUnavailable),
+  }));
   return (
     <li class={['collections-item', { 'is-touched': props.touched }]} data-testid="collections-item">
       <div class="collections-item-identity">
@@ -537,6 +544,7 @@ export default function CollectionEditor(props) {
                     limits={limits()}
                     currency={props.currency}
                     currencyPending={Boolean(props.currencyPending)}
+                    pricesUnavailable={Boolean(book().pricesUnavailable())}
                     onPatch={(id, changes) => edit(setItem(draft(), id, changes, limits()))}
                     onRemove={(id) => edit(removeItem(draft(), id))}
                   />

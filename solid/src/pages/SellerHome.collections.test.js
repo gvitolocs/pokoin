@@ -30,6 +30,7 @@ const viewSrc = read('../components/dashboard/SellerDashboardView.jsx');
 const tableSrc = read('../components/dashboard/SegmentTable.jsx');
 const editorSrc = read('../components/dashboard/CollectionEditor.jsx');
 const bookSrc = read('../lib/collections-book.js');
+const storeSrc = read('../../../market/src/portfolio-collections-store.js');
 const css = read('../../../market/src/seller-collections.css');
 const segmentsCss = read('../../../market/src/seller-segments.css');
 
@@ -145,6 +146,67 @@ test('the Collections level says what it cannot do yet', () => {
   assert.match(tableSrc, /data-testid=\{`segment-collection-confirm-\$\{props\.row\.key\}`\}/);
 });
 
+test('the answer that says its prices are out keeps the level and says it once', () => {
+  // A contract field, not a failure: the seller's lists came back and the
+  // numbers did not, so the level is drawn from what did come.
+  const lists = [
+    {
+      id: 'binder',
+      name: 'Charizard binder',
+      items: [
+        { game: 'pokemon', cardId: '129552', condition: 'NM', language: 'EN', quantity: 2, pricePkn: null },
+        { game: 'pokemon', cardId: '44144', condition: 'LP', language: 'EN', quantity: 1, pricePkn: null },
+      ],
+    },
+    { id: 'empty', name: 'Nothing in it', items: [] },
+  ];
+  const state = normalizeCollections({
+    limits: { collections: 20, items: 300, quantity: 999, name: 40 },
+    collections: lists,
+    segmentDefs: lists.map((row) => ({ key: `collection:${row.id}`, group: 'collection', label: row.name })),
+    days: [],
+    seriesError: 'prices_unavailable',
+  });
+  assert.equal(state.pricesUnavailable, true);
+  const rows = segmentGroups(withCollections(null, state.model), COLLECTIONS_LEVEL, {})
+    .flatMap((group) => group.rows);
+  // Every list keeps its row and its count, because the lists state the count
+  // themselves once no day can.
+  assert.deepEqual(
+    rows.map((row) => [row.label, row.held, row.valuePkn, row.state]),
+    [['Charizard binder', 3, 0, 'unpriced'], ['Nothing in it', 0, 0, 'empty']],
+  );
+  assert.equal(
+    normalizeCollections(previewCollectionsFrom(series())).pricesUnavailable,
+    false,
+    'the fixture never claims its own prices are out',
+  );
+  // The bar says it once, with a retry that is a plain new GET, and steps
+  // aside the moment the level has a sentence of its own to say.
+  assert.match(tableSrc, /<Show when=\{pricesOut\(\) && !book\(\)\?\.error\(\) && !book\(\)\?\.pending\(\)\}>/);
+  assert.match(tableSrc, /Prices are unavailable right now/);
+  assert.match(tableSrc, /data-testid="segment-collections-prices-retry" onClick=\{\(\) => book\(\)\?\.reload\(\)\}>Try again</);
+  // The rows do not repeat it and do not pretend to be priced: no note on each
+  // line, no "Priced 0 of 3 cards", no line about cards that never sold.
+  assert.match(tableSrc, /props\.pricesUnavailable \? '' : 'No price data yet'/);
+  assert.match(tableSrc, /pricesUnavailable=\{isCollections\(\) && pricesOut\(\)\}/);
+  assert.match(tableSrc, /cards in this list\. Nothing is priced right now\./);
+  assert.match(tableSrc, /row\(\)\.held > row\(\)\.priced && !pricesOut\(\)/);
+  assert.match(css, /\.segment-collections-error,\s*\.segment-collections-prices \{/);
+  // The editor's price cell is the dash with the sentence that explains it, and
+  // the value is read from the answer rather than guessed at by the form.
+  assert.match(editorSrc, /unavailable: '—',/);
+  assert.match(editorSrc, /unavailable: 'Prices are unavailable right now\./);
+  assert.match(editorSrc, /pricesUnavailable: Boolean\(props\.pricesUnavailable\)/);
+  assert.match(editorSrc, /pricesUnavailable=\{Boolean\(book\(\)\.pricesUnavailable\(\)\)\}/);
+  assert.match(storeSrc, /pricesUnavailable: \(\) => state\.pricesUnavailable/);
+  assert.match(bookSrc, /pricesUnavailable: \(\) => view\(\)\.pricesUnavailable/);
+  // A failed load is NOT this: the store takes the flag from the answer alone,
+  // so a table that kept its lists keeps saying what it knows about them.
+  assert.match(storeSrc, /Whether the level's prices are out is not derived here/);
+  assert.doesNotMatch(storeSrc, /pricesUnavailable: next\.error/);
+});
+
 test('a saved list with nothing sold still opens: Edit and Delete live there', () => {
   const lists = [
     { id: 'sealed', name: 'Sealed nobody sold', items: [{ game: 'pokemon', cardId: '176014', name: 'Evolving Skies Booster Bundle', quantity: 2, pricePkn: null }] },
@@ -212,7 +274,13 @@ test('an amount is written in the currency the desk shows, or not at all', () =>
   assert.doesNotMatch(editorSrc, /formatPknNumber|formatAssetsValue/);
   assert.doesNotMatch(editorSrc, /props\.currency \|\| 'PKN'/);
   assert.match(editorSrc, /pending: '—',/);
-  assert.match(editorSrc, /itemPriceLine\(item\(\), \{ currencyPending: Boolean\(props\.currencyPending\) \}\)/);
+  // Point 11 of the lead's browser list added the second question the line
+  // answers: with the prices out the cell must not read the missing number as
+  // this slice having sold nothing.
+  assert.match(
+    editorSrc,
+    /itemPriceLine\(item\(\), \{\n?\s*currencyPending: Boolean\(props\.currencyPending\),\n?\s*pricesUnavailable: Boolean\(props\.pricesUnavailable\),?\n?\s*\}\)/,
+  );
   assert.match(viewSrc, /currency=\{props\.moverCurrency \|\| ''\}\n\s*currencyPending=\{Boolean\(props\.moverCurrencyPending\)\}/);
 });
 
@@ -220,12 +288,18 @@ test('a row shows the server price of its exact slice, or says it has none', () 
   // Which line a row shows is the module's decision (itemPriceLine); the form
   // only writes it, and only the server's answer ever becomes an amount.
   assert.match(editorSrc, /itemPriceLine,[\s\S]*\} from '@market\/portfolio-collections\.js';/);
-  assert.match(editorSrc, /const line = createMemo\(\(\) => itemPriceLine\(item\(\), \{ currencyPending: Boolean\(props\.currencyPending\) \}\)\)/);
+  assert.match(
+    editorSrc,
+    /const line = createMemo\(\(\) => itemPriceLine\(item\(\), \{\n\s*currencyPending: Boolean\(props\.currencyPending\),\n\s*pricesUnavailable: Boolean\(props\.pricesUnavailable\),?\n\s*\}\)\)/,
+  );
   assert.match(editorSrc, /\{line\(\) === 'amount' \? amount\(item\(\)\.pricePkn, props\.currency\) : PRICE_TEXT\[line\(\)\]\}/);
   // A card new to the list, or one a facet has moved off its priced slice, waits
   // for the save. A search result's number is what somebody asks for a card.
   assert.match(editorSrc, /later: 'Priced after saving'/);
   assert.match(editorSrc, /sold: 'No sold price'/);
+  // Point 11's line is the answer that priced nothing; the em dash is what the
+  // lead asked for, and it is not an amount, so it wears the note colour.
+  assert.match(editorSrc, /unavailable: '—'/);
   assert.doesNotMatch(editorSrc, /pricePkn:/);
   // Only an amount wears the gold of a number.
   assert.match(editorSrc, /collections-item-price\$\{line\(\) === 'amount' \? '' : ' is-note'\}/);

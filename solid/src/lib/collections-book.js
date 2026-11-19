@@ -91,6 +91,8 @@ export function createCollectionsBook({ previewAnswer = null } = {}) {
     openEdit,
     openNew,
     pending: () => view().pending,
+    /** The answer said the prices are out, or a write left none on the desk. */
+    pricesUnavailable: () => view().pricesUnavailable,
     reload: () => store.reload(),
     remove,
     save,

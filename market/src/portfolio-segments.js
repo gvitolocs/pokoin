@@ -272,7 +272,11 @@ function windowChangePct(series) {
 function segmentRow(def, days) {
   const series = days.map((day) => ({ date: day.date, valuePkn: segmentValueAt(day, def.key) }));
   const lastDay = days[days.length - 1] || null;
-  const held = lastDay ? segmentCountAt(lastDay, def.key, 'held') : 0;
+  // A day is normally the only thing that states a count. A saved-list def can
+  // carry one itself (`held`, from the collections answer when that answer has
+  // no days to count in) so a row still says how big the list is; no other
+  // group sets it, so every other row reads 0 as it always did.
+  const held = lastDay ? segmentCountAt(lastDay, def.key, 'held') : Math.max(0, Number(def.held) || 0);
   const priced = lastDay ? segmentCountAt(lastDay, def.key, 'priced') : 0;
   const valuePkn = lastDay ? segmentCountAt(lastDay, def.key, 'valuePkn') : 0;
   const state = held <= 0

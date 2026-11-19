@@ -19,7 +19,11 @@
   font-weight: 700;
 }
 
-.segment-collections-error {
+/* The two sentences the bar says with a button of its own: the lists did not
+   come back, and the lists came back without any prices. They are never on
+   screen at once, so they are one line of chrome. */
+.segment-collections-error,
+.segment-collections-prices {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -30,7 +34,8 @@
   font-weight: 700;
 }
 
-.segment-collections-error button {
+.segment-collections-error button,
+.segment-collections-prices button {
   min-height: 2rem;
   padding: 0 0.6rem;
   border: 1px solid var(--g5);
@@ -41,7 +46,8 @@
   cursor: pointer;
 }
 
-.segment-collections-error button:hover {
+.segment-collections-error button:hover,
+.segment-collections-prices button:hover {
   border-color: var(--yellow);
 }
 
@@ -539,6 +545,7 @@
   .collections-item-remove,
   .segment-collections-actions button,
   .segment-collections-error button,
+  .segment-collections-prices button,
   .segment-collections-new {
     min-height: 44px;
   }

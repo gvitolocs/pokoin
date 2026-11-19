@@ -130,7 +130,12 @@ test('a def the server already sent is kept as it sent it', () => {
 });
 
 test('emptyCollections is the state before any answer', () => {
-  assert.deepEqual(emptyCollections(), { limits: DEFAULT_LIMITS, collections: [], model: { defs: [], days: [] } });
+  assert.deepEqual(emptyCollections(), {
+    limits: DEFAULT_LIMITS,
+    collections: [],
+    pricesUnavailable: false,
+    model: { defs: [], days: [] },
+  });
   assert.deepEqual(emptyCollections({ collections: 3 }).limits.collections, 3);
   assert.deepEqual(normalizeLimits(undefined), DEFAULT_LIMITS);
 });
@@ -328,6 +333,47 @@ test('a row is priced by the server answer for its exact slice, and by nothing e
   assert.deepEqual(again.items[0], { ...priced, quantity: 3 });
   assert.equal(itemPriceLine(again.items[0]), 'amount');
   assert.equal(itemPriceLine(null), 'later', 'a row that is not there prices nothing');
+});
+
+test('a seriesError answer keeps the lists, their counts and no prices', () => {
+  const book = normalizeCollections({
+    ...payload(),
+    seriesError: 'prices_unavailable',
+    collections: payload().collections.map((row) => ({
+      ...row,
+      items: row.items.map((card) => ({ ...card, pricePkn: null })),
+    })),
+    days: [],
+  });
+  assert.equal(book.pricesUnavailable, true);
+  assert.equal(book.collections.length, 2, 'the seller still owns every collection');
+  assert.equal(book.collections[0].items.length, 2, 'and every card in it');
+  assert.deepEqual(book.model.days, [], 'nothing to plot');
+  // The counts survive because the lists state them themselves: with no days
+  // there is no day left that could hold a collection's cards.
+  assert.deepEqual(book.model.defs.map((def) => [def.key, def.held]), [['collection:c1', 3], ['collection:c2', 0]]);
+  // Not "nothing sold on it" — nothing was priced at all, slice or not.
+  assert.equal(itemPriceLine(book.collections[0].items[0], { pricesUnavailable: true }), 'unavailable');
+  assert.equal(itemPriceLine(book.collections[0].items[1], { pricesUnavailable: true }), 'unavailable');
+  assert.equal(
+    itemPriceLine(book.collections[0].items[1], { pricesUnavailable: true, currencyPending: true }),
+    'unavailable',
+    'the missing prices come first: a currency will not bring them back',
+  );
+  const rows = segmentGroups(withCollections(null, book.model), COLLECTIONS_LEVEL).flatMap((group) => group.rows);
+  assert.deepEqual(
+    rows.map((row) => [row.key, row.held, row.priced, row.state]),
+    [['collection:c1', 3, 0, 'unpriced'], ['collection:c2', 0, 0, 'empty']],
+    'a list with cards reads as unpriced, and an empty one stays empty',
+  );
+  // Only that exact value means it.
+  assert.equal(normalizeCollections(payload()).pricesUnavailable, false, 'no field, nothing wrong');
+  assert.equal(normalizeCollections({ ...payload(), seriesError: 'prices_lagging' }).pricesUnavailable, false);
+  assert.equal(normalizeCollections({ ...payload(), seriesError: '' }).pricesUnavailable, false);
+  assert.equal(normalizeCollections({ ...payload(), seriesError: null }).pricesUnavailable, false);
+  assert.equal(normalizeCollections(payload()).model.defs.every((def) => def.held === undefined), true, 'a priced answer never restates a count');
+  assert.equal(normalizeCollections({ seriesError: 'prices_unavailable' }).pricesUnavailable, true, 'the field alone is still an answer about prices');
+  assert.deepEqual(normalizeCollections({ seriesError: 'prices_unavailable' }).model, { defs: [], days: [] });
 });
 
 test('the name check: 1 to 40 characters, taken names compared case-insensitively', () => {
