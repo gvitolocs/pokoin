@@ -640,17 +640,24 @@ impl Edge {
     }
 
     /// A flight that got no answer from the API at all (timed out, unreadable
-    /// body): the last good copy if the cache holds one, `502`/`504` if it does
-    /// not. Either way the flight is settled, so every follower is told the same
-    /// thing this request was.
+    /// body): the last good copy if the cache holds one and [`lead`] was allowed
+    /// to replace this response with one (`replaceable`), `502`/`504` if it does
+    /// not or if the headers already refused the swap. Either way the flight is
+    /// settled, so every follower is told the same thing this request was.
     fn fail_flight(
         &self,
         pathname: &str,
         game: &str,
         flight: FlightGuard,
         status: StatusCode,
+        replaceable: bool,
     ) -> Response {
-        match self.last_good(pathname, game, &flight.key) {
+        let copy = if replaceable {
+            self.last_good(pathname, game, &flight.key)
+        } else {
+            None
+        };
+        match copy {
             Some(entry) => {
                 flight.finish(Flight::StaleError {
                     copy: entry.clone(),
@@ -756,10 +763,20 @@ impl Edge {
         let req = with_uri(req, &target);
         let Ok(response) = tokio::time::timeout_at(deadline, self.inner.api.clone().oneshot(req)).await else {
             tracing::warn!(path = pathname, timeout_s = self.inner.cfg.flight_timeout.as_secs(), "edge flight timed out");
-            return self.fail_flight(pathname, game, flight, StatusCode::GATEWAY_TIMEOUT);
+            // No headers came at all, so nothing has refused a copy.
+            return self.fail_flight(pathname, game, flight, StatusCode::GATEWAY_TIMEOUT, true);
         };
         let response = response.unwrap_or_else(|never| match never {});
         let status = response.status();
+        // Whether this response may be answered from the cache's last good copy
+        // is decided from the headers, before the body is read: one of
+        // [`answers_error`]'s four, and no `Set-Cookie` meant for this client —
+        // a cookie is about the request that failed, and the copy would drop it.
+        // A body that then fails or runs out the deadline must not unlock the
+        // copy the headers refused: the swap belongs to the response the origin
+        // was actually giving, not to whatever the edge manages to buffer.
+        let replaceable =
+            answers_error(status) && !response.headers().contains_key(header::SET_COOKIE);
         let max_ttl = self.inner.cfg.cache_max_ttl;
         let policy = policy_for_path(pathname, status, response.headers(), max_ttl);
         if policy.is_none() && !answers_error(status) {
@@ -778,10 +795,28 @@ impl Edge {
         let (parts, body) = response.into_parts();
         let body = match tokio::time::timeout_at(deadline, to_bytes(body, usize::MAX)).await {
             Ok(Ok(body)) => body,
-            Ok(Err(_)) => return self.fail_flight(pathname, game, flight, StatusCode::BAD_GATEWAY),
+            Ok(Err(_)) => {
+                return self.fail_flight(
+                    pathname,
+                    game,
+                    flight,
+                    StatusCode::BAD_GATEWAY,
+                    replaceable,
+                )
+            }
             Err(_) => {
-                tracing::warn!(path = pathname, timeout_s = self.inner.cfg.flight_timeout.as_secs(), "edge flight body timed out");
-                return self.fail_flight(pathname, game, flight, StatusCode::GATEWAY_TIMEOUT);
+                tracing::warn!(
+                    path = pathname,
+                    timeout_s = self.inner.cfg.flight_timeout.as_secs(),
+                    "edge flight body timed out"
+                );
+                return self.fail_flight(
+                    pathname,
+                    game,
+                    flight,
+                    StatusCode::GATEWAY_TIMEOUT,
+                    replaceable,
+                );
             }
         };
         let mut headers = HeaderMap::new();
@@ -793,12 +828,11 @@ impl Edge {
         headers.insert(HeaderName::from_static("x-robots-tag"), HeaderValue::from_static("noindex"));
         let now = Instant::now();
         let Some(policy) = policy else {
-            // One of the four: every waiting follower gets this answer; the next
-            // request fetches again. The cache's last good copy answers instead
-            // when it holds one, and this error is never stored. An error that
-            // hands the client a `Set-Cookie` is about this request, not about
-            // the page, so nothing replaces it — the cookie has to arrive.
-            if !headers.contains_key(header::SET_COOKIE) {
+            // One of the four, and [`replaceable`] is what its headers said: every
+            // waiting follower gets this answer; the next request fetches again.
+            // The cache's last good copy answers instead when the swap is allowed
+            // and the cache holds one, and this error is never stored.
+            if replaceable {
                 if let Some(entry) = self.last_good(pathname, game, &flight.key) {
                     flight.finish(Flight::StaleError {
                         copy: entry.clone(),
@@ -1914,14 +1948,16 @@ mod tests {
     const SLOW_ORIGIN: Duration = Duration::from_millis(300);
 
     /// [`sick_by_game_api`]'s answers, failing slowly enough that a second
-    /// request joins the first one's flight instead of starting its own. The
-    /// caller hands in the counter of every origin request, so it can see that a
-    /// follower is answered without one.
-    fn slow_sick_by_game_api(calls: Arc<AtomicU64>) -> Router {
+    /// request joins the first one's flight instead of starting its own. Each
+    /// game counts its own origin requests, so the Pokémon page is the first
+    /// answer ever given *to Pokémon* whatever else arrives in between, and a
+    /// test reads the satellite's counter to see that its follower was answered
+    /// without a request of its own.
+    fn slow_sick_by_game_api(pokemon: Arc<AtomicU64>, other: Arc<AtomicU64>) -> Router {
         Router::new().route(
             "/api/marketplace-expansion-page",
             get(move |headers: HeaderMap, uri: Uri| {
-                let calls = calls.clone();
+                let (pokemon, other) = (pokemon.clone(), other.clone());
                 async move {
                     let query = pokoin_api_common::http::Query::from_uri(&uri);
                     let game = pokoin_api_common::game::parse_game_from_request(
@@ -1929,6 +1965,7 @@ mod tests {
                         query.first("game"),
                         query.first("marketplaceGame"),
                     );
+                    let calls = if game == "pokemon" { &pokemon } else { &other };
                     let first = calls.fetch_add(1, Ordering::SeqCst) == 0;
                     if game == "pokemon" && first {
                         return good_page();
@@ -2043,10 +2080,10 @@ mod tests {
     #[tokio::test]
     async fn a_follower_of_another_game_is_not_answered_with_the_leaders_copy() {
         let dir = tempfile::tempdir().unwrap();
-        let calls = Arc::new(AtomicU64::new(0));
+        let (pokemon, satellite) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
         let edge = Edge::new(
             config(dir.path().to_path_buf(), Duration::from_secs(30)),
-            slow_sick_by_game_api(calls.clone()),
+            slow_sick_by_game_api(pokemon.clone(), satellite.clone()),
             Router::new(),
         );
         let get = |edge: &Edge, headers: &'static [(&'static str, &'static str)]| {
@@ -2081,7 +2118,7 @@ mod tests {
             &[("host", "pokoin.com"), ("x-marketplace-game", "magic")][..],
         ] {
             let (asked, stale) = (
-                calls.load(Ordering::SeqCst),
+                pokemon.load(Ordering::SeqCst),
                 edge.inner.stats.stale_error.load(Ordering::Relaxed),
             );
             let (leader, other) =
@@ -2121,9 +2158,14 @@ mod tests {
                 "the Pokémon page is not the satellite's body: {follower:?}"
             );
             assert_eq!(
-                calls.load(Ordering::SeqCst),
+                pokemon.load(Ordering::SeqCst),
                 asked + 1,
                 "the follower was answered from the leader's flight, not a second origin request: {follower:?}"
+            );
+            assert_eq!(
+                satellite.load(Ordering::SeqCst),
+                0,
+                "and the satellite never reached its own origin: {follower:?}"
             );
         }
     }
@@ -2220,6 +2262,79 @@ mod tests {
             edge.inner.stats.stale_error.load(Ordering::Relaxed),
             1,
             "only the cookie-free error was replaced"
+        );
+    }
+
+    /// The origin of point 2 of the second review: `/api/marketplace-card-page`
+    /// answers one cacheable 200 — the copy — and then a 503 that hands the client a
+    /// `Set-Cookie` and whose body is cut off mid-read. The headers alone say whether
+    /// the copy may answer, because the body never gets the chance.
+    fn cookie_cut_body_api() -> Router {
+        let calls = Arc::new(AtomicU64::new(0));
+        Router::new().route(
+            "/api/marketplace-card-page",
+            get(move || {
+                let calls = calls.clone();
+                async move {
+                    if calls.fetch_add(1, Ordering::SeqCst) > 0 {
+                        return Response::builder()
+                            .status(StatusCode::SERVICE_UNAVAILABLE)
+                            .header(header::CONTENT_TYPE, "application/json")
+                            .header("cache-control", "no-store")
+                            .header("set-cookie", "pokoin_test=1; Path=/")
+                            .body(Body::from_stream(futures_util::stream::iter(
+                                std::iter::once(Err::<Bytes, std::io::Error>(std::io::Error::new(
+                                    std::io::ErrorKind::UnexpectedEof,
+                                    "body cut mid-flight",
+                                ))),
+                            )))
+                            .unwrap();
+                    }
+                    good_page()
+                }
+            }),
+        )
+    }
+
+    /// Point 2 of the second review: whether a copy may replace a failing answer is a
+    /// decision about the headers, so it is made before the body is read. An error
+    /// that carries a `Set-Cookie` and whose body then broke was falling through to
+    /// the stale copy regardless — a 200 page, and the cookie the client was being
+    /// handed gone with the error it came in. A body the edge cannot read is now the
+    /// synthetic 502 it has always been when no copy exists.
+    #[tokio::test]
+    async fn a_cookie_error_with_a_cut_body_is_not_answered_from_a_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let edge = Edge::new(
+            config(dir.path().to_path_buf(), Duration::from_secs(30)),
+            cookie_cut_body_api(),
+            Router::new(),
+        );
+        let get = |edge: &Edge| {
+            let edge = edge.clone();
+            async move { proxy(State(edge), req("GET", "/api/marketplace-card-page", &[])).await }
+        };
+        assert_eq!(get(&edge).await.headers()["x-pokoin-edge-cache"], "MISS");
+        tokio::time::sleep(PAST_SHORT_GOOD).await;
+        let answer = get(&edge).await;
+        assert_eq!(
+            answer.status(),
+            StatusCode::BAD_GATEWAY,
+            "a body the edge cannot read is the 502 it always was"
+        );
+        assert_ne!(
+            answer
+                .headers()
+                .get("x-pokoin-edge-cache")
+                .and_then(|value| value.to_str().ok()),
+            Some("STALE-ERROR"),
+            "and not the copy the headers had already refused"
+        );
+        assert_eq!(answer.headers()["cache-control"], "no-store");
+        assert_eq!(
+            edge.inner.stats.stale_error.load(Ordering::Relaxed),
+            0,
+            "no copy was sent, and none was queued for a follower either"
         );
     }
 
