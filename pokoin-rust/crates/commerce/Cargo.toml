@@ -47,6 +47,7 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tower = { workspace = true, features = ["util"] }
 http-body-util = "0.1"
 urlencoding = "2"
+proptest = { workspace = true }
 
 [lints.rust]
 unsafe_code = "forbid"

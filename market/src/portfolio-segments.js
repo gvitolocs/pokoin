@@ -2,11 +2,11 @@
  * Segment rows for the Dashboard "Your collection" tile.
  *
  * `GET /api/marketplace-portfolio-history` answers one point per UTC day with
- * the seller's value split into segments (per game, per Pokémon era, Sealed
- * and Graded). This module turns that raw answer into the table the desk
- * paints: levels, rows, sparkline geometry and the versus chart of one segment
- * against the whole collection. Segment keys are opaque — everything is keyed
- * off `group` and `game`, never off the key's shape.
+ * the seller's value split into segments (per game, per era or set of that
+ * game, Sealed and Graded). This module turns that raw answer into the table
+ * the desk paints: levels, rows, sparkline geometry and the versus chart of one
+ * segment against the whole collection. Segment keys are opaque — everything is
+ * keyed off `group` and `game`, never off the key's shape.
  */
 
 import { addUtcDays, utcDayKey } from './portfolio-history.js';
@@ -14,9 +14,9 @@ import { GAMES } from './game.js';
 
 export const ALL_LEVEL = 'all';
 
-const GROUPS = new Set(['game', 'type', 'era']);
+const GROUPS = new Set(['game', 'type', 'era', 'set']);
 /** Only these groups make a level of their own beside `all`. */
-const LEVEL_GROUPS = new Set(['era', 'type']);
+const LEVEL_GROUPS = new Set(['era', 'set', 'type']);
 
 function numberOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -244,7 +244,11 @@ export function segmentGroups(model, levelId, window = {}) {
   const level = text(levelId) || ALL_LEVEL;
   const wanted = level === ALL_LEVEL
     ? [['Games', (def) => def.group === 'game'], ['Across all games', (def) => def.group === 'type' && def.game === ALL_LEVEL]]
-    : [['Eras', (def) => def.group === 'era' && def.game === level], ['Types', (def) => def.group === 'type' && def.game === level]];
+    : [
+      ['Eras', (def) => def.group === 'era' && def.game === level],
+      ['Sets', (def) => def.group === 'set' && def.game === level],
+      ['Types', (def) => def.group === 'type' && def.game === level],
+    ];
   const groups = [];
   for (const [title, match] of wanted) {
     const rows = defs.filter(match).map((def) => segmentRow(def, days));
