@@ -210,6 +210,30 @@ pub async fn sync_start(
         return Err(ApiError::bad_request("Connect CardTrader before syncing inventory.").with_code("cardtrader_not_connected"));
     }
 
+    // A trailing number that could be the box name is never written on a guess,
+    // and an import that ends in this 409 changes nothing at all: it is decided
+    // here, ahead of the sync-direction write below, so a refused request
+    // leaves the integration document, the job queue and every listing row as
+    // it found them. A preview answers the same question without writing, so
+    // the preview shapes keep detection's guess instead of being refused.
+    let preview_shape = payload["previewPowerTools"] == true
+        || payload["previewGames"] == true
+        || payload["previewGamesOnly"] == true;
+    let carries_csv = payload
+        .get("powerToolsCsv")
+        .or_else(|| payload.get("powerToolsByGame"))
+        .is_some();
+    if !preview_shape && carries_csv {
+        let refusal = blocking({
+            let payload = payload.clone();
+            move || link::location_style_preflight(&payload)
+        })
+        .await??;
+        if let Some(refusal) = refusal {
+            return Ok(json_response(409, refusal));
+        }
+    }
+
     if let Some(raw) = payload.get("direction").filter(|value| !value.is_null()) {
         let direction = link::Direction::parse(raw.as_str().unwrap_or_default()).ok_or_else(|| {
             ApiError::bad_request("Choose CardTrader → Pokoin, Pokoin → CardTrader or both ways.")

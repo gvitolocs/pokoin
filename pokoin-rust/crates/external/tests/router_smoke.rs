@@ -117,17 +117,14 @@ async fn admin_refresh_requires_a_configured_environment_secret() {
     }
 }
 
-/// The Power Tools import that writes listing locations is refused before
-/// anything is written while a trailing number could still be the box name.
-#[tokio::test]
-async fn cardtrader_sync_refuses_an_unconfirmed_box_reading() {
-    let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("../src/fixtures/location_style_cases.json"))
-            .expect("shared location-style table");
-    let csv = "name,set,cn,condition,language,quantity,price,location\n\
-        Pikachu,Base Set,58/102,NM,English,1,2.50,Focobomba 006\n\
-        Charmander,Base Set,46/102,LP,English,2,1.00,Focobomba 007\n\
-        Squirtle,Base Set,63/102,NM,English,1,1.00,FUOCOBOMBA 006 - 16\n";
+/// A Power Tools import whose locations end in numbers that could be box names.
+const AMBIGUOUS_CSV: &str = "name,set,cn,condition,language,quantity,price,location\n\
+    Pikachu,Base Set,58/102,NM,English,1,2.50,Focobomba 006\n\
+    Charmander,Base Set,46/102,LP,English,2,1.00,Focobomba 007\n\
+    Squirtle,Base Set,63/102,NM,English,1,1.00,FUOCOBOMBA 006 - 16\n";
+
+/// A connected test seller, its integration document as stored.
+async fn connected_seller() -> DomainState {
     let state = DomainState::for_test();
     state
         .firestore
@@ -142,27 +139,96 @@ async fn cardtrader_sync_refuses_an_unconfirmed_box_reading() {
         )
         .await
         .expect("connect the test seller");
+    state
+}
+
+async fn start_sync(
+    state: &DomainState,
+    body: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
     let request = Request::builder()
         .method("POST")
         .uri("/api/cardtrader-sync")
         .header("authorization", "Bearer test-seller")
         .header("content-type", "application/json")
-        .body(Body::from(
-            serde_json::json!({ "powerToolsCsv": { "pokemon": csv } }).to_string(),
-        ))
+        .body(Body::from(body.to_string()))
         .unwrap();
-    let response = router(state.clone())
-        .oneshot(request)
+    call(state.clone(), request).await
+}
+
+async fn stored_doc(state: &DomainState) -> serde_json::Value {
+    state
+        .firestore
+        .get_doc(
+            pokoin_external::cardtrader::integration::COLLECTION,
+            &pokoin_external::cardtrader::integration::integration_doc_id("seller"),
+        )
         .await
-        .expect("router response");
-    assert_eq!(response.status(), StatusCode::CONFLICT);
-    let body = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("body");
-    let body: serde_json::Value = serde_json::from_slice(&body).expect("json body");
+        .expect("integration document")
+        .data
+}
+
+/// The Power Tools import that writes listing locations is refused before
+/// anything is written while a trailing number could still be the box name.
+#[tokio::test]
+async fn cardtrader_sync_refuses_an_unconfirmed_box_reading() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../src/fixtures/location_style_cases.json"))
+            .expect("shared location-style table");
+    let state = connected_seller().await;
+    let (status, body) = start_sync(
+        &state,
+        serde_json::json!({ "powerToolsCsv": { "pokemon": AMBIGUOUS_CSV } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(
         body, fixture["refusalOfAmbiguousList"],
         "the refusal carries the readings the seller has to choose between"
+    );
+    assert!(
+        !state.sync_jobs.is_running("seller").await,
+        "the refused import started no sync"
+    );
+}
+
+/// "Refused" means nothing happened: the same request also carries a new sync
+/// direction, and the guard runs before that write, so the integration document
+/// comes back byte-equal and no sync is queued.
+#[tokio::test]
+async fn cardtrader_sync_refusal_changes_nothing_at_all() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../src/fixtures/location_style_cases.json"))
+            .expect("shared location-style table");
+    let state = connected_seller().await;
+    state
+        .firestore
+        .merge_doc(
+            pokoin_external::cardtrader::integration::COLLECTION,
+            &pokoin_external::cardtrader::integration::integration_doc_id("seller"),
+            serde_json::json!({ "inventorySync": { "direction": "ct_to_pokoin", "updatedAt": "before" } }),
+        )
+        .await
+        .expect("set the stored direction");
+    let before = serde_json::to_string(&stored_doc(&state).await).expect("document json");
+    let (status, body) = start_sync(
+        &state,
+        serde_json::json!({
+            "direction": "both",
+            "powerToolsCsv": { "pokemon": AMBIGUOUS_CSV },
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body, fixture["refusalOfAmbiguousList"]);
+    let after = serde_json::to_string(&stored_doc(&state).await).expect("document json");
+    assert_eq!(
+        after, before,
+        "a refused import must not move the sync direction or touch the document"
+    );
+    assert_eq!(
+        stored_doc(&state).await.pointer("/inventorySync/direction"),
+        Some(&serde_json::json!("ct_to_pokoin"))
     );
     assert!(
         !state.sync_jobs.is_running("seller").await,
