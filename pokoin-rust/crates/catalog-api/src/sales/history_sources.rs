@@ -104,6 +104,15 @@ pub fn pkn_of_usd(usd: Option<f64>, rate: Option<f64>) -> Option<f64> {
     round2(usd / rate * PKN_PER_EUR)
 }
 
+/// The PKN of an amount in euro cents — the unit `cardmarket_offer_daily.min_cents`
+/// stores — as a whole number, because `PKN_PER_EUR` cents per cent is exactly 2
+/// and a price is never quoted in fractions of a PKN. `None` for a null,
+/// non-finite or ≤ 0 cent amount.
+pub fn pkn_of_cents(cents: Option<f64>) -> Option<f64> {
+    let cents = cents.filter(|cents| cents.is_finite() && cents > &0.0)?;
+    Some((cents * 2.0).round())
+}
+
 fn pkn_json(pkn: Option<f64>) -> Value {
     pkn.map(pg::js_number).unwrap_or(Value::Null)
 }
@@ -315,6 +324,374 @@ pub async fn cardmarket_history(
     };
     let presence = table_presence::presence_all(pool, &CARDMARKET_TABLES).await;
     cardmarket_leg(presence, || cardmarket_block(pool, ct_id, from, to)).await
+}
+
+/// The cheapest offer of every condition floor of one Cardmarket product and one
+/// language, per day. Every value is a bind. `condition <> '*'` because that row
+/// is Cardmarket's own aggregate over the floors rather than a floor the graph
+/// can plot; `finish` and `first_edition` keep the exact and the `'*'` rows so
+/// that a day whose facet page was not asked can still be answered by its
+/// aggregate row, which [`facet_or_star`] then prefers to use only as a fallback.
+pub const CM_OFFER_HISTORY_SQL: &str = "select o.day::text as day, o.condition, o.seller_type, \
+       o.min_cents::float8 as min_cents, o.asked, o.finish, o.first_edition \
+   from public.cardmarket_offer_daily o \
+   where o.cm_product_id = $1::bigint \
+     and o.language = $2 \
+     and o.condition <> '*' \
+     and (o.finish = $3 or o.finish = '*') \
+     and (o.first_edition = $4 or o.first_edition = '*') \
+     and o.day between $5::date and $6::date \
+   order by o.condition, o.day, o.min_cents, o.seller_type";
+
+/// The table of `CM_OFFER_HISTORY_SQL`.
+pub const CM_OFFER_TABLE: &str = "public.cardmarket_offer_daily";
+
+/// The tables this leg reads: the blueprints that turn a card into a Cardmarket
+/// product and the daily offer table itself. Neither exists on a satellite game's
+/// database, and the offer table is not migrated on production yet — the probe
+/// then answers this leg `empty` without a query (PH-02).
+pub const CM_OFFER_TABLES: [&str; 2] = ["public.cardtrader_pokemon_blueprints", CM_OFFER_TABLE];
+
+/// The condition floors of the answer, in the order the graph lists them. `Poor`
+/// is Cardmarket's own spelling; `'*'` is its aggregate over the floors and is
+/// never a series of its own.
+pub const CM_OFFER_FLOORS: [&str; 5] = ["NM", "SP", "MP", "PL", "Poor"];
+
+/// The language keys `cardmarket_offer_daily` stores, `'*'` included: every
+/// language of the product in one line.
+pub const CM_OFFER_LANGUAGES: [&str; 14] = [
+    "EN", "FR", "DE", "ES", "IT", "ZH", "JP", "PT", "RU", "KO", "ZHT", "NL", "PL", "*",
+];
+
+/// The default facet of the leg: near mint, English.
+pub const CM_OFFER_DEFAULT_CONDITION: &str = "NM";
+pub const CM_OFFER_DEFAULT_LANGUAGE: &str = "EN";
+
+/// The printing the daily table is read for: Cardmarket's language plus the two
+/// flags that say which rows of that language are this card. They always travel
+/// together — a request has one of them, and the block it answers names them
+/// back — so they are one argument rather than three.
+#[derive(Debug, Clone, Copy)]
+pub struct CmOfferPrinting<'a> {
+    pub language: &'a str,
+    pub finish: &'a str,
+    pub first_edition: &'a str,
+}
+
+/// `value` as one of the floors, case-insensitively, or `None`; an empty asked
+/// value is the default floor, because the desk's "Any condition" is no filter.
+pub fn cm_offer_condition(value: Option<&str>) -> Option<&'static str> {
+    let value = value.map(str::trim).unwrap_or("");
+    if value.is_empty() {
+        return Some(CM_OFFER_DEFAULT_CONDITION);
+    }
+    CM_OFFER_FLOORS
+        .iter()
+        .find(|floor| floor.eq_ignore_ascii_case(value))
+        .copied()
+}
+
+/// `value` as one of the stored language keys, case-insensitively, or `None`.
+pub fn cm_offer_language(value: Option<&str>) -> Option<&'static str> {
+    let value = value.map(str::trim).unwrap_or("");
+    if value.is_empty() {
+        return Some(CM_OFFER_DEFAULT_LANGUAGE);
+    }
+    CM_OFFER_LANGUAGES
+        .iter()
+        .find(|key| key.eq_ignore_ascii_case(value))
+        .copied()
+}
+
+/// One `CM_OFFER_HISTORY_SQL` row: the cheapest offer of one seller type of one
+/// floor on one day, under one facet.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OfferRow {
+    pub day: String,
+    pub condition: String,
+    pub seller_type: String,
+    /// The offer price in euro cents; `None` when the cell is not readable, which
+    /// [`cm_offer_series`] leaves out rather than plotting as a price of zero.
+    pub min_cents: Option<f64>,
+    /// Whether the day's facet page was asked for, as the loader recorded it.
+    pub asked: bool,
+    pub finish: String,
+    pub first_edition: String,
+}
+
+impl OfferRow {
+    /// The row of `CM_OFFER_HISTORY_SQL`; a day that is not a day, a floor that
+    /// is not a floor and an absent seller type are not offers at all.
+    fn from_row(row: &Value) -> Option<OfferRow> {
+        let day = day_of(row.get("day"));
+        let condition = js::string_or_empty(row.get("condition"));
+        if day.is_empty() || condition.is_empty() {
+            return None;
+        }
+        Some(OfferRow {
+            day,
+            condition,
+            seller_type: js::string_or_empty(row.get("seller_type")),
+            min_cents: number_of(row.get("min_cents")),
+            asked: row.get("asked").and_then(Value::as_bool).unwrap_or(false),
+            finish: js::string_or_empty(row.get("finish")),
+            first_edition: js::string_or_empty(row.get("first_edition")),
+        })
+    }
+}
+
+/// The rows of one day that answer the asked facet value: those naming it
+/// exactly, and only when the day carries no such row the `'*'` aggregate the
+/// loader writes for a day whose facet page was not fetched. Asking `'*'` is
+/// asking the aggregate, so then every row of the day counts.
+fn facet_rows<'a>(
+    rows: &[&'a OfferRow],
+    asked: &str,
+    cell: impl Fn(&OfferRow) -> &str,
+) -> Vec<&'a OfferRow> {
+    if asked == "*" {
+        return rows.to_vec();
+    }
+    let exact: Vec<&'a OfferRow> = rows
+        .iter()
+        .copied()
+        .filter(|row| cell(row) == asked)
+        .collect();
+    if !exact.is_empty() {
+        return exact;
+    }
+    rows.iter()
+        .copied()
+        .filter(|row| cell(row) == "*")
+        .collect()
+}
+
+/// The place in [`CM_OFFER_FLOORS`] of a row's condition; `None` for anything
+/// else, which is not a floor the graph has a line for.
+fn cm_offer_floor_index(condition: &str) -> Option<usize> {
+    CM_OFFER_FLOORS.iter().position(|floor| *floor == condition)
+}
+
+/// Price first, its seller type inside it; a row whose cents cannot be read
+/// stands last, so it never wins a day it cannot price.
+fn by_offer_price(a: &OfferRow, b: &OfferRow) -> std::cmp::Ordering {
+    a.min_cents
+        .unwrap_or(f64::MAX)
+        .partial_cmp(&b.min_cents.unwrap_or(f64::MAX))
+        .unwrap_or(std::cmp::Ordering::Equal)
+        .then_with(|| a.seller_type.cmp(&b.seller_type))
+}
+
+/// The series of the answer, one per floor that has a day, in
+/// [`CM_OFFER_FLOORS`] order. Every floor's days are oldest first and each day
+/// carries the cheapest offer across the seller types of the facet asked:
+/// `finish` and `first_edition`, each falling back to that day's `'*'` row only
+/// when the day has no row naming the asked value.
+pub fn cm_offer_series(rows: &[Value], finish: &str, first_edition: &str) -> Vec<Value> {
+    let owned: Vec<OfferRow> = rows
+        .iter()
+        .filter_map(OfferRow::from_row)
+        .filter(|row| cm_offer_floor_index(&row.condition).is_some())
+        .collect();
+    let mut parsed: Vec<&OfferRow> = owned.iter().collect();
+    parsed.sort_by(|a, b| {
+        cm_offer_floor_index(&a.condition)
+            .cmp(&cm_offer_floor_index(&b.condition))
+            .then_with(|| a.day.cmp(&b.day))
+            .then_with(|| by_offer_price(a, b))
+    });
+    CM_OFFER_FLOORS
+        .iter()
+        .enumerate()
+        .filter_map(|(index, floor)| {
+            let cells: Vec<&OfferRow> = parsed
+                .iter()
+                .copied()
+                .filter(|row| cm_offer_floor_index(&row.condition) == Some(index))
+                .collect();
+            let mut days: Vec<Value> = Vec::new();
+            let mut next = 0usize;
+            while next < cells.len() {
+                let day = cells[next].day.as_str();
+                let mut end = next;
+                while end < cells.len() && cells[end].day == day {
+                    end += 1;
+                }
+                let cell = &cells[next..end];
+                next = end;
+                let asked = facet_rows(
+                    &facet_rows(cell, finish, |row| row.finish.as_str()),
+                    first_edition,
+                    |row| row.first_edition.as_str(),
+                );
+                let Some(offer) = asked.first() else {
+                    continue;
+                };
+                let Some(pkn) = pkn_of_cents(offer.min_cents) else {
+                    continue;
+                };
+                days.push(json!({
+                    "day": day,
+                    "lowestPkn": pkn_json(Some(pkn)),
+                    "sellerType": offer.seller_type,
+                    "asked": offer.asked,
+                }));
+            }
+            if days.is_empty() {
+                return None;
+            }
+            Some(json!({ "condition": floor, "days": days }))
+        })
+        .collect()
+}
+
+/// The `cardmarketOffers` block: the floors of the product in `product` that the
+/// daily table has offers for. `status` overrides the derived one (a failed query
+/// is `unavailable`).
+pub fn cardmarket_offers_source(
+    rows: &[Value],
+    status: Option<&str>,
+    product: Option<i64>,
+    language: &str,
+    finish: &str,
+    first_edition: &str,
+) -> Value {
+    json!({
+        "source": "cardmarket_offers", "currency": "PKN", "metric": "lowestOffer",
+        "status": status.unwrap_or(if rows.is_empty() { "empty" } else { "available" }),
+        "idProduct": product, "language": language,
+        "finish": finish, "firstEdition": first_edition, "conditionIsFloor": true,
+        "series": cm_offer_series(rows, finish, first_edition),
+    })
+}
+
+/// The `cardmarketOffers` block of a game whose offers we do not collect.
+pub fn unsupported_cardmarket_offers(language: &str) -> Value {
+    json!({
+        "source": "cardmarket_offers", "status": "unsupported_game", "currency": "PKN",
+        "metric": "lowestOffer", "idProduct": Value::Null, "language": language,
+        "conditionIsFloor": true, "series": [],
+    })
+}
+
+/// The offer rows of one product, language and facet of the range.
+pub async fn cm_offer_rows(
+    pool: &PgPool,
+    product: i64,
+    language: &str,
+    finish: &str,
+    first_edition: &str,
+    from: &str,
+    to: &str,
+) -> Result<Vec<Value>, sqlx::Error> {
+    pg::pool_rows(
+        pool,
+        CM_OFFER_HISTORY_SQL,
+        &[
+            Bind::Int(product),
+            Bind::Text(language.to_owned()),
+            Bind::Text(finish.to_owned()),
+            Bind::Text(first_edition.to_owned()),
+            Bind::Text(from.to_owned()),
+            Bind::Text(to.to_owned()),
+        ],
+    )
+    .await
+}
+
+fn failed_cardmarket_offers(error: &sqlx::Error, language: &str) -> Value {
+    warn_query(CM_OFFER_TABLE, error);
+    cardmarket_offers_source(&[], Some("unavailable"), None, language, "", "")
+}
+
+/// The `cardmarketOffers` block of one blueprint: its first product, then
+/// `CM_OFFER_HISTORY_SQL`. A failure of either query fails this block alone.
+async fn cardmarket_offers_block(
+    pool: &PgPool,
+    ct_id: &str,
+    from: &str,
+    to: &str,
+    language: &str,
+    finish: &str,
+    first_edition: &str,
+) -> Value {
+    let products = match cm_product_ids(pool, ct_id).await {
+        Ok(products) => products,
+        Err(error) => return failed_cardmarket_offers(&error, language),
+    };
+    let Some(product) = products.first().copied() else {
+        return cardmarket_offers_source(&[], None, None, language, finish, first_edition);
+    };
+    match cm_offer_rows(pool, product, language, finish, first_edition, from, to).await {
+        Ok(rows) => {
+            cardmarket_offers_source(&rows, None, Some(product), language, finish, first_edition)
+        }
+        Err(error) => failed_cardmarket_offers(&error, language),
+    }
+}
+
+/// The `cardmarketOffers` block with the probe already answered. `read` runs the
+/// two queries and is reached only when `presence` says their tables are there,
+/// so a database without the daily table answers `empty` and logs no Postgres
+/// error (PH-02).
+pub async fn cardmarket_offers_leg<R, Fut>(presence: Presence, read: R) -> Value
+where
+    R: FnOnce() -> Fut,
+    Fut: Future<Output = Value>,
+{
+    table_presence::guarded(
+        presence,
+        read,
+        || cardmarket_offers_source(&[], None, None, CM_OFFER_DEFAULT_LANGUAGE, "", ""),
+        || {
+            cardmarket_offers_source(
+                &[],
+                Some("unavailable"),
+                None,
+                CM_OFFER_DEFAULT_LANGUAGE,
+                "",
+                "",
+            )
+        },
+    )
+    .await
+}
+
+/// The `cardmarketOffers` block of the response. Only Pokémon has collected
+/// offers; every other game is the stub without a query, a card without a
+/// blueprint is `empty` without one, and a database without the daily table is
+/// `empty` from the probe without one either.
+pub async fn cardmarket_offers_history(
+    pool: &PgPool,
+    game: &str,
+    ct_id: Option<&str>,
+    from: &str,
+    to: &str,
+    printing: CmOfferPrinting<'_>,
+) -> Value {
+    let CmOfferPrinting {
+        language,
+        finish,
+        first_edition,
+    } = printing;
+    if game != "pokemon" {
+        return unsupported_cardmarket_offers(language);
+    }
+    let Some(ct_id) = ct_id.filter(|ct_id| !ct_id.is_empty()) else {
+        return cardmarket_offers_source(&[], None, None, language, finish, first_edition);
+    };
+    let presence = table_presence::presence_all(pool, &CM_OFFER_TABLES).await;
+    cardmarket_offers_leg(presence, || {
+        cardmarket_offers_block(pool, ct_id, from, to, language, finish, first_edition)
+    })
+    .await
+}
+
+/// The graph day of the offers leg: the plotted price of the day alone, as the
+/// brief shapes it. Nothing without a PKN price.
+fn cm_offer_graph_day(day: &Value) -> Option<Value> {
+    let price = day.get("lowestPkn").filter(|price| !price.is_null())?;
+    Some(json!({ "day": day_of(day.get("day")), "lowestPkn": price }))
 }
 
 /// The listing events that decide the `pokoin` line of one card: the last change
@@ -804,7 +1181,43 @@ fn cardmarket_graph(block: &Value, weekly: bool) -> Value {
 /// keys, in the same order, each block keeping its status, everything trimmed to
 /// the numbers the desk graph draws and thinned per ISO week over a long span
 /// (PH-06).
-pub fn graph_answer(body: &Value, reverse: bool) -> Value {
+/// The `cardmarketOffers` block of the graph answer: the one series of the
+/// `cmCondition` that was asked, which is the only line the graph plots. The
+/// other floors are left out entirely, so a `1m` window of five floors goes out
+/// as the one floor the desk shows.
+fn cardmarket_offers_graph(block: &Value, condition: &str, weekly: bool) -> Value {
+    let wanted = condition.trim();
+    let kept: Vec<Value> = block
+        .get("series")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter(|row| {
+                    js::string_or_empty(row.get("condition")).eq_ignore_ascii_case(wanted)
+                })
+                .map(|row| {
+                    with_field(
+                        row,
+                        "days",
+                        Value::Array(graph_day_rows(
+                            row.get("days").and_then(Value::as_array),
+                            weekly,
+                            cm_offer_graph_day,
+                        )),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    with_field(block, "series", Value::Array(kept))
+}
+
+/// The `fields=graph` answer of a full price-history body: the same top-level
+/// keys, in the same order, each block keeping its status, everything trimmed to
+/// the numbers the desk graph draws and thinned per ISO week over a long span
+/// (PH-06). `cm_condition` is the `cmCondition` the request asked, which is the
+/// one floor the offers line plots.
+pub fn graph_answer(body: &Value, reverse: bool, cm_condition: &str) -> Value {
     let Some(object) = body.as_object() else {
         return body.clone();
     };
@@ -815,6 +1228,7 @@ pub fn graph_answer(body: &Value, reverse: bool) -> Value {
             "cardtrader" | "pokoin" => ask_graph(block, weekly),
             "tcgplayer" => tcgplayer_graph(block, reverse, weekly),
             "cardmarket" => cardmarket_graph(block, weekly),
+            "cardmarketOffers" => cardmarket_offers_graph(block, cm_condition, weekly),
             _ => block.clone(),
         };
         out.insert(key.clone(), block);
@@ -1162,6 +1576,19 @@ mod tests {
             "pokoin": {
                 "source": "pokoin_listings", "currency": "PKN", "metric": "lowestAsk", "status": "available",
                 "days": [{ "day": "2026-11-15", "lowestAskPkn": 260, "listingCount": 2 }],
+            },
+            "cardmarketOffers": {
+                "source": "cardmarket_offers", "currency": "PKN", "metric": "lowestOffer", "status": "available",
+                "idProduct": 794461, "language": "EN", "finish": "N", "firstEdition": "N", "conditionIsFloor": true,
+                "series": [
+                    { "condition": "NM", "days": [
+                        { "day": "2026-11-09", "lowestPkn": 1840, "sellerType": "private", "asked": true },
+                        { "day": "2026-11-16", "lowestPkn": 1900, "sellerType": "pro", "asked": false },
+                    ] },
+                    { "condition": "SP", "days": [
+                        { "day": "2026-11-16", "lowestPkn": 1500, "sellerType": "private", "asked": true },
+                    ] },
+                ],
             },
             "fx": { "base": "EUR", "quote": "USD", "firstDay": "2026-08-10", "lastDay": "2026-11-16" },
         })
@@ -1775,7 +2202,7 @@ mod tests {
     #[test]
     fn graph_answer_trims_every_block_to_the_plotted_numbers() {
         let body = graph_body();
-        let graph = graph_answer(&body, false);
+        let graph = graph_answer(&body, false, CM_OFFER_DEFAULT_CONDITION);
         let keys = |value: &Value| {
             value
                 .as_object()
@@ -1800,7 +2227,13 @@ mod tests {
         assert_eq!(graph["fx"], body["fx"]);
 
         // Statuses and every block header survive; only the days are trimmed.
-        for block in ["cardtrader", "tcgplayer", "cardmarket", "pokoin"] {
+        for block in [
+            "cardtrader",
+            "tcgplayer",
+            "cardmarket",
+            "cardmarketOffers",
+            "pokoin",
+        ] {
             assert_eq!(graph[block]["status"], body[block]["status"], "{block}");
             assert_eq!(graph[block]["source"], body[block]["source"], "{block}");
         }
@@ -1840,7 +2273,7 @@ mod tests {
         );
 
         // `reverse=1` asks for the reverse-holo series instead.
-        let reverse = graph_answer(&body, true);
+        let reverse = graph_answer(&body, true, CM_OFFER_DEFAULT_CONDITION);
         assert_eq!(
             reverse["tcgplayer"]["series"][0]["subtype"],
             json!("Reverse Holofoil")
@@ -1858,6 +2291,7 @@ mod tests {
         let empty = graph_answer(
             &json!({ "from": "2026-10-01", "to": "2026-11-01", "pokoin": pokoin_source(&[], None, "2026-10-01", "2026-11-01") }),
             false,
+            CM_OFFER_DEFAULT_CONDITION,
         );
         assert_eq!(empty["pokoin"]["status"], "empty");
         assert!(empty["pokoin"]["days"].as_array().expect("days").is_empty());
@@ -1916,7 +2350,7 @@ mod tests {
             { "day": "2026-11-08", "lowestAskPkn": 260 },
             { "day": "2026-11-16", "lowestAskPkn": 255 },
         ]);
-        let weekly = graph_answer(&body, false);
+        let weekly = graph_answer(&body, false, CM_OFFER_DEFAULT_CONDITION);
         assert_eq!(weekly["bucket"], json!("week"));
         assert_eq!(
             weekly["cardtrader"]["days"],
@@ -2006,5 +2440,422 @@ mod tests {
                 assert!(sql.contains(&format!("${index}")), "{sql} binds ${index}");
             }
         }
+    }
+
+    /// One `CM_OFFER_HISTORY_SQL` row as Postgres answers it: the floor and the
+    /// day, the seller type and its cents, and the facet the row was stored under.
+    fn offer_row(
+        day: &str,
+        condition: &str,
+        seller_type: &str,
+        cents: i64,
+        finish: &str,
+        first_edition: &str,
+        asked: bool,
+    ) -> Value {
+        json!({
+            "day": day, "condition": condition, "seller_type": seller_type,
+            "min_cents": cents, "finish": finish, "first_edition": first_edition,
+            "asked": asked,
+        })
+    }
+
+    /// The same row with no readable cents, which is what a damaged dump leaves.
+    fn offer_row_without_price(day: &str, condition: &str, seller_type: &str) -> Value {
+        let mut row = offer_row(day, condition, seller_type, 0, "N", "N", true);
+        row["min_cents"] = Value::Null;
+        row
+    }
+
+    /// The field names of an object, in the order the answer put them.
+    fn field_order(value: &Value) -> String {
+        value
+            .as_object()
+            .map(|map| map.keys().cloned().collect::<Vec<_>>().join(","))
+            .unwrap_or_default()
+    }
+
+    /// `day lowestPkn sellerType asked` of every day of one floor, so that one
+    /// assertion reads like the answer it checks.
+    fn offer_days(block: &Value, floor: &str) -> Vec<String> {
+        block["series"]
+            .as_array()
+            .map(|series| {
+                series
+                    .iter()
+                    .filter(|row| row["condition"] == json!(floor))
+                    .flat_map(|row| row["days"].as_array().cloned().unwrap_or_default())
+                    .map(|day| {
+                        format!(
+                            "{} {} {} {}",
+                            day["day"].as_str().unwrap_or_default(),
+                            day["lowestPkn"],
+                            day["sellerType"].as_str().unwrap_or_default(),
+                            day["asked"],
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn cm_offer_cents_are_whole_pkn() {
+        // Two PKN per euro cent: 9.20 EUR is 1840, and one cent is two. The scale
+        // is PKN_PER_EUR per euro in an integer, because a cent is the smallest
+        // money Cardmarket quotes and a PKN is never quoted in fractions.
+        for (cents, pkn) in [
+            (1.0, 2.0),
+            (99.0, 198.0),
+            (920.0, 1840.0),
+            (25000.0, 50000.0),
+        ] {
+            assert_eq!(pkn_of_cents(Some(cents)), Some(pkn), "{cents} cents");
+        }
+        for cents in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(pkn_of_cents(Some(cents)), None, "{cents} is not an offer");
+        }
+        assert_eq!(pkn_of_cents(None), None);
+        // The answer prints it without a decimal point, like every other PKN field.
+        assert_eq!(pkn_json(pkn_of_cents(Some(920.0))), json!(1840));
+    }
+
+    #[test]
+    fn cm_offer_facet_defaults_and_vocabularies() {
+        assert_eq!(cm_offer_condition(None), Some("NM"));
+        assert_eq!(cm_offer_condition(Some("")), Some("NM"));
+        assert_eq!(cm_offer_condition(Some(" mp ")), Some("MP"));
+        assert_eq!(cm_offer_condition(Some("poor")), Some("Poor"));
+        assert_eq!(cm_offer_condition(Some("Mint")), None);
+        assert_eq!(cm_offer_language(None), Some("EN"));
+        assert_eq!(cm_offer_language(Some("")), Some("EN"));
+        assert_eq!(cm_offer_language(Some("jp")), Some("JP"));
+        assert_eq!(cm_offer_language(Some("ZHT")), Some("ZHT"));
+        assert_eq!(cm_offer_language(Some("*")), Some("*"));
+        // The desk's Indonesian, Thai and Vietnamese are not Cardmarket facets, and
+        // nothing that is not one of the stored keys reaches the bind.
+        for code in ["ID", "TH", "VI", "EN;", "NLX", "*;drop"] {
+            assert_eq!(
+                cm_offer_language(Some(code)),
+                None,
+                "{code} is not a stored key"
+            );
+        }
+        // Everything each vocabulary holds is accepted by its own parser.
+        for floor in CM_OFFER_FLOORS {
+            assert_eq!(cm_offer_condition(Some(floor)), Some(floor), "{floor}");
+        }
+        for key in CM_OFFER_LANGUAGES {
+            assert_eq!(cm_offer_language(Some(key)), Some(key), "{key}");
+        }
+    }
+
+    #[test]
+    fn cm_offer_series_takes_the_cheapest_seller_type_of_every_day() {
+        let rows = [
+            // Two pro offers and one private on 9 Nov: the private 9.20 EUR is the
+            // day, and its own `asked` flag is what the day reports.
+            offer_row("2026-11-09", "NM", "pro", 1500, "N", "N", true),
+            offer_row("2026-11-09", "NM", "private", 920, "N", "N", true),
+            offer_row("2026-11-09", "NM", "pro", 950, "N", "N", false),
+            // The same floor a week later, cheapest from a pro this time.
+            offer_row("2026-11-16", "NM", "pro", 1000, "N", "N", false),
+            offer_row("2026-11-16", "NM", "private", 1200, "N", "N", true),
+            // A second floor, one day.
+            offer_row("2026-11-16", "SP", "private", 700, "N", "N", true),
+        ];
+        let block = cardmarket_offers_source(&rows, None, Some(279646), "EN", "N", "N");
+        assert_eq!(
+            field_order(&block),
+            "source,currency,metric,status,idProduct,language,finish,firstEdition,conditionIsFloor,series"
+        );
+        assert_eq!(block["source"], json!("cardmarket_offers"));
+        assert_eq!(block["currency"], json!("PKN"));
+        assert_eq!(block["metric"], json!("lowestOffer"));
+        assert_eq!(block["status"], json!("available"));
+        assert_eq!(block["idProduct"], json!(279646));
+        assert_eq!(block["language"], json!("EN"));
+        assert_eq!(block["conditionIsFloor"], json!(true));
+        assert_eq!(
+            offer_days(&block, "NM"),
+            ["2026-11-09 1840 private true", "2026-11-16 2000 pro false"],
+            "the cheapest offer of the day across the seller types, in PKN"
+        );
+        assert_eq!(offer_days(&block, "SP"), ["2026-11-16 1400 private true"]);
+        assert_eq!(
+            field_order(&block["series"][0]["days"][0]),
+            "day,lowestPkn,sellerType,asked"
+        );
+    }
+
+    #[test]
+    fn cm_offer_series_falls_back_to_the_aggregate_row_of_a_day() {
+        let rows = [
+            // 1 Nov carries the asked facet exactly.
+            offer_row("2026-11-01", "NM", "private", 1000, "N", "N", true),
+            // 2 Nov was never asked as a non-reverse facet: only its Y row and the
+            // day's '*' aggregate exist, so the aggregate prices the N ask.
+            offer_row("2026-11-02", "NM", "private", 800, "Y", "N", true),
+            offer_row("2026-11-02", "NM", "private", 1500, "*", "*", true),
+            // 3 Nov has both first-edition facets and no aggregate: the exact N
+            // wins and the cheaper '*' row never enters.
+            offer_row("2026-11-03", "NM", "private", 700, "N", "N", true),
+            offer_row("2026-11-03", "NM", "private", 300, "N", "*", true),
+            // 4 Nov has nothing but the aggregate rows of both facets.
+            offer_row("2026-11-04", "NM", "private", 400, "*", "*", false),
+        ];
+        assert_eq!(
+            offer_days(
+                &cardmarket_offers_source(&rows, None, Some(7), "EN", "N", "N"),
+                "NM"
+            ),
+            [
+                "2026-11-01 2000 private true",
+                "2026-11-02 3000 private true",
+                "2026-11-03 1400 private true",
+                "2026-11-04 800 private false",
+            ],
+            "the exact facet where the day has one, its aggregate only where it has none"
+        );
+        // The reverse ask reads the Y facet instead, and a day that has neither a Y
+        // nor an aggregate finish row is simply not a day of that line.
+        assert_eq!(
+            offer_days(
+                &cardmarket_offers_source(&rows, None, Some(7), "EN", "Y", "N"),
+                "NM"
+            ),
+            [
+                "2026-11-02 1600 private true",
+                "2026-11-04 800 private false"
+            ],
+            "1 Nov and 3 Nov have no Y-finish row to read"
+        );
+        // Asked for the aggregate outright, every row of the day counts, cheapest wins.
+        assert_eq!(
+            offer_days(
+                &cardmarket_offers_source(&rows, None, Some(7), "EN", "*", "*"),
+                "NM"
+            ),
+            [
+                "2026-11-01 2000 private true",
+                "2026-11-02 1600 private true",
+                "2026-11-03 600 private true",
+                "2026-11-04 800 private false",
+            ],
+            "an aggregate ask is the cheapest row of the day whatever facet it was stored under"
+        );
+    }
+
+    #[test]
+    fn cm_offer_series_orders_the_floors_and_leaves_out_what_is_not_one() {
+        let rows = [
+            offer_row("2026-11-16", "Poor", "private", 100, "N", "N", true),
+            offer_row("2026-11-16", "PL", "private", 200, "N", "N", true),
+            offer_row("2026-11-16", "MP", "private", 300, "N", "N", true),
+            offer_row("2026-11-16", "NM", "private", 400, "N", "N", true),
+            offer_row("2026-11-15", "NM", "private", 500, "N", "N", true),
+            // Not floors: the table's own aggregate over the conditions, and a code
+            // nobody collects.
+            offer_row("2026-11-16", "*", "private", 50, "N", "N", true),
+            offer_row("2026-11-16", "Mint", "private", 60, "N", "N", true),
+        ];
+        let block = cardmarket_offers_source(&rows, None, Some(7), "EN", "N", "N");
+        let floors = block["series"]
+            .as_array()
+            .expect("series")
+            .iter()
+            .map(|row| row["condition"].as_str().unwrap_or_default().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            floors,
+            ["NM", "MP", "PL", "Poor"],
+            "the floor order of the answer; SP has no day, so it is not a series"
+        );
+        assert_eq!(
+            offer_days(&block, "NM"),
+            [
+                "2026-11-15 1000 private true",
+                "2026-11-16 800 private true"
+            ],
+            "oldest first, whatever order the rows came in"
+        );
+    }
+
+    #[test]
+    fn cm_offer_series_has_no_day_it_cannot_price() {
+        let rows = [
+            // A floor whose only row has unreadable cents is not a series at all.
+            offer_row_without_price("2026-11-09", "SP", "private"),
+            // A day whose only row has unreadable cents is not a day.
+            offer_row_without_price("2026-11-09", "NM", "private"),
+            // A day where a priced offer wins over the unreadable one, however the
+            // rows are ordered.
+            offer_row_without_price("2026-11-10", "NM", "private"),
+            offer_row("2026-11-10", "NM", "pro", 900, "N", "N", false),
+            offer_row("2026-11-11", "NM", "private", 800, "N", "N", true),
+        ];
+        let block = cardmarket_offers_source(&rows, None, Some(7), "EN", "N", "N");
+        assert_eq!(
+            block["series"].as_array().expect("series").len(),
+            1,
+            "SP has no priced day, so the answer has one floor"
+        );
+        assert_eq!(
+            offer_days(&block, "NM"),
+            ["2026-11-10 1800 pro false", "2026-11-11 1600 private true"],
+            "the unreadable 9 Nov is left out and never drawn as a price of zero"
+        );
+    }
+
+    #[test]
+    fn cm_offer_sql_binds_every_value() {
+        assert!(
+            !CM_OFFER_HISTORY_SQL.contains('{'),
+            "no format interpolation in the statement"
+        );
+        // Neither the product, the facet nor the window is ever inlined, so a value
+        // that is not a key of the vocabulary cannot reach Postgres as SQL.
+        for value in [
+            "279646",
+            "EN",
+            "ZHT",
+            "NM",
+            "Poor",
+            "2024-02-08",
+            "2026-11-16",
+            "'; drop table public.cardmarket_offer_daily; --",
+        ] {
+            assert!(
+                !CM_OFFER_HISTORY_SQL.contains(value),
+                "{value} is interpolated into {CM_OFFER_HISTORY_SQL}"
+            );
+        }
+        assert_eq!(
+            CM_OFFER_HISTORY_SQL.matches('$').count(),
+            6,
+            "product, language, finish, first edition and the two day bounds"
+        );
+        for index in 1..=6 {
+            assert!(
+                CM_OFFER_HISTORY_SQL.contains(&format!("${index}")),
+                "{CM_OFFER_HISTORY_SQL} binds ${index}"
+            );
+        }
+        assert_eq!(
+            CM_OFFER_TABLES.to_vec(),
+            vec!["public.cardtrader_pokemon_blueprints", CM_OFFER_TABLE],
+            "the probe covers both tables the statement reads"
+        );
+    }
+
+    #[tokio::test]
+    async fn cm_offer_leg_queries_only_a_present_table() {
+        for (presence, expected_status, expected_calls) in [
+            (Presence::Present, "empty", 1usize),
+            (Presence::Missing, "empty", 0),
+            (Presence::ProbeFailed, "unavailable", 0),
+        ] {
+            let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let counted = std::sync::Arc::clone(&calls);
+            let block = cardmarket_offers_leg(presence, move || {
+                counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async { cardmarket_offers_source(&[], None, None, "EN", "N", "N") }
+            })
+            .await;
+            assert_eq!(block["status"], expected_status, "{presence:?}");
+            assert_eq!(block["source"], json!("cardmarket_offers"), "{presence:?}");
+            assert_eq!(
+                block["series"].as_array().expect("series").len(),
+                0,
+                "{presence:?}"
+            );
+            assert_eq!(
+                calls.load(std::sync::atomic::Ordering::SeqCst),
+                expected_calls,
+                "{presence:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn other_games_stay_unsupported_for_the_offers_leg_too() {
+        // A pool that cannot be reached at all: the stub is answered before the
+        // probe, so nothing here ever acquires a connection.
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .acquire_timeout(std::time::Duration::from_millis(50))
+            .connect_lazy("postgres://pokoin_test@127.0.0.1:1/pokoin_magic")
+            .expect("lazy pool");
+        let block = cardmarket_offers_history(
+            &pool,
+            "magic",
+            Some("239324"),
+            "2026-10-01",
+            "2026-11-01",
+            CmOfferPrinting {
+                language: "JP",
+                finish: "N",
+                first_edition: "N",
+            },
+        )
+        .await;
+        assert_eq!(block["status"], json!("unsupported_game"));
+        assert_eq!(block["source"], json!("cardmarket_offers"));
+        assert_eq!(
+            block["language"],
+            json!("JP"),
+            "the facet asked is still what the block names"
+        );
+        assert_eq!(block["idProduct"], Value::Null);
+        assert!(block["series"].as_array().expect("series").is_empty());
+    }
+
+    #[test]
+    fn cm_offer_graph_answer_keeps_only_the_asked_floor() {
+        let body = graph_body();
+        let graph = graph_answer(&body, false, "SP");
+        assert_eq!(
+            field_order(&graph["cardmarketOffers"]),
+            "source,currency,metric,status,idProduct,language,finish,firstEdition,conditionIsFloor,series",
+            "the header of the block is the full one, field for field"
+        );
+        let series = graph["cardmarketOffers"]["series"]
+            .as_array()
+            .expect("series");
+        assert_eq!(series.len(), 1, "the one floor the desk plots");
+        assert_eq!(series[0]["condition"], json!("SP"));
+        assert_eq!(
+            series[0]["days"],
+            json!([{ "day": "2026-11-16", "lowestPkn": 1500 }]),
+            "a graph day is the day and its price, nothing else"
+        );
+        assert!(
+            graph_answer(&body, false, "Poor")["cardmarketOffers"]["series"]
+                .as_array()
+                .expect("series")
+                .is_empty(),
+            "a floor the table never had is not a line"
+        );
+    }
+
+    #[test]
+    fn cm_offer_graph_answer_thins_a_long_span_to_weeks() {
+        let mut body = graph_body();
+        body["from"] = json!("2025-01-01");
+        body["cardmarketOffers"]["series"][0]["days"] = json!([
+            { "day": "2026-11-09", "lowestPkn": 1800, "sellerType": "private", "asked": true },
+            { "day": "2026-11-12", "lowestPkn": 1840, "sellerType": "pro", "asked": true },
+            { "day": "2026-11-16", "lowestPkn": 1900, "sellerType": "private", "asked": false },
+        ]);
+        let weekly = graph_answer(&body, false, "NM");
+        assert_eq!(weekly["bucket"], json!("week"));
+        assert_eq!(
+            weekly["cardmarketOffers"]["series"][0]["days"],
+            json!([
+                { "day": "2026-11-12", "lowestPkn": 1840 },
+                { "day": "2026-11-16", "lowestPkn": 1900 },
+            ]),
+            "9 and 12 Nov are one week (W46: 9–15 Nov): its last priced day stands"
+        );
     }
 }
