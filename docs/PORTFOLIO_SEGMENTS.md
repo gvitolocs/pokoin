@@ -211,6 +211,9 @@ four echoed in `limits`. A write's `id` is a list this seller already has or the
 of it is a 404, a name another of their lists carries is a 409, a missing name or an
 over-budget list is a 400 that says which limit it hit, and an item whose `cardId` is
 not a positive integer or whose quantity is out of range is a 400 naming its index.
+A `cardId` is canonicalised before anything else reads it: the leading zeros come off,
+so `0012` is stored, answered, merged and looked up as `12` rather than becoming two
+lines of one card that each price.
 `?action=` outside those two writes is a 400 too: there is no third verb. An unknown
 id and someone else's id answer byte-identically, so no read of the store can tell a
 list that exists from one that does not.

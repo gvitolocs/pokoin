@@ -201,18 +201,20 @@ pub fn sanitize_display(value: Option<&Json>) -> String {
         .collect()
 }
 
-/// A public `card_id`: 1–12 ASCII digits, and not zero.
+/// A public `card_id`: at most 12 ASCII digits, and not zero. Leading zeros come
+/// off, so `0012` is stored, answered, merged and looked up as the `12` the catalog
+/// carries — two spellings of one card must not become two lines that each price.
 fn sanitize_card_id(value: Option<&Json>) -> Option<String> {
     let text = text_of(value);
     let text = text.trim();
-    if text.is_empty()
-        || text.len() > 12
-        || !text.bytes().all(|byte| byte.is_ascii_digit())
-        || text.bytes().all(|byte| byte == b'0')
-    {
+    if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
-    Some(text.to_string())
+    let digits = text.trim_start_matches('0');
+    if digits.is_empty() || digits.len() > 12 {
+        return None;
+    }
+    Some(digits.to_string())
 }
 
 /// An owned quantity: a whole number 1..=[`MAX_QUANTITY`], or one when the field
@@ -1425,6 +1427,52 @@ mod tests {
         .unwrap();
         assert_eq!(saved.card_id, "123456789012");
         assert_eq!(saved.quantity, MAX_QUANTITY);
+    }
+
+    #[test]
+    fn a_padded_card_id_is_the_plain_one_everywhere() {
+        let padded = Item::from_input(&json!({ "cardId": "0012", "quantity": 3 }), 0).unwrap();
+        assert_eq!(
+            padded.card_id, "12",
+            "the catalog carries digits, not padding"
+        );
+        assert_eq!(padded.to_json()["cardId"], json!("12"), "the answer");
+        assert_eq!(
+            padded.row()["card_id"],
+            json!("12"),
+            "and the row the blueprint lookup is asked by"
+        );
+
+        let merged = sanitize_items(&[
+            json!({ "cardId": "0012", "quantity": 3 }),
+            input("12", 4),
+            json!({ "cardId": "0000000000012", "quantity": 1 }),
+        ])
+        .unwrap();
+        assert_eq!(
+            merged.len(),
+            1,
+            "three spellings of one card are one line, not three that each price"
+        );
+        assert_eq!(merged[0].card_id, "12");
+        assert_eq!(merged[0].quantity, 8);
+
+        // The 12-digit bound is on the id, not on how it is spelled: padding never
+        // grows an id past it, and a real 13-digit value stays not a card id.
+        assert_eq!(
+            Item::from_input(&json!({ "cardId": "000000000000123456789012" }), 0)
+                .unwrap()
+                .card_id,
+            "123456789012"
+        );
+        assert!(Item::from_input(&json!({ "cardId": "01234567890123" }), 0).is_err());
+        // Zero has no canonical form, however many zeros spell it.
+        for zero in ["0", "00", "000000000000"] {
+            assert!(
+                Item::from_input(&json!({ "cardId": zero }), 0).is_err(),
+                "{zero} is not a card"
+            );
+        }
     }
 
     #[test]
