@@ -757,8 +757,8 @@ pub fn parse_power_tools_location(raw: &str, location_parse: &str) -> (String, i
         let mid = MID.get_or_init(|| Regex::new(r"^(.+?)[·•](\d+)(?:[·•](\d+))?$").expect("mid regex"));
         if let Some(captures) = mid.captures(&text) {
             let box_name = clean_text(Some(captures.get(1).map(|m| m.as_str()).unwrap_or_default()), 64);
-            let stack: i64 = captures.get(2).map(|m| m.as_str()).unwrap_or("1").parse().unwrap_or(1).clamp(1, 9999);
-            let position: i64 = captures.get(3).map(|m| m.as_str()).unwrap_or("1").parse().unwrap_or(1).clamp(1, 9999);
+            let stack = location_number(captures.get(2).map(|m| m.as_str()).unwrap_or("1"));
+            let position = location_number(captures.get(3).map(|m| m.as_str()).unwrap_or("1"));
             return (box_name, stack, position, true);
         }
         return (text, 1, 1, false);
@@ -768,21 +768,68 @@ pub fn parse_power_tools_location(raw: &str, location_parse: &str) -> (String, i
         let dash = DASH.get_or_init(|| Regex::new(r"^(.+?)\s+-\s+(\d+)$").expect("dash regex"));
         if let Some(captures) = dash.captures(&text) {
             let box_name = clean_text(Some(captures.get(1).map(|m| m.as_str()).unwrap_or_default()), 64);
-            let stack: i64 = captures.get(2).map(|m| m.as_str()).unwrap_or("1").parse().unwrap_or(1).clamp(1, 9999);
+            let stack = location_number(captures.get(2).map(|m| m.as_str()).unwrap_or("1"));
             return (box_name, stack, 1, true);
         }
-        static SPACE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-        let space = SPACE.get_or_init(|| Regex::new(r"^(.+?)[\s_]+(\d+)$").expect("space regex"));
-        if let Some(captures) = space.captures(&text) {
-            let head = captures.get(1).map(|m| m.as_str()).unwrap_or_default();
+        if let Some((head, digits)) = split_trailing_number(&text) {
             if head.chars().any(|c| c.is_ascii_alphabetic()) {
                 let box_name = clean_text(Some(head), 64);
-                let stack: i64 = captures.get(2).map(|m| m.as_str()).unwrap_or("1").parse().unwrap_or(1).clamp(1, 9999);
-                return (box_name, stack, 1, true);
+                return (box_name, location_number(digits), 1, true);
             }
         }
     }
     (text, 1, 1, false)
+}
+
+/// The separators a location value's trailing number can sit behind: a space, a
+/// tab or an underscore. Every detector and every parser decides with these, so
+/// two of them cannot read one CSV as two different styles.
+pub const LOCATION_NUMBER_SEPARATORS: [char; 3] = [' ', '\t', '_'];
+
+/// The one definition of "this location value ends in a number": the digits
+/// after the last run of [`LOCATION_NUMBER_SEPARATORS`]. `Box 12`, `Box_12` and
+/// `Box\t12` all split to head `Box` and digits `12`; `Box-12`, `Box` and a bare
+/// `12` do not split.
+pub fn split_trailing_number(text: &str) -> Option<(&str, &str)> {
+    let index = text.rfind(LOCATION_NUMBER_SEPARATORS)?;
+    let digits = &text[index + 1..];
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let head = text[..index].trim_end_matches(LOCATION_NUMBER_SEPARATORS.as_slice());
+    if head.is_empty() {
+        return None;
+    }
+    Some((head, digits))
+}
+
+/// How one cleaned location value reads, decided by the shared rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocationShape {
+    /// Carries a `·`, `•` or `#`: the seller wrote the structure.
+    Structured,
+    /// Ends in a number: a stack, or part of the box name.
+    TrailingNumber,
+    /// Neither: the whole text is the box.
+    Plain,
+}
+
+/// [`LocationShape`] of a value the caller already cleaned.
+pub fn location_shape(text: &str) -> LocationShape {
+    if text.contains(['·', '•', '#']) {
+        return LocationShape::Structured;
+    }
+    if split_trailing_number(text).is_some() {
+        return LocationShape::TrailingNumber;
+    }
+    LocationShape::Plain
+}
+
+/// The number a run of digits reads as: out of range or unrepresentable becomes
+/// 1, the way every location parser clamps. A reported reading built with this
+/// is a reading its parser really stores.
+pub fn location_number(digits: &str) -> i64 {
+    digits.parse::<i64>().unwrap_or(1).clamp(1, 9999)
 }
 
 /// The explicit dash form `NAME - 16`: the seller wrote the stack number
@@ -795,12 +842,7 @@ pub fn dash_stack_location(text: &str) -> Option<(String, i64)> {
         Some(captures.get(1).map(|m| m.as_str()).unwrap_or_default()),
         64,
     );
-    let stack = captures
-        .get(2)
-        .map(|m| m.as_str())
-        .and_then(|digits| digits.parse::<i64>().ok())
-        .unwrap_or(1)
-        .clamp(1, 9999);
+    let stack = location_number(captures.get(2).map(|m| m.as_str()).unwrap_or("1"));
     Some((box_name, stack))
 }
 
@@ -827,21 +869,20 @@ impl AmbiguousLocation {
 /// The one definition of the ambiguity every location parser and detector
 /// shares. `text` is the value as the caller already cleaned it. It is
 /// ambiguous when the text carries no `·`/`•`/`#`, is not the explicit dash
-/// form, and ends in a space or underscore plus digits with at least one ASCII
-/// letter in front: `Focobomba 006` is the box `Focobomba` stack 6 just as much
-/// as it is the box `Focobomba 006`, and the text cannot say which.
+/// form, and ends — after a [`LOCATION_NUMBER_SEPARATORS`] separator — in digits
+/// with at least one ASCII letter in front: `Focobomba 006` is the box
+/// `Focobomba` stack 6 just as much as it is the box `Focobomba 006`, and the
+/// text cannot say which. [`AmbiguousLocation::stack`] is the number this
+/// crate's `trailing_stack` parser would store, so the reported reading is the
+/// one at stake.
 pub fn ambiguous_location(text: &str) -> Option<AmbiguousLocation> {
-    if text.is_empty() || text.contains(['·', '•', '#']) {
+    if location_shape(text) != LocationShape::TrailingNumber {
         return None;
     }
     if dash_stack_location(text).is_some() {
         return None;
     }
-    static TRAILING: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    let trailing =
-        TRAILING.get_or_init(|| Regex::new(r"^(.+?)[\s_]+(\d+)$").expect("trailing number regex"));
-    let captures = trailing.captures(text)?;
-    let head = captures.get(1).map(|m| m.as_str()).unwrap_or_default();
+    let (head, digits) = split_trailing_number(text)?;
     if !head.chars().any(|c| c.is_ascii_alphabetic()) {
         return None;
     }
@@ -849,12 +890,7 @@ pub fn ambiguous_location(text: &str) -> Option<AmbiguousLocation> {
         raw: text.to_string(),
         as_box: text.to_string(),
         box_name: clean_text(Some(head), 64),
-        stack: captures
-            .get(2)
-            .map(|m| m.as_str())
-            .and_then(|digits| digits.parse::<i64>().ok())
-            .unwrap_or(1)
-            .clamp(1, 9999),
+        stack: location_number(digits),
     })
 }
 
@@ -1274,6 +1310,12 @@ mod tests {
                 case["asStack"]["stack"].as_i64().unwrap(),
                 "{text:?}"
             );
+            // What this crate's own parser stores for the same value, so the
+            // reported reading can never be one the import contradicts — the
+            // clamp is shared too (`Box 10000`, `Box 0`).
+            let (box_name, stack, _, _) = parse_power_tools_location(text, "trailing_stack");
+            assert_eq!(box_name, found.box_name, "{text:?} as trailing_stack");
+            assert_eq!(stack, found.stack, "{text:?} as trailing_stack");
         }
 
         assert_eq!(

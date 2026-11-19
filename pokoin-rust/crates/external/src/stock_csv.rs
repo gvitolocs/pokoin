@@ -4,6 +4,7 @@
 use serde_json::{json, Map, Value};
 
 use crate::error::{clean_text, ApiError, ApiResult};
+use crate::powertools as pt;
 
 pub const POWERTOOLS_HEADERS: [&str; 22] = [
     "cardmarketId", "quantity", "name", "set", "setCode", "cn", "condition", "language",
@@ -220,9 +221,10 @@ pub fn parse_location(raw: &str) -> Value {
     }
     // dash form: "box - 2 - 5" is ambiguous; treat as bare box (reference behavior)
     let dash = split_numeric_tail(&text, &[' ', '_', '-']);
-    if let Some((box_name, stack)) = dash {
+    if let Some((box_name, digits)) = dash {
         if box_name.chars().any(|c| c.is_ascii_alphabetic()) && text.matches('-').count() == 1 {
-            return json!({"box": stock_clean_text(&box_name, 64), "stack": clamp_int(Some(stack as f64), 1, 9999, 1), "position": 1, "structured": true, "hasPosition": false});
+            let stack = pt::location_number(&digits);
+            return json!({"box": stock_clean_text(&box_name, 64), "stack": stack, "position": 1, "structured": true, "hasPosition": false});
         }
     }
     // trailing "#N"
@@ -242,7 +244,8 @@ pub fn parse_location(raw: &str) -> Value {
     json!({"box": text, "stack": 1, "position": 1, "structured": false, "hasPosition": false})
 }
 
-fn split_numeric_tail(text: &str, seps: &[char]) -> Option<(String, i64)> {
+/// The head and the digits of a value that ends in a number after one of `seps`.
+fn split_numeric_tail(text: &str, seps: &[char]) -> Option<(String, String)> {
     let index = text.rfind(|c| seps.contains(&c))?;
     let tail = text[index + 1..].trim();
     if tail.is_empty() || !tail.chars().all(|c| c.is_ascii_digit()) {
@@ -252,7 +255,7 @@ fn split_numeric_tail(text: &str, seps: &[char]) -> Option<(String, i64)> {
     if head.is_empty() {
         return None;
     }
-    tail.parse::<i64>().ok().map(|stack| (head, stack))
+    Some((head, tail.to_string()))
 }
 
 /// `parsePowerToolsLocation`.
@@ -266,11 +269,15 @@ pub fn parse_power_tools_location(raw: &str, location_parse: &str) -> Value {
         return parse_location(&text);
     }
     if mode == "trailing_stack" {
-        if let Some((box_name, stack)) = split_numeric_tail_owned(&text, " - ") {
+        if let Some((box_name, digits)) = split_numeric_tail_owned(&text, " - ") {
+            let stack = pt::location_number(&digits);
             return json!({"box": stock_clean_text(&box_name, 64), "stack": stack, "position": 1, "structured": true, "hasPosition": false});
         }
-        if let Some((box_name, stack)) = split_numeric_tail(&text, &[' ', '_']) {
+        if let Some((box_name, digits)) =
+            split_numeric_tail(&text, pt::LOCATION_NUMBER_SEPARATORS.as_slice())
+        {
             if box_name.chars().any(|c| c.is_ascii_alphabetic()) {
+                let stack = pt::location_number(&digits);
                 return json!({"box": stock_clean_text(&box_name, 64), "stack": stack, "position": 1, "structured": true, "hasPosition": false});
             }
         }
@@ -278,7 +285,7 @@ pub fn parse_power_tools_location(raw: &str, location_parse: &str) -> Value {
     json!({"box": text, "stack": 1, "position": 1, "structured": false, "hasPosition": false})
 }
 
-fn split_numeric_tail_owned(text: &str, sep: &str) -> Option<(String, i64)> {
+fn split_numeric_tail_owned(text: &str, sep: &str) -> Option<(String, String)> {
     let index = text.rfind(sep)?;
     let tail = text[index + sep.len()..].trim();
     if tail.is_empty() || !tail.chars().all(|c| c.is_ascii_digit()) {
@@ -288,7 +295,7 @@ fn split_numeric_tail_owned(text: &str, sep: &str) -> Option<(String, i64)> {
     if head.is_empty() {
         return None;
     }
-    tail.parse::<i64>().ok().map(|stack| (head, stack))
+    Some((head, tail.to_string()))
 }
 
 /// `detectPowerToolsLocationStyle`.
@@ -305,16 +312,11 @@ pub fn detect_power_tools_location_style(locations: &[String]) -> Value {
         if examples.len() < 6 && !examples.contains(&text) {
             examples.push(text.clone());
         }
-        if text.contains('·') || text.contains('•') || text.contains('#') {
-            structured += 1;
-            continue;
+        match pt::location_shape(&text) {
+            pt::LocationShape::Structured => structured += 1,
+            pt::LocationShape::TrailingNumber => trailing += 1,
+            pt::LocationShape::Plain => as_is += 1,
         }
-        let has_digit_suffix = text.rfind(' ').map(|i| text[i + 1..].chars().all(|c| c.is_ascii_digit())).unwrap_or(false);
-        if (text.contains(" - ") && has_digit_suffix) || has_digit_suffix {
-            trailing += 1;
-            continue;
-        }
-        as_is += 1;
     }
     let total = structured + trailing + as_is;
     let mut location_parse = "as_is";
@@ -1022,10 +1024,38 @@ mod tests {
         for case in table["cases"].as_array().unwrap() {
             let value = case["raw"].as_str().unwrap();
             let detected = detect_power_tools_location_style(&[value.to_string()]);
+            let ambiguous = case["ambiguous"].as_bool().unwrap();
             assert_eq!(
                 detected["confirmationNeeded"].as_bool().unwrap(),
-                case["ambiguous"].as_bool().unwrap(),
+                ambiguous,
                 "detection disagrees on {value:?}"
+            );
+            assert_eq!(
+                detected["ambiguousCount"].as_i64().unwrap(),
+                i64::from(ambiguous),
+                "detection disagrees on {value:?}"
+            );
+            if !ambiguous {
+                continue;
+            }
+            let both =
+                json!({ "raw": case["raw"], "asBox": case["asBox"], "asStack": case["asStack"] });
+            assert_eq!(
+                detected["ambiguousExamples"][0], both,
+                "the two readings of {value:?}"
+            );
+            // The reported stack reading is what this parser stores.
+            let stored = parse_power_tools_location(value, "trailing_stack");
+            assert_eq!(
+                (
+                    stored["box"].as_str().unwrap(),
+                    stored["stack"].as_i64().unwrap(),
+                ),
+                (
+                    case["asStack"]["box"].as_str().unwrap(),
+                    case["asStack"]["stack"].as_i64().unwrap(),
+                ),
+                "{value:?} as trailing_stack"
             );
         }
         let detected = detect_power_tools_location_style(
@@ -1046,6 +1076,19 @@ mod tests {
             table["ambiguousListDetection"]["ambiguousExamples"]
         );
         assert!(detected["confirmationNeeded"].as_bool().unwrap());
+        for entry in table["detectorParity"].as_array().unwrap() {
+            let why = entry["why"].as_str().unwrap();
+            let locations = entry["locations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|value| value.as_str().unwrap().to_string())
+                .collect::<Vec<_>>();
+            let detected = detect_power_tools_location_style(&locations);
+            for key in ["locationParse", "ambiguousCount", "confirmationNeeded"] {
+                assert_eq!(detected[key], entry[key], "{key} — {why}");
+            }
+        }
     }
 
     #[test]

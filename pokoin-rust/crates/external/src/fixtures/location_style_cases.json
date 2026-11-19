@@ -5,6 +5,8 @@
     { "raw": "Focobomba 007", "ambiguous": true, "asBox": "Focobomba 007", "asStack": { "box": "Focobomba", "stack": 7 } },
     { "raw": "Focobomba_006", "ambiguous": true, "asBox": "Focobomba_006", "asStack": { "box": "Focobomba", "stack": 6 } },
     { "raw": "Binder A 3", "ambiguous": true, "asBox": "Binder A 3", "asStack": { "box": "Binder A", "stack": 3 } },
+    { "raw": "Box 10000", "ambiguous": true, "asBox": "Box 10000", "asStack": { "box": "Box", "stack": 9999 } },
+    { "raw": "Box 0", "ambiguous": true, "asBox": "Box 0", "asStack": { "box": "Box", "stack": 1 } },
     { "raw": "FUOCOBOMBA 006 - 16", "ambiguous": false },
     { "raw": "BOX 001 - 131", "ambiguous": false },
     { "raw": "box·2", "ambiguous": false },
@@ -28,6 +30,15 @@
   },
   "dashOnly": ["FUOCOBOMBA 006 - 16", "FUOCOBOMBA 007 - 12"],
   "structuredOnly": ["box·2", "box·3"],
+  "detectorParity": [
+    { "why": "an underscore separates a trailing number exactly like a space", "locations": ["Focobomba_006", "BOX_007"], "locationParse": "trailing_stack", "ambiguousCount": 2, "confirmationNeeded": true },
+    { "why": "a tab separates a trailing number exactly like a space", "locations": ["Box\t12", "Bin\t3"], "locationParse": "trailing_stack", "ambiguousCount": 2, "confirmationNeeded": true },
+    { "why": "separators mixed in one file are still one style", "locations": ["Focobomba_006", "Focobomba 007", "Loose"], "locationParse": "trailing_stack", "ambiguousCount": 2, "confirmationNeeded": true },
+    { "why": "a number behind a hash marker is a structured address, not a stack guess", "locations": ["Bin # 3"], "locationParse": "structured", "ambiguousCount": 0, "confirmationNeeded": false },
+    { "why": "digits before the trailing number settle the reading", "locations": ["12 34"], "locationParse": "trailing_stack", "ambiguousCount": 0, "confirmationNeeded": false },
+    { "why": "a dash already names the stack", "locations": ["FUOCOBOMBA 006 - 16", "BOX 001 - 131"], "locationParse": "trailing_stack", "ambiguousCount": 0, "confirmationNeeded": false },
+    { "why": "no trailing number: nothing to read", "locations": ["Loose", "A1"], "locationParse": "as_is", "ambiguousCount": 0, "confirmationNeeded": false }
+  ],
   "refusalOfAmbiguousList": {
     "error": "location_style_unconfirmed",
     "message": "Choose how to read locations that end in a number.",

@@ -174,6 +174,16 @@ pub fn location_style_refusal(import: &PowerToolsImport) -> Option<Value> {
     }))
 }
 
+/// The refusal a request carrying this body would get from
+/// [`location_style_refusal`], decided from the raw body before the handler
+/// persists anything: an import that ends in a 409 must leave no
+/// integration-document change, no job and no listing row. `Ok(None)` when the
+/// body carries no Power Tools CSV or its rows leave nothing to choose.
+pub fn location_style_preflight(body: &Value) -> ApiResult<Option<Value>> {
+    let import = parse_power_tools_body(body)?;
+    Ok(import.as_ref().and_then(location_style_refusal))
+}
+
 /// `detectPowerToolsLocationStyle`: which location mode most rows look like.
 pub fn detect_location_style(locations: &[String]) -> Value {
     let mut examples: Vec<String> = Vec::new();
@@ -188,22 +198,11 @@ pub fn detect_location_style(locations: &[String]) -> Value {
         if examples.len() < 6 && !examples.contains(&text) {
             examples.push(text.clone());
         }
-        if text.contains('·') || text.contains('•') || text.contains('#') {
-            structured += 1;
-            continue;
+        match pt::location_shape(&text) {
+            pt::LocationShape::Structured => structured += 1,
+            pt::LocationShape::TrailingNumber => trailing += 1,
+            pt::LocationShape::Plain => as_is += 1,
         }
-        let digit_suffix = text
-            .rfind([' ', '_'])
-            .map(|i| {
-                let tail = &text[i + 1..];
-                !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit())
-            })
-            .unwrap_or(false);
-        if digit_suffix {
-            trailing += 1;
-            continue;
-        }
-        as_is += 1;
     }
     let total = structured + trailing + as_is;
     let location_parse = if total > 0 && structured > 0 && structured >= trailing && structured >= as_is {
@@ -1452,6 +1451,17 @@ mod tests {
             if ambiguous {
                 let both = json!({ "raw": case["raw"], "asBox": case["asBox"], "asStack": case["asStack"] });
                 assert_eq!(examples[0], both, "{raw}");
+                // The second reading is not a report the parser contradicts: it
+                // is what a trailing_stack import stores for this value.
+                let (box_name, stack, _, _) = pt::parse_power_tools_location(raw, "trailing_stack");
+                assert_eq!(
+                    (box_name.as_str(), stack),
+                    (
+                        case["asStack"]["box"].as_str().expect("stack box"),
+                        case["asStack"]["stack"].as_i64().expect("stack number")
+                    ),
+                    "{raw} as trailing_stack"
+                );
             } else {
                 assert_eq!(examples.len(), 0, "{raw}");
             }
@@ -1470,6 +1480,21 @@ mod tests {
             let style = detect_location_style(&listed(&table[key]));
             assert_eq!(style["ambiguousCount"], 0, "{key}");
             assert_eq!(style["confirmationNeeded"], false, "{key}");
+        }
+        style_decides_the_trailing_number_like_the_other_detectors(&table);
+    }
+
+    /// The three detector copies read one CSV as one style: the same
+    /// `locationParse`, the same count of values ending in a number, the same
+    /// answer to `confirmationNeeded`. A tab, an underscore or a hash marker is
+    /// decided here once, so no copy can drift again.
+    fn style_decides_the_trailing_number_like_the_other_detectors(table: &Value) {
+        for entry in table["detectorParity"].as_array().expect("detectorParity") {
+            let why = entry["why"].as_str().expect("why");
+            let style = detect_location_style(&listed(&entry["locations"]));
+            for key in ["locationParse", "ambiguousCount", "confirmationNeeded"] {
+                assert_eq!(style[key], entry[key], "{key} — {why}");
+            }
         }
     }
 
