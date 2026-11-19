@@ -444,7 +444,9 @@ export function soldGraphRowPrice(pkn, parts, currency = '') {
  * order they are passed. A sold series with no sale that day says so; a source
  * reads its own nearest day (Cardmarket its last one at or before) inside its
  * gap, says which day it starts from when the hover is earlier than that, and
- * otherwise has no data. The list is capped and the rest is counted.
+ * otherwise has no data. A source with `carry: 'none'` is read only on a day it
+ * quoted itself — a daily offer series has no price to stand for a day it did
+ * not reach. The list is capped and the rest is counted.
  */
 export function soldGraphHoverRows(series, day, {
   cap = SOLD_GRAPH_TIP_ROWS,
@@ -482,7 +484,9 @@ export function soldGraphHoverRows(series, day, {
     } else {
       hit = line.carry === 'onOrBefore'
         ? soldGraphDayOnOrBefore(days, day)
-        : soldGraphNearDay(days, day, line.gapDays);
+        : (line.carry === 'none'
+          ? days.find((row) => String(row?.day) === String(day)) || null
+          : soldGraphNearDay(days, day, line.gapDays));
       if (!hit && firstDay && soldGraphDayMs(day) < soldGraphDayMs(firstDay)) {
         note = `from ${formatDay(firstDay)}`;
       } else if (!hit) {

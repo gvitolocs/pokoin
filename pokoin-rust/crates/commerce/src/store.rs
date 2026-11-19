@@ -86,10 +86,23 @@ pub struct LedgerOp {
     pub mode: MoveMode,
     /// Reject when the sender balance is short (default `true`).
     pub require_available: bool,
+    /// What the guarded request is, committed with the marker so a replay of
+    /// the key can be compared with the request sent under it.
+    pub fingerprint: Option<String>,
+    /// A document created by the same commit as the balances, the ledger
+    /// entries and the marker: the request record and its money move together,
+    /// and an id whose record already exists moves nothing.
+    pub create: Option<(String, Value)>,
 }
 
 impl LedgerOp {
-    fn base(from: Option<&str>, to: Option<&str>, amount: i64, reason: &str, mode: MoveMode) -> Self {
+    fn base(
+        from: Option<&str>,
+        to: Option<&str>,
+        amount: i64,
+        reason: &str,
+        mode: MoveMode,
+    ) -> Self {
         Self {
             idem_key: None,
             reason: reason.to_string(),
@@ -103,6 +116,8 @@ impl LedgerOp {
             meta: json!({}),
             mode,
             require_available: true,
+            fingerprint: None,
+            create: None,
         }
     }
 
@@ -151,6 +166,18 @@ impl LedgerOp {
         self
     }
 
+    pub fn with_fingerprint(mut self, fingerprint: impl Into<String>) -> Self {
+        self.fingerprint = Some(fingerprint.into());
+        self
+    }
+
+    /// Add a document that this commit creates at `path`, beside the balances,
+    /// the ledger entries and the marker.
+    pub fn with_create(mut self, path: impl Into<String>, value: Value) -> Self {
+        self.create = Some((path.into(), value));
+        self
+    }
+
     pub fn with_ref(mut self, reference: impl Into<String>) -> Self {
         self.ref_id = Some(reference.into());
         self
@@ -161,7 +188,11 @@ impl LedgerOp {
         self
     }
 
-    pub fn with_counterparty(mut self, uid: impl Into<String>, username: impl Into<String>) -> Self {
+    pub fn with_counterparty(
+        mut self,
+        uid: impl Into<String>,
+        username: impl Into<String>,
+    ) -> Self {
         self.counterparty = Some(uid.into());
         self.counterparty_username = Some(username.into());
         self
@@ -174,6 +205,13 @@ pub struct LedgerOutcome {
     pub from_available: i64,
     pub to_available: i64,
     pub ledger_ids: Vec<String>,
+    /// What the guarded request is: this call's own when it committed, the
+    /// marker's when the key was already committed, so the handler can tell the
+    /// same request from a different one under one key.
+    pub fingerprint: Option<String>,
+    /// A replay: the response the first call stored under the key, when it
+    /// stored one. `applied` by this call is `None` — this call answers itself.
+    pub result: Option<Value>,
 }
 
 /// Firestore document ids cannot contain `/`, so a caller-provided key is
@@ -272,14 +310,18 @@ pub async fn apply_all(
 
     let mut uids: Vec<String> = Vec::new();
     for op in ops {
-        for uid in [op.from_uid.as_ref(), op.to_uid.as_ref()].into_iter().flatten() {
+        for uid in [op.from_uid.as_ref(), op.to_uid.as_ref()]
+            .into_iter()
+            .flatten()
+        {
             if !uid.is_empty() && !uids.contains(uid) {
                 uids.push(uid.clone());
             }
         }
     }
     uids.sort();
-    if uids.len() + 2 * ops.len() + 1 > MAX_WRITES_PER_COMMIT {
+    let creates = ops.iter().filter(|op| op.create.is_some()).count();
+    if uids.len() + 2 * ops.len() + 1 + creates > MAX_WRITES_PER_COMMIT {
         return Err(StoreError::Invalid(
             "Too many parties in one ledger op.".into(),
         ));
@@ -305,9 +347,18 @@ pub async fn apply_all(
             let seen = seen_for_tx.clone();
             Box::pin(async move {
                 *seen.lock().unwrap() = None;
-                let mut paths = Vec::with_capacity(uids.len() + 1);
+                let mut paths = Vec::with_capacity(uids.len() + 2);
                 for uid in &uids {
                     paths.push(client.document_path(BALANCES, uid)?);
+                }
+                // The record each op creates, read in the same transaction as
+                // the balances and written in the same commit as the marker.
+                let creates = ops
+                    .iter()
+                    .filter_map(|op| op.create.clone())
+                    .collect::<Vec<_>>();
+                for (path, _) in &creates {
+                    paths.push(path.clone());
                 }
                 let marker_path = match &key {
                     Some(key) => Some(client.document_path(IDEMPOTENCY, &idempotency_doc_id(key))?),
@@ -338,30 +389,37 @@ pub async fn apply_all(
                         )
                     })
                     .collect();
-                for op in &mut ops {
-                    let locked_shortfall = apply_mode(&mut balances, op)?;
-                    if locked_shortfall > 0 {
-                        if !op.meta.is_object() {
-                            op.meta = json!({});
-                        }
-                        if let Some(object) = op.meta.as_object_mut() {
-                            object.insert("lockedShortfallPkn".into(), json!(locked_shortfall));
-                        }
-                    }
-                }
-                let mut writes = build_writes(&client, &uids, &balances, &ops)?;
+                // A record already written under this path is a request that
+                // exists: this call starts nothing, so nothing of it is
+                // committed. Otherwise the record is created in this same
+                // commit, beside the balances and the ledger entries. A
+                // settled payout that asked for more than the lock held
+                // records that remainder on the entry.
+                let mut writes = writes_for_unrecorded_request(
+                    &client,
+                    &uids,
+                    &mut balances,
+                    &mut ops,
+                    &documents[uids.len()..],
+                )?;
                 if let (Some(path), Some(key)) = (marker_path, key) {
                     let (from_available, to_available) = party_balances(&balances, &ops[0]);
+                    let mut marker = json!({
+                        "key": key,
+                        "applyId": apply_id,
+                        "fromAvailable": from_available,
+                        "toAvailable": to_available,
+                        "applied": true,
+                        "createdAt": now_iso(),
+                    });
+                    if let (Some(object), Some(fingerprint)) =
+                        (marker.as_object_mut(), ops[0].fingerprint.as_deref())
+                    {
+                        object.insert("fingerprint".into(), json!(fingerprint));
+                    }
                     writes.push(FirestoreWrite::Create {
                         path,
-                        value: json!({
-                            "key": key,
-                            "applyId": apply_id,
-                            "fromAvailable": from_available,
-                            "toAvailable": to_available,
-                            "applied": true,
-                            "createdAt": now_iso(),
-                        }),
+                        value: marker,
                     });
                 }
                 *seen.lock().unwrap() = Some(TxSeen::Applied(balances));
@@ -381,9 +439,13 @@ pub async fn apply_all(
                     from_available,
                     to_available,
                     ledger_ids: Vec::new(),
+                    fingerprint: first.fingerprint.clone(),
+                    result: None,
                 })
             }
-            None => Err(StoreError::Cache("Ledger transaction returned no result.".into())),
+            None => Err(StoreError::Cache(
+                "Ledger transaction returned no result.".into(),
+            )),
         },
         Err(error) => {
             // A racing caller committed the marker first (precondition
@@ -405,7 +467,10 @@ fn party_balances(balances: &[(String, FirestoreBalance)], op: &LedgerOp) -> (i6
             .map(|(_, balance)| balance.available_pkn)
             .unwrap_or(0)
     };
-    (available(op.from_uid.as_ref()), available(op.to_uid.as_ref()))
+    (
+        available(op.from_uid.as_ref()),
+        available(op.to_uid.as_ref()),
+    )
 }
 
 /// Apply one operation to the balances. The `Ok` value is the PKN the
@@ -487,6 +552,49 @@ fn apply_mode(
         MoveMode::RecordOnly => {}
     }
     Ok(0)
+}
+
+/// The money writes for a request whose record is not already present.
+///
+/// A present record refuses the commit before any balance moves, so that
+/// request's money stays where it was. A new record is a create in the same
+/// write list as the balances and the ledger entries: one commit carries both.
+/// A settled payout that asked for more than its lock held records the
+/// remainder on the operation, so the ledger entry of this same commit says so.
+fn writes_for_unrecorded_request(
+    client: &FirestoreClient,
+    uids: &[String],
+    balances: &mut [(String, FirestoreBalance)],
+    ops: &mut [LedgerOp],
+    create_documents: &[Option<Value>],
+) -> Result<Vec<FirestoreWrite>, StoreError> {
+    let creates: Vec<(String, Value)> = ops.iter().filter_map(|op| op.create.clone()).collect();
+    if let Some(foreign) = create_documents
+        .iter()
+        .position(|document| document.is_some())
+    {
+        if let Some((path, _)) = creates.get(foreign) {
+            return Err(StoreError::Conflict(format!(
+                "That request is already recorded: {path}"
+            )));
+        }
+    }
+    for op in ops.iter_mut() {
+        let locked_shortfall = apply_mode(balances, op)?;
+        if locked_shortfall > 0 {
+            if !op.meta.is_object() {
+                op.meta = json!({});
+            }
+            if let Some(object) = op.meta.as_object_mut() {
+                object.insert("lockedShortfallPkn".into(), json!(locked_shortfall));
+            }
+        }
+    }
+    let mut writes = build_writes(client, uids, balances, ops)?;
+    for (path, value) in creates {
+        writes.push(FirestoreWrite::Create { path, value });
+    }
+    Ok(writes)
 }
 
 fn build_writes(
@@ -580,8 +688,16 @@ fn outcome_from_record(record: &Value, apply_id: &str) -> LedgerOutcome {
             .get("fromAvailable")
             .and_then(Value::as_i64)
             .unwrap_or(0),
-        to_available: record.get("toAvailable").and_then(Value::as_i64).unwrap_or(0),
+        to_available: record
+            .get("toAvailable")
+            .and_then(Value::as_i64)
+            .unwrap_or(0),
         ledger_ids: Vec::new(),
+        fingerprint: record
+            .get("fingerprint")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        result: record.get("result").cloned(),
     }
 }
 
@@ -639,7 +755,9 @@ pub async fn idempotency_result(
     key: &str,
 ) -> Result<Option<Value>, StoreError> {
     let id = idempotency_doc_id(key);
-    let document = fs.get_document(&fs.document_path(IDEMPOTENCY, &id)?).await?;
+    let document = fs
+        .get_document(&fs.document_path(IDEMPOTENCY, &id)?)
+        .await?;
     Ok(document.map(merged_record))
 }
 
@@ -672,6 +790,20 @@ pub async fn update_idempotency(
 ) -> Result<(), StoreError> {
     let path = fs.document_path(IDEMPOTENCY, &idempotency_doc_id(key))?;
     fs.set_document(&path, fields).await?;
+    Ok(())
+}
+
+/// Attach the body this key answered to the claim, after the commit that
+/// landed the money, so a later replay can read it. Only a replay needs it:
+/// the call that committed already holds its own answer.
+pub async fn record_result(
+    fs: &FirestoreClient,
+    key: &str,
+    result: &Value,
+) -> Result<(), StoreError> {
+    let path = fs.document_path(IDEMPOTENCY, &idempotency_doc_id(key))?;
+    fs.update_document(&path, &json!({ "result": result }), Some(&["result"]))
+        .await?;
     Ok(())
 }
 
@@ -727,7 +859,10 @@ pub async fn uid_for_username(
     if crate::firestore::validate_document_id(&clean).is_err() {
         return Ok(None);
     }
-    if let Some(document) = fs.get_document(&fs.document_path(USERNAMES, &clean)?).await? {
+    if let Some(document) = fs
+        .get_document(&fs.document_path(USERNAMES, &clean)?)
+        .await?
+    {
         let uid = document
             .get("uid")
             .and_then(Value::as_str)
@@ -937,7 +1072,11 @@ mod tests {
         assert!(amounts.contains(&250));
         let kinds: Vec<&str> = ledger
             .iter()
-            .map(|json| json["update"]["fields"]["type"]["stringValue"].as_str().unwrap())
+            .map(|json| {
+                json["update"]["fields"]["type"]["stringValue"]
+                    .as_str()
+                    .unwrap()
+            })
             .collect();
         assert!(kinds.contains(&"account_transfer_sent"));
         assert!(kinds.contains(&"account_transfer_received"));
@@ -962,6 +1101,82 @@ mod tests {
         assert_eq!(clean_offset(None), 0);
         assert_eq!(clean_offset(Some(&json!(-5))), 0);
         assert_eq!(clean_offset(Some(&json!(1_000_000))), 50_000);
+    }
+
+    #[test]
+    fn a_request_record_is_created_in_the_same_commit_as_its_money() {
+        let client = test_client();
+        let request = "6b1f2a34-0000-4c9d-8f1e-0a1b2c3d4e5f";
+        let path = client.document_path(WITHDRAW_REQUESTS, request).unwrap();
+        let record = json!({ "uid": "a", "status": "pending", "amountPkn": 250 });
+        let mut op = LedgerOp::lock("a", 250, "withdraw_requested")
+            .with_ref(request)
+            .with_create(path, record);
+        let uids = vec!["a".to_string()];
+        let mut state = balances(&[("a", 1_000, 0)]);
+        let writes = writes_for_unrecorded_request(
+            &client,
+            &uids,
+            &mut state,
+            std::slice::from_mut(&mut op),
+            &[None],
+        )
+        .unwrap();
+        assert_eq!(state[0].1.available_pkn, 750);
+        assert_eq!(state[0].1.locked_pkn, 250);
+        let body = commit_body_for(Some("tx"), &writes);
+        let committed = body["writes"].as_array().unwrap();
+        let names: Vec<&str> = committed
+            .iter()
+            .filter_map(|write| write["update"]["name"].as_str())
+            .collect();
+        assert!(
+            names.iter().any(|name| name.contains("/balances/")),
+            "{names:?}"
+        );
+        assert!(
+            names.iter().any(|name| name.contains("/ledger_entries/")),
+            "{names:?}"
+        );
+        assert!(
+            names
+                .iter()
+                .any(|name| name.contains("/withdraw_requests/")),
+            "{names:?}"
+        );
+        let created = committed
+            .iter()
+            .find(|write| {
+                write["update"]["name"]
+                    .as_str()
+                    .is_some_and(|name| name.contains("/withdraw_requests/"))
+            })
+            .expect("record create");
+        assert_eq!(created["currentDocument"]["exists"], json!(false));
+        assert_eq!(body["transaction"], json!("tx"));
+    }
+
+    #[test]
+    fn a_request_record_that_already_exists_moves_nothing() {
+        let client = test_client();
+        let request = "6b1f2a34-0000-4c9d-8f1e-0a1b2c3d4e5f";
+        let path = client.document_path(WITHDRAW_REQUESTS, request).unwrap();
+        let record = json!({ "uid": "a", "status": "pending" });
+        let mut op = LedgerOp::lock("a", 250, "withdraw_requested").with_create(path, record);
+        let uids = vec!["a".to_string()];
+        let mut state = balances(&[("a", 1_000, 0)]);
+        let existing = json!({ "uid": "a", "status": "pending" });
+        let error = writes_for_unrecorded_request(
+            &client,
+            &uids,
+            &mut state,
+            std::slice::from_mut(&mut op),
+            &[Some(existing)],
+        )
+        .unwrap_err();
+        assert!(matches!(error, StoreError::Conflict(_)), "{error:?}");
+        assert_eq!(state[0].1.available_pkn, 1_000);
+        assert_eq!(state[0].1.locked_pkn, 0);
     }
 
     #[test]
