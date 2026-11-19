@@ -467,23 +467,47 @@ export async function fetchExactNameCards(name, {
  * nothing here is cut at a page size.
  *
  * Rows are the same objects a `name` list carries, so `cardFromCatalogRow` reads
- * both. Until the job has built the species lists — or when this read fails —
- * the exact-name path answers: a hub must never show fewer cards than it did.
+ * both. The hub answers with the UNION of the species list and the exact-name
+ * result (species rows first, de-duplicated by card id), never with the species
+ * list alone: a species snapshot is only as good as the last nightly build, so a
+ * stale or partial one must not hide cards the old path showed, and a single
+ * whose dex column is 0 or the sentinel never reaches a species list at all but
+ * does reach a name one. Both reads run at once; one that fails or is missing
+ * contributes nothing and the other answers alone, and both failing is exactly
+ * today's failed name read.
  */
 export async function fetchSpeciesCards(dex, { name = '', lang, signal } = {}) {
   const number = Number(dex);
   // Species snapshots are English titles, like the `name` lists; a page in
   // another title language keeps the localized live search.
-  if (Number.isInteger(number) && number > 0 && (!lang || lang === 'en')) {
-    const snapshot = await fetchListSnapshot('species', String(number), { signal });
-    const cards = (Array.isArray(snapshot?.cards) ? snapshot.cards : [])
-      .map(cardFromCatalogRow)
-      .filter((card) => card.id);
-    if (cards.length) {
-      return cards;
+  const speciesRead = Number.isInteger(number) && number > 0 && (!lang || lang === 'en')
+    ? fetchListSnapshot('species', String(number), { signal })
+    : Promise.resolve(null);
+  // The name path keeps its own paging; its rejection is carried, not swallowed,
+  // so it can still fail the page when the species list has nothing to give.
+  const nameRead = fetchExactNameCards(name, { lang, signal })
+    .then((cards) => ({ cards }), (error) => ({ error }));
+  const [snapshot, named] = await Promise.all([speciesRead, nameRead]);
+  const speciesCards = (Array.isArray(snapshot?.cards) ? snapshot.cards : [])
+    .map(cardFromCatalogRow)
+    .filter((card) => card.id);
+  if (named.error) {
+    if (speciesCards.length) {
+      return speciesCards;
     }
+    throw named.error;
   }
-  return fetchExactNameCards(name, { lang, signal });
+  const seen = new Set();
+  const cards = [];
+  for (const card of speciesCards.concat(named.cards)) {
+    const id = String(card.id);
+    if (seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    cards.push(card);
+  }
+  return cards;
 }
 
 /** SQL-backed candidate pool for ambiguous early set prefixes. The endpoint's
