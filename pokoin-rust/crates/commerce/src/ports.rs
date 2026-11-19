@@ -1223,6 +1223,10 @@ impl ChainClient {
             && self.config.wpkn_settlement_address.is_some()
     }
 
+    /// Set on an error returned after a payout transaction was signed. The send
+    /// may already have been accepted by the node.
+    pub const PAYOUT_BROADCAST_IN_DOUBT: &str = "payout_broadcast_in_doubt";
+
     /// Sign and submit a native PKN payout from one of the Pokoin wallets.
     async fn send_native_pkn(
         &self,
@@ -1260,7 +1264,14 @@ impl ChainClient {
             key, chain_id, nonce, gas_price, gas_limit, &to, value, &[],
         )
         .map_err(|error| ApiError::internal(error.to_string()))?;
-        let tx_hash = self.send_raw_transaction(&url, &signed.raw_hex).await?;
+        // The transaction is signed. From here an error — the send itself, or
+        // anything after this signature — does not show that the node never
+        // received it. Callers tell this apart from a nonce, chain, or key
+        // error, which returned above, before any signature existed.
+        let tx_hash = self
+            .send_raw_transaction(&url, &signed.raw_hex)
+            .await
+            .map_err(|error| error.with_code(Self::PAYOUT_BROADCAST_IN_DOUBT))?;
         Ok(("automatic_available".into(), Some(tx_hash)))
     }
 

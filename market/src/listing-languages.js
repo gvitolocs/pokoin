@@ -1,12 +1,13 @@
 import releases from './set-release-languages.json' with { type: 'json' };
 
-/** Western listing codes. Asian printings are other cards, not languages of this set. */
+/** Every western code a listing carries, in sell order — a filter, not a default offer. */
 export const WESTERN_SELL_LANGS = ['EN', 'IT', 'FR', 'DE', 'ES', 'PT', 'NL', 'PL', 'RU'];
 
 /**
- * Every western printing can be listed in these. TCGdex release rows only say
- * which languages TCGdex has data for — Plasma Blast has no ES there, yet
- * CardTrader sellers list Spanish copies — so they only add NL/PL/RU.
+ * The languages every western printing can be listed in, and what one with no
+ * release data is offered. TCGdex release rows only say which languages TCGdex
+ * has data for — Plasma Blast has no ES there, yet CardTrader sellers list
+ * Spanish copies — so they only add NL/PL/RU.
  */
 const WESTERN_CORE_LANGS = ['EN', 'IT', 'FR', 'DE', 'ES', 'PT'];
 
@@ -29,6 +30,26 @@ const REDIRECT = {
   ZH: { nationality: 'chinese', label: 'Chinese' },
   ZHT: { nationality: 'chinese', label: 'Traditional Chinese' },
 };
+
+/**
+ * Listing languages of a game, in the order its desks and sell forms show them.
+ * Riftbound is printed in English (every set), Simplified Chinese (every set since
+ * August 2025), French (since 29 May 2026) and Korean (Origins since 18 September
+ * 2026, further sets following) — checked 2026-11-19 against Riot's announcements on
+ * playriftbound.com and its 2026 roadmap; Traditional Chinese is announced but not
+ * out, and Pokoin's own Riftbound sales are EN, ZH and FR only. It has never been
+ * printed in the other European languages, so Pokémon's western set is wrong for it.
+ * A game with no entry keeps the nationality and release rules below.
+ */
+export const GAME_SELL_LANGS = {
+  riftbound: ['EN', 'FR', 'ZH', 'KO'],
+};
+
+/** The game's own listing languages in its own order, or null when it has none. */
+function gameSellLangs(game) {
+  const list = GAME_SELL_LANGS[String(game || '').trim().toLowerCase()];
+  return list ? list.slice() : null;
+}
 
 function cleanCodes(codes) {
   const known = new Set(SELL_ORDER);
@@ -59,15 +80,24 @@ export function releaseLanguagesForSet(setName) {
 }
 
 /**
- * Languages a seller can list this printing in. Asian printings follow their
- * nationality; western ones get EN/IT/FR/DE/ES/PT plus any NL/PL/RU release.
+ * Languages a seller can list this printing in. An Asian printing follows its
+ * nationality, then a game with its own print languages (GAME_SELL_LANGS) uses
+ * theirs; anything else is Pokémon: the core EN/IT/FR/DE/ES/PT, plus NL, PL and
+ * RU only when release data names them. A set with no release row and no
+ * `releaseLanguages` gets the core alone — Dutch sits on 6, Polish on 4 and
+ * Russian on 13 of the few hundred rows of the release table, so they are
+ * exceptions and never a default: Mega Golurk ex of Delta Reign has no Dutch,
+ * Polish or Russian listing. A printing really released in them keeps them, and
+ * deskLanguageChips still adds a language the caller has real data for.
  */
-export function sellLanguages({ nationality, setName, releaseLanguages } = {}) {
+export function sellLanguages({ game, nationality, setName, releaseLanguages } = {}) {
   const printed = PRINT_LANG[String(nationality || '').toLowerCase()];
   if (printed) return rank(printed);
+  const byGame = gameSellLangs(game);
+  if (byGame) return byGame;
   const fromCard = cleanCodes(releaseLanguages);
   const released = fromCard.length ? fromCard : cleanCodes(releaseLanguagesForSet(setName));
-  if (!released.length) return WESTERN_SELL_LANGS.slice();
+  if (!released.length) return rank(WESTERN_CORE_LANGS);
   // A release row of only Asian codes is not a western printing's languages.
   const western = released.filter((code) => WESTERN_SELL_LANGS.includes(code));
   if (!western.length) return rank(released);
@@ -79,8 +109,8 @@ export function sellLanguages({ nationality, setName, releaseLanguages } = {}) {
  * caller has real data for (a listing, a sale, a buy order). What the visitor
  * reads is not data: an English desk of a Chinese card offers ZH and ZHT.
  */
-export function deskLanguageChips({ nationality, setName, releaseLanguages, data } = {}) {
-  const codes = sellLanguages({ nationality, setName, releaseLanguages });
+export function deskLanguageChips({ game, nationality, setName, releaseLanguages, data } = {}) {
+  const codes = sellLanguages({ game, nationality, setName, releaseLanguages });
   const extra = cleanCodes(data).filter((code) => !codes.includes(code));
   return [...codes, ...rank(extra)];
 }
@@ -90,8 +120,8 @@ export function deskLanguageChips({ nationality, setName, releaseLanguages, data
  * when this printing exists in it, else the first chip with data, else the
  * printing's first language — ZH for a Chinese one, EN for a western one.
  */
-export function deskLanguageChoice({ nationality, setName, releaseLanguages, data, chosen } = {}) {
-  const chips = deskLanguageChips({ nationality, setName, releaseLanguages, data });
+export function deskLanguageChoice({ game, nationality, setName, releaseLanguages, data, chosen } = {}) {
+  const chips = deskLanguageChips({ game, nationality, setName, releaseLanguages, data });
   const have = new Set(cleanCodes(data));
   const want = String(chosen || '').trim().toUpperCase();
   if (chips.includes(want)) return want;
@@ -101,6 +131,7 @@ export function deskLanguageChoice({ nationality, setName, releaseLanguages, dat
 /**
  * Asian codes that are a different printing of the same artwork.
  * Choosing one confirms a redirect instead of listing this card in that language.
+ * A game with its own print languages has no redirect for a code it really prints.
  */
 export function versionRedirects(printings, currentId, listed, options = {}) {
   const rows = printings || [];
@@ -108,9 +139,11 @@ export function versionRedirects(printings, currentId, listed, options = {}) {
   const have = new Set(cleanCodes(listed));
   const nation = String(options.nationality || '').toLowerCase();
   const hideChinese = nation === 'japanese' || nation === 'korean';
+  const byGame = gameSellLangs(options.game);
   const out = [];
   for (const [code, spec] of Object.entries(REDIRECT)) {
     if (have.has(code)) continue;
+    if (byGame?.includes(code)) continue;
     if (hideChinese && (code === 'ZH' || code === 'ZHT')) continue;
     const candidates = rows.filter((row) => {
       const id = String(row?.id || row?.card_id || '');
