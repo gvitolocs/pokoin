@@ -839,6 +839,7 @@ function CardDesk(props) {
   const shownLang = createMemo(() => {
     const row = card();
     return deskLanguageChoice({
+      game: deskGame,
       nationality: row.nationality,
       setName: identity().set || row.set,
       releaseLanguages: row.releaseLanguages,
@@ -998,6 +999,7 @@ function CardDesk(props) {
   const allDealLangs = createMemo(() => {
     const row = card();
     return deskLanguageChips({
+      game: deskGame,
       nationality: row.nationality,
       setName: identity().set || row.set,
       releaseLanguages: row.releaseLanguages,

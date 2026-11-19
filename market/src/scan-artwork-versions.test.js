@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import test from 'node:test';
 import {
   candidatesForPrintFamily,
@@ -218,4 +219,11 @@ test('draft language uses stamped nationality and keeps unknown data', () => {
   assert.equal(draftLanguageForPick({ nationality: 'unknown' }, 'ZH'), 'ZH');
   assert.equal(draftLanguageForPick({ nationality: 'indonesian' }, 'ZH'), 'ID');
   assert.equal(draftLanguageForPick({ nationality: 'korean' }, 'ZH'), 'KO');
+});
+
+test('the draft language is asked of the desk game, not of Pokémon alone', () => {
+  const source = fs.readFileSync(new URL('./scan-artwork-versions.js', import.meta.url), 'utf8');
+  // Same reader the desk's own Game select uses (solid/src/pages/ScanDesk.jsx).
+  assert.match(source, /import \{ gameIdFromHost \} from '\.\/game\.js';/);
+  assert.match(source, /deskLanguageChips\(\{[^}]*game: gameIdFromHost\(\)/);
 });

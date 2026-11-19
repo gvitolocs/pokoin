@@ -10,6 +10,7 @@
  */
 
 import { printLangBadge } from './card-versions.js';
+import { gameIdFromHost } from './game.js';
 import { deskLanguageChips } from './listing-languages.js';
 import { effectivePrintBucket } from './print-bucket.js';
 
@@ -204,7 +205,12 @@ export function draftLanguageForPick(card, batchLanguage = '') {
   const batch = String(batchLanguage || '').trim().toUpperCase() || 'EN';
   const nationality = effectivePrintBucket(card);
   if (nationality === 'unknown') return batch;
-  const languages = deskLanguageChips({ nationality, setName: card?.set || card?.set_name });
+  const languages = deskLanguageChips({
+    // The desk's own game: a Riftbound printing is not a Pokémon one.
+    game: gameIdFromHost(),
+    nationality,
+    setName: card?.set || card?.set_name,
+  });
   if (languages.includes(batch)) return batch;
   // The first chip for a Korean printing is JP, so retain its own language.
   if (nationality === 'korean') return 'KO';

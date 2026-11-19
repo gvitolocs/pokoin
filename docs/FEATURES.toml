@@ -176,8 +176,8 @@ status = "partial"
 id = "listing-create"
 name = "Seller lists copies of a card"
 money = true
-entry = ["solid/src/components/desk/ListingForm.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/crates/commerce/tests/listing_game_flow.rs::a_listing_is_stored_under_the_catalog_that_holds_its_card", "pokoin-rust/crates/commerce/tests/seller_api_flow.rs::a_grant_connects_sets_stock_lists_and_hears_every_event"]
+entry = ["solid/src/components/desk/ListingForm.jsx", "market/src/api.js", "market/src/listing-languages.js"]
+proof = ["pokoin-rust/crates/commerce/tests/listing_game_flow.rs::a_listing_is_stored_under_the_catalog_that_holds_its_card", "pokoin-rust/crates/commerce/tests/seller_api_flow.rs::a_grant_connects_sets_stock_lists_and_hears_every_event", "market/src/listing-languages.test.js", "solid/src/components/desk/ListingForm.test.js"]
 status = "proved"
 
 [[flow]]
