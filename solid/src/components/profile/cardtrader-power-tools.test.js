@@ -49,7 +49,7 @@ test('the dialog asks the question and shows both readings of the locations in t
 });
 
 test('no import starts while the reading is unchosen, and the button says why', () => {
-  assert.match(modal, /const awaitingChoice = createMemo\(\(\) => confirmation\(\)\.needed && locationParse\(\) === 'auto'\)/);
+  assert.match(modal, /const awaitingChoice = createMemo\(\(\) => confirmation\(\)\.needed && !modeChosen\(\)\)/);
   assert.match(
     modal,
     /disabled=\{busyAll\(\) \|\| !canImport\(\) \|\| awaitingChoice\(\)\}\s*title=\{awaitingChoice\(\) \? LOCATION_ASK_PENDING : undefined\}\s*onClick=\{confirmFull\}/s,
@@ -60,14 +60,14 @@ test('no import starts while the reading is unchosen, and the button says why', 
 
 test('the request carries the chosen mode and never an auto the server would guess', () => {
   const confirm = between(modal, 'async function confirmFull()', 'const close = ');
-  assert.match(confirm, /const parse = locationParseToSend\(\{\s*chosen: locationParse\(\),\s*detected: props\.preview\?\.locationParse,\s*needed: confirmation\(\)\.needed,\s*\}\)/);
+  assert.match(confirm, /const parse = locationParseToSend\(\{\s*chosen: modeChosen\(\) \? locationParse\(\) : 'auto',\s*detected: props\.preview\?\.locationParse,\s*needed: confirmation\(\)\.needed,\s*\}\)/);
   assert.match(confirm, /if \(!parse\) return false;/, 'nothing is sent until a reading exists');
   assert.match(confirm, /locationParse: parse/, 'the payload gets the resolved mode, not the signal');
   assert.doesNotMatch(confirm, /locationParse: locationParse\(\)/);
   assert.doesNotMatch(confirm, /\|\| 'auto'/, 'auto never reaches the server');
   // Picking a choice is also what dismisses the question.
   const radio = between(modal, 'name="ct-pt-location-parse"', '</fieldset>');
-  assert.match(radio, /setLocationTouched\(true\);\s*setLocationParse\(mode\.id\);\s*setAsk\(null\)/);
+  assert.match(radio, /setLocationTouched\(true\);\s*setLocationParse\(mode\.id\);\s*setModeChosen\(true\);\s*setAsk\(null\)/);
 });
 
 test('a 409 refusal reopens the same question with the examples it carries', () => {
@@ -81,7 +81,7 @@ test('a 409 refusal reopens the same question with the examples it carries', () 
   assert.match(modal, /const confirmation = createMemo\(\(\) => \{\s*if \(ask\(\)\) return ask\(\);/);
   assert.match(modal, /return needsLocationConfirmation\(props\.preview\);/);
   for (const reset of [between(modal, 'function invalidateUploadState()', 'createEffect(() => Boolean(props.open)'),
-    between(modal, 'setLocationTouched(false);\n    setAsk(null);', 'setAnalyzeToken(0)')]) {
+    between(modal, 'setModeChosen(false);\n    setAsk(null);', 'setAnalyzeToken(0)')]) {
     assert.match(reset, /setAsk\(null\)/, 'a reset forgets a refusal nobody answered');
   }
 });
@@ -93,4 +93,37 @@ test('the panel keeps the dialog open for its own refusal instead of closing it'
   assert.match(run, /if \(holdModalOpen && isLocationStyleUnconfirmed\(err\)\) throw err;/);
   assert.match(run, /setError\(err\.message \|\| 'Could not sync CardTrader inventory\.'\)/, 'any other failure is still an error line');
   assert.match(panel, /onConfirmWithCsv=\{\(opts\) => runSync\(opts, '', \{ holdModalOpen: true \}\)\}/);
+});
+
+// Finding A: a reading belongs to the file it was read from. Every event that
+// changes what is about to be imported clears the mode and its touched flag, and
+// only a click after the current analyze answer counts as the seller's choice.
+
+test('a mode read from one file is never carried over to the next', () => {
+  const invalidate = between(modal, 'function invalidateUploadState()', 'createEffect(() => Boolean(props.open)');
+  assert.match(invalidate, /setLocationParse\('auto'\)/);
+  assert.match(invalidate, /setLocationTouched\(false\)/);
+  assert.match(invalidate, /setModeChosen\(false\)/);
+  assert.match(invalidate, /setAsk\(null\)/);
+  // The three events that change what will be imported all go through it.
+  const mode = between(modal, 'function setMode(next) {', 'function onFile(');
+  assert.match(mode, /invalidateUploadState\(\)/);
+  const file = between(modal, 'function onFile\(gameId, file\) \{', 'const uploadedIds');
+  assert.equal(file.match(/invalidateUploadState\(\)/g).length, 2, 'a replaced file and a removed one');
+  assert.match(modal, /onClick=\{invalidateUploadState\}>\s*Change CSV/s, 'Change CSV is one of those events too');
+  // Reopening the dialog starts from nothing.
+  const reopen = between(modal, 'createEffect(() => Boolean(props.open)', 'function setMode');
+  assert.match(reopen, /setModeChosen\(false\)/);
+});
+
+test('only a click is a choice, and a mode the dialog adopted is not one', () => {
+  const adopt = between(modal, "createEffect(\n    () => (step() === 'preview'", 'const suggested = Number(preview.suggestedStackSize)');
+  assert.doesNotMatch(adopt, /setModeChosen\(true\)/, 'adopting the detected mode marks nothing');
+  assert.match(adopt, /setLocationParse\(preview\.locationParse\)/);
+  const radio = between(modal, 'name="ct-pt-location-parse"', '</fieldset>');
+  assert.match(radio, /setModeChosen\(true\)/);
+  assert.match(modal, /const awaitingChoice = createMemo\(\(\) => confirmation\(\)\.needed && !modeChosen\(\)\)/);
+  const confirm = between(modal, 'async function confirmFull()', 'const close = ');
+  assert.match(confirm, /chosen: modeChosen\(\) \? locationParse\(\) : 'auto'/, 'an adopted mode is not sent as consent');
+  assert.match(between(confirm, '} catch (err) {', 'return true;'), /setModeChosen\(false\)/, 'a refusal takes the choice back');
 });

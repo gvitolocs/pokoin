@@ -45,6 +45,8 @@ export default function CardTraderPowerToolsModal(props) {
   const [localError, setLocalError] = createSignal('');
   const [stackSizeTouched, setStackSizeTouched] = createSignal(false);
   const [locationTouched, setLocationTouched] = createSignal(false);
+  /** A mode the seller clicked for the reading in hand; an adopted one is never this. */
+  const [modeChosen, setModeChosen] = createSignal(false);
   /** The question the import itself refused to answer for (the server's 409). */
   const [ask, setAsk] = createSignal(null);
 
@@ -52,10 +54,16 @@ export default function CardTraderPowerToolsModal(props) {
     props.onClearPreview?.();
   }
 
+  // Everything that changes what is about to be imported comes through here: a
+  // file added, replaced or removed, the upload mode switched, the CSV changed.
+  // The reading belongs to the file it was read from, so it goes with the file.
   function invalidateUploadState() {
     clearPreview();
     setStep('upload');
     setAsk(null);
+    setLocationParse('auto');
+    setLocationTouched(false);
+    setModeChosen(false);
     setAnalyzeToken((n) => n + 1);
   }
 
@@ -71,6 +79,7 @@ export default function CardTraderPowerToolsModal(props) {
     setStackSize(0);
     setStackSizeTouched(false);
     setLocationTouched(false);
+    setModeChosen(false);
     setAsk(null);
     setAnalyzeToken(0);
     clearPreview();
@@ -79,7 +88,8 @@ export default function CardTraderPowerToolsModal(props) {
   // After analyze, adopt what the CSV actually contains unless the seller already
   // chose. A trailing number is never read as a stack without the seller saying so,
   // so nothing is preselected while the reading is ambiguous: the question comes
-  // first and the import waits for a choice.
+  // first and the import waits for a choice. What is adopted here is the dialog's
+  // own reading of a preview, never a choice, and it never marks one.
   createEffect(
     () => (step() === 'preview' && props.preview?.ok ? props.preview : null),
     (preview) => {
@@ -124,8 +134,8 @@ export default function CardTraderPowerToolsModal(props) {
     if (!props.preview?.ok) return NO_CONFIRMATION;
     return needsLocationConfirmation(props.preview);
   });
-  /** Confirmation is owed and nothing picked yet: no reading is applied, no import starts. */
-  const awaitingChoice = createMemo(() => confirmation().needed && locationParse() === 'auto');
+  /** Confirmation is owed and the seller has clicked no reading for it: nothing is applied, nothing starts. */
+  const awaitingChoice = createMemo(() => confirmation().needed && !modeChosen());
 
   const visibleOverflows = () => {
     const capacity = stackSize() > 0 ? stackSize() : Number(props.preview?.suggestedStackSize) || 0;
@@ -193,9 +203,10 @@ export default function CardTraderPowerToolsModal(props) {
 
   async function confirmFull() {
     setLocalError('');
-    // A reading the seller has not chosen is not sent, and it is not guessed here either.
+    // A reading the seller has not chosen is not sent, and it is not guessed here
+    // either: what the dialog adopted from a previous preview is not their answer.
     const parse = locationParseToSend({
-      chosen: locationParse(),
+      chosen: modeChosen() ? locationParse() : 'auto',
       detected: props.preview?.locationParse,
       needed: confirmation().needed,
     });
@@ -210,6 +221,7 @@ export default function CardTraderPowerToolsModal(props) {
       if (!isLocationStyleUnconfirmed(err)) throw err;
       setLocationTouched(false);
       setLocationParse('auto');
+      setModeChosen(false);
       setAsk(locationAskFromRefusal(err));
     }
     return true;
@@ -447,6 +459,7 @@ export default function CardTraderPowerToolsModal(props) {
                         onChange={() => {
                           setLocationTouched(true);
                           setLocationParse(mode.id);
+                          setModeChosen(true);
                           setAsk(null);
                           reAnalyzeWith({ locationParse: mode.id });
                         }}
@@ -568,7 +581,7 @@ export default function CardTraderPowerToolsModal(props) {
                       ? `Import ${recognizedRowCount() || 0} recognized rows`
                       : 'Looks good — import locations'}
                 </button>
-                <button type="button" class="btn ghost" disabled={busyAll()} onClick={() => { setStep('upload'); clearPreview(); }}>
+                <button type="button" class="btn ghost" disabled={busyAll()} onClick={invalidateUploadState}>
                   Change CSV
                 </button>
                 <button type="button" class="btn ghost" disabled={busyAll()} onClick={close}>Cancel</button>
