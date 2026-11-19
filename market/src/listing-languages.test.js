@@ -35,6 +35,46 @@ test('Plasma Blast lists Spanish and Portuguese though TCGdex lacks them', () =>
   assert.deepEqual(langs, ['EN', 'IT', 'FR', 'DE', 'ES', 'PT']);
 });
 
+test('a set with no release data is offered the six core languages only', () => {
+  // Mega Golurk ex of Delta Reign: no Dutch, Polish or Russian printing exists.
+  const card = { nationality: 'western', setName: 'Delta Reign' };
+  assert.deepEqual(sellLanguages(card), ['EN', 'IT', 'FR', 'DE', 'ES', 'PT']);
+  assert.deepEqual(deskLanguageChips(card), ['EN', 'IT', 'FR', 'DE', 'ES', 'PT']);
+  assert.equal(deskLanguageChoice(card), 'EN');
+});
+
+test('release data on the card still adds the exception language it names', () => {
+  assert.deepEqual(
+    sellLanguages({ nationality: 'western', setName: 'Delta Reign', releaseLanguages: ['EN', 'IT', 'FR', 'DE', 'ES', 'PT', 'NL'] }),
+    ['EN', 'IT', 'FR', 'DE', 'ES', 'PT', 'NL'],
+  );
+});
+
+test('a set without a row still shows a language the desk has data for', () => {
+  const card = { nationality: 'western', setName: 'Delta Reign' };
+  assert.deepEqual(deskLanguageChips({ ...card, data: ['NL'] }), ['EN', 'IT', 'FR', 'DE', 'ES', 'PT', 'NL']);
+  assert.equal(deskLanguageChoice({ ...card, data: ['NL'], chosen: 'NL' }), 'NL');
+  // An edited listing keeps its stored language selectable, nothing else.
+  assert.equal(deskLanguageChoice({ ...card, data: ['PL'], chosen: 'PL' }), 'PL');
+  // With no data behind it, the ask is not a language this printing exists in.
+  assert.equal(deskLanguageChoice({ ...card, chosen: 'PL' }), 'EN');
+});
+
+test('a set whose row names NL, PL or RU is still offered that language', () => {
+  assert.deepEqual(
+    sellLanguages({ nationality: 'western', setName: 'Diamond & Pearl' }),
+    ['EN', 'IT', 'FR', 'DE', 'ES', 'PT', 'PL'],
+  );
+  assert.deepEqual(
+    sellLanguages({ nationality: 'western', setName: 'Base Set' }),
+    ['EN', 'IT', 'FR', 'DE', 'ES', 'PT', 'NL'],
+  );
+  assert.deepEqual(
+    sellLanguages({ nationality: 'western', setName: 'XY' }),
+    ['EN', 'IT', 'FR', 'DE', 'ES', 'PT', 'RU'],
+  );
+});
+
 test('a Japanese printing lists the other Asian languages except Chinese', () => {
   assert.deepEqual(
     sellLanguages({ nationality: 'japanese', setName: 'Nihil Zero' }),
@@ -161,18 +201,24 @@ const POKEMON_LANGS = [
   { fn: 'sell', arg: { nationality: 'western', setName: '151', releaseLanguages: ['EN', 'FR'] }, want: ['EN', 'IT', 'FR', 'DE', 'ES', 'PT'] },
   { fn: 'sell', arg: { nationality: 'western', setName: 'Base Set' }, want: ['EN', 'IT', 'FR', 'DE', 'ES', 'PT', 'NL'] },
   { fn: 'sell', arg: { nationality: 'western', setName: 'Plasma Blast' }, want: ['EN', 'IT', 'FR', 'DE', 'ES', 'PT'] },
+  { fn: 'sell', arg: { nationality: 'western', setName: 'Delta Reign' }, want: ['EN', 'IT', 'FR', 'DE', 'ES', 'PT'] },
+  { fn: 'sell', arg: { nationality: 'western', setName: 'Diamond & Pearl' }, want: ['EN', 'IT', 'FR', 'DE', 'ES', 'PT', 'PL'] },
   { fn: 'sell', arg: { nationality: 'japanese', setName: 'Nihil Zero' }, want: ['JP', 'KO', 'ID', 'TH', 'VI'] },
   { fn: 'sell', arg: { nationality: 'korean', setName: '151' }, want: ['JP', 'KO', 'ID', 'TH', 'VI'] },
   { fn: 'sell', arg: { nationality: 'chinese' }, want: ['ZH', 'ZHT'] },
   { fn: 'chips', arg: { nationality: 'chinese' }, want: ['ZH', 'ZHT'] },
   { fn: 'chips', arg: { nationality: 'japanese', setName: 'Nihil Zero' }, want: ['JP', 'KO', 'ID', 'TH', 'VI'] },
   { fn: 'chips', arg: { nationality: 'western', setName: '151' }, want: ['EN', 'IT', 'FR', 'DE', 'ES', 'PT'] },
+  { fn: 'chips', arg: { nationality: 'western', setName: 'Delta Reign' }, want: ['EN', 'IT', 'FR', 'DE', 'ES', 'PT'] },
+  { fn: 'chips', arg: { nationality: 'western', setName: 'Delta Reign', data: ['NL'] }, want: ['EN', 'IT', 'FR', 'DE', 'ES', 'PT', 'NL'] },
   { fn: 'chips', arg: { nationality: 'chinese', data: ['EN'] }, want: ['ZH', 'ZHT', 'EN'] },
   { fn: 'choice', arg: { nationality: 'chinese', chosen: 'EN' }, want: 'ZH' },
   { fn: 'choice', arg: { nationality: 'japanese', setName: 'Nihil Zero', chosen: 'EN' }, want: 'JP' },
   { fn: 'choice', arg: { nationality: 'western', setName: '151', chosen: 'EN' }, want: 'EN' },
   { fn: 'choice', arg: { nationality: 'western', setName: '151', chosen: 'IT' }, want: 'IT' },
   { fn: 'choice', arg: { nationality: 'western', setName: '151' }, want: 'EN' },
+  { fn: 'choice', arg: { nationality: 'western', setName: 'Delta Reign' }, want: 'EN' },
+  { fn: 'choice', arg: { nationality: 'western', setName: 'Delta Reign', chosen: 'PL' }, want: 'EN' },
   { fn: 'choice', arg: { nationality: 'chinese', data: ['ZHT'], chosen: 'EN' }, want: 'ZHT' },
   { fn: 'choice', arg: { nationality: 'chinese', chosen: 'ZHT' }, want: 'ZHT' },
   { fn: 'choice', arg: { nationality: 'chinese', data: ['EN'], chosen: 'EN' }, want: 'EN' },
