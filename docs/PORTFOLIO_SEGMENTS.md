@@ -218,7 +218,9 @@ write uses: a document written before some rule existed still answers one line p
 slice, with the copies added.
 `?action=` outside those two writes is a 400 too: there is no third verb. An unknown
 id and someone else's id answer byte-identically, so no read of the store can tell a
-list that exists from one that does not.
+list that exists from one that does not. A name the store reserves for its own markers
+— `__` on both ends, as `__namespace__` is spelled — is refused by that same 404 out of
+the id shape, before the store is asked about it at all.
 
 `priceBasis` is `"ct-last-sold"`, the same as `SERIES_REVISION`'s basis: the last
 CardTrader sold median of the exact slice, carried forward, with the 20× outlier

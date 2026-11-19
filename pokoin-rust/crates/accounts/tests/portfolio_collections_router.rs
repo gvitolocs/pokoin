@@ -87,9 +87,17 @@ fn card(id: &str, quantity: i64) -> Json {
     })
 }
 
-/// A Firestore whose answers come from what it was last told, so a read after a
-/// write is the write.
-fn store_state(seed: Vec<(String, Json)>) -> (pokoin_accounts::state::DomainState, Store) {
+/// A Firestore whose answers come from what it was last told, so a save really is
+/// read back and a foreign document really is another seller's. The transport comes
+/// back with it because a refusal that never reaches the store is only proven by
+/// counting what the store was asked.
+fn store_state(
+    seed: Vec<(String, Json)>,
+) -> (
+    pokoin_accounts::state::DomainState,
+    Store,
+    Arc<ScriptedTransport>,
+) {
     let store: Store = Arc::new(Mutex::new(seed.into_iter().collect()));
     let transport = ScriptedTransport::new();
     transport.on("/oauth", |_| {
@@ -156,7 +164,18 @@ fn store_state(seed: Vec<(String, Json)>) -> (pokoin_accounts::state::DomainStat
         HttpResponse::json(200, json!({ "writeResults": results }))
     });
 
-    (test_state(&transport), store)
+    (test_state(&transport), store, transport)
+}
+
+/// Every Firestore wire call a request made — document reads and writes, queries and
+/// commits — and nothing else. The token fetches are not the store.
+fn store_calls(transport: &ScriptedTransport) -> Vec<String> {
+    transport
+        .requests()
+        .iter()
+        .filter(|request| request.url.contains("/documents"))
+        .map(|request| request.url.clone())
+        .collect()
 }
 
 fn token(sub: &str) -> String {
@@ -267,7 +286,7 @@ fn names_of(body: &Json) -> Vec<String> {
 
 #[tokio::test]
 async fn a_seller_reads_their_own_lists_and_nobody_elses() {
-    let (state, _store) = store_state(vec![
+    let (state, _store, _transport) = store_state(vec![
         stored("mine", SELLER, "Vault", "2026-09-01T10:00:00Z"),
         stored("theirs", OTHER, "Their vault", "2026-09-02T10:00:00Z"),
         document(
@@ -358,7 +377,7 @@ async fn a_seller_reads_their_own_lists_and_nobody_elses() {
 
 #[tokio::test]
 async fn a_save_answers_the_list_it_just_wrote() {
-    let (state, store) = store_state(vec![stored(
+    let (state, store, _transport) = store_state(vec![stored(
         "mine",
         SELLER,
         "Vault",
@@ -501,7 +520,7 @@ fn card_plain(id: &str) -> Json {
 
 #[tokio::test]
 async fn a_list_you_do_not_own_is_not_there() {
-    let (state, store) = store_state(vec![
+    let (state, store, _transport) = store_state(vec![
         stored("mine", SELLER, "Vault", "2026-09-01T10:00:00Z"),
         stored("theirs", OTHER, "Their vault", "2026-09-02T10:00:00Z"),
     ]);
@@ -581,7 +600,7 @@ async fn a_list_you_do_not_own_is_not_there() {
 
 #[tokio::test]
 async fn a_request_outside_the_contract_is_refused() {
-    let (state, _store) = store_state(Vec::new());
+    let (state, _store, transport) = store_state(Vec::new());
     let app = router(state);
 
     // Twenty lists: the twenty-first is the one that is refused.
@@ -595,7 +614,7 @@ async fn a_request_outside_the_contract_is_refused() {
             )
         })
         .collect();
-    let (full, _store) = store_state(seed);
+    let (full, _store, _transport) = store_state(seed);
     let full = router(full);
     let (status, answer, _) = post(&full, "save", json!({ "name": "One too many" }), SELLER).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "answer={answer}");
@@ -700,6 +719,38 @@ async fn a_request_outside_the_contract_is_refused() {
         Some("private, no-store")
     );
 
+    // A name the store keeps for its own markers is not a list id either: it answers
+    // the 404 every other unknown id answers, and the store is never asked about it.
+    for (action, body) in [
+        ("save", json!({ "id": "__namespace__", "name": "Vault" })),
+        ("delete", json!({ "id": "__namespace__" })),
+    ] {
+        transport.clear_requests();
+        let (status, answer, _) = post(&app, action, body, SELLER).await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "action={action} answer={answer}"
+        );
+        assert_eq!(
+            answer["code"],
+            json!("collection_not_found"),
+            "action={action}"
+        );
+        assert_eq!(
+            store_calls(&transport),
+            Vec::<String>::new(),
+            "a reserved id is refused before the store is asked: action={action}"
+        );
+    }
+    // And the counter is not simply blind: a read of the very same app does ask it.
+    transport.clear_requests();
+    let (_status, _answer, _) = get(&app, Some(SELLER)).await;
+    assert!(
+        !store_calls(&transport).is_empty(),
+        "an ordinary read reaches the store, so the empty answer above means a refusal"
+    );
+
     // And without a token none of it is even reached.
     let (status, _answer, _) = call(
         &app,
@@ -714,7 +765,7 @@ async fn a_request_outside_the_contract_is_refused() {
 
 #[tokio::test]
 async fn a_delete_loses_the_list_and_its_line() {
-    let (state, _store) = store_state(vec![
+    let (state, _store, _transport) = store_state(vec![
         document(
             "mine",
             SELLER,

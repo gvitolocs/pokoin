@@ -294,13 +294,23 @@ fn sanitize_language(value: Option<&Json>, at: Where) -> Result<String> {
 
 /// What [`crate::firestore::new_document_id`] writes: an id outside that shape
 /// cannot exist, and sending it to the REST API would answer a 400 that reads as
-/// a server failure.
+/// a server failure. The store's own marker shape — `__` on both ends, as
+/// `__namespace__` and the Datastore conversion ids are spelled — is refused with
+/// it, so a name the backend reserves for itself never even reaches it: the caller
+/// gets the same 404 it gets for a list that is not there.
 pub fn is_collection_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 32
+        && !is_reserved_id(value)
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
+/// A name the Firestore wire gives its own markers, so it is never a list id — not
+/// even the two characters alone, which is what a truncated marker looks like.
+fn is_reserved_id(value: &str) -> bool {
+    value.starts_with("__") && value.ends_with("__")
 }
 
 /// Where a card of a collection was read from: a `?action=save` body, named by its
@@ -1532,6 +1542,32 @@ mod tests {
         assert!(!is_collection_id("has space"));
         assert!(!is_collection_id("a/b"));
         assert!(!is_collection_id(&"x".repeat(33)));
+    }
+
+    #[test]
+    fn a_name_the_store_reserves_is_never_a_list_id() {
+        // Firestore keeps `__…__` for its own marker ids, so such a name addresses no
+        // list — and because the shape check runs before any document read or write,
+        // the store is never asked about it.
+        for reserved in ["__namespace__", "__kind__", "____", "__"] {
+            assert!(!is_collection_id(reserved), "{reserved} is the store's");
+            let error = Save::from_body(&json!({ "id": reserved, "name": "Vault" })).unwrap_err();
+            assert_eq!(
+                error.status(),
+                axum::http::StatusCode::NOT_FOUND,
+                "{reserved}"
+            );
+            assert_eq!(error.code(), Some("collection_not_found"), "{reserved}");
+            assert_eq!(
+                error.body(),
+                missing_error().body(),
+                "a reserved name answers exactly like an absent one"
+            );
+        }
+        // Underscores that do not close the marker are ordinary id characters.
+        assert!(is_collection_id("_id_"));
+        assert!(is_collection_id("__leading"));
+        assert!(is_collection_id("trailing__"));
     }
 
     #[test]
