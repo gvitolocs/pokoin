@@ -374,10 +374,10 @@ status = "partial"
 
 [[flow]]
 id = "browse-pages"
-name = "Visitor browses sets, eras, expansions and artists"
+name = "Visitor browses sets, eras, expansions, artists and Pokémon species"
 money = false
-entry = ["solid/src/pages/Sets.jsx", "solid/src/pages/Era.jsx", "solid/src/pages/Expansion.jsx", "solid/src/pages/Artist.jsx"]
-proof = ["pokoin-rust/crates/catalog-api/tests/satellite_marketplace_flow.rs", "market/src/browse-pages.test.js"]
+entry = ["solid/src/pages/Sets.jsx", "solid/src/pages/Era.jsx", "solid/src/pages/Expansion.jsx", "solid/src/pages/Artist.jsx", "solid/src/pages/PokemonHub.jsx", "market/src/api.js"]
+proof = ["pokoin-rust/crates/catalog-api/tests/satellite_marketplace_flow.rs", "market/src/browse-pages.test.js", "market/src/species-cards.test.js", "solid/src/pages/PokemonHub.test.js", "pokoin-rust/apps/api/src/lists.rs::species_lists_hold_every_single_of_the_dex_number_and_serve_like_name_lists", "pokoin-rust/apps/api/src/lists.rs::a_kind_cannot_read_leaves_the_other_kinds_to_build", "pokoin-rust/apps/api/src/lists.rs::a_species_without_cards_stops_answering_and_a_failed_read_deletes_nothing"]
 status = "partial"
 
 [[flow]]
