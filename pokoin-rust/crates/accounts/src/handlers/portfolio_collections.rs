@@ -22,7 +22,7 @@ use serde_json::Value as Json;
 
 use crate::domain::portfolio_collections::{
     answer_body, apply_save, collection_days, delete_body_id, delete_collection, last_day,
-    list_collections, set_blueprint, Book, Collection, Rows, Save,
+    list_collections, set_blueprint, Collection, Rows, Save,
 };
 use crate::domain::portfolio_history::{sold_price_book, utc_day_key_ms, SOLD_BY_BLUEPRINT_SQL};
 use crate::domain::portfolio_segments::{game_of, POKEMON};
@@ -144,15 +144,17 @@ fn pokemon_card_ids(rows: &[Json]) -> Vec<i64> {
         .collect()
 }
 
-/// One sold price book for every collection of this seller, and the blueprints its
-/// rows are now priced by.
+/// The sold rows for every collection of this seller, and the blueprints its rows
+/// are now priced by.
 ///
 /// This is the whole market read of a request: the Pokémon catalog pass, every other
 /// game's own database through [`price_other_games`], then one sold query for the
 /// blueprints both confirmed — the same three steps, in the same order, as the main
 /// series. Both Pokémon reads share [`POKEMON_READ_TIMEOUT`], and the other games
 /// share theirs, so the wait this route can add to a request is bounded whatever the
-/// market is doing.
+/// market is doing. The rows are returned as they were read: dropping the outliers
+/// and keying them into a book is arithmetic over everything the seller sold, and
+/// [`answer`] does it on the blocking pool with the series.
 ///
 /// A read that fails leaves its cards **held and unpriced** rather than failing the
 /// request: the lists themselves are Firestore data, and a graph that cannot price a
@@ -161,7 +163,7 @@ fn pokemon_card_ids(rows: &[Json]) -> Vec<i64> {
 /// log.
 async fn read_collection_book(state: &DomainState, rows: &mut Rows) -> PriceRead {
     if rows.rows().is_empty() {
-        return PriceRead::complete(Book::new());
+        return PriceRead::complete(Vec::new());
     }
     let Ok(db) = state.marketplace_db() else {
         tracing::warn!("portfolio collections have no marketplace database to price from");
@@ -230,15 +232,15 @@ async fn read_collection_book(state: &DomainState, rows: &mut Rows) -> PriceRead
             }
         }
     }
-    PriceRead {
-        book: sold_price_book(&sold),
-        unavailable,
-    }
+    PriceRead { sold, unavailable }
 }
 
-/// The market this answer is priced out of, and whether all of it arrived.
+/// The sold rows this answer is priced out of, and whether all of the market read
+/// arrived. The rows are handed over unfiltered on purpose: the outlier filter and
+/// the book are the first thing the blocking hop does with them, so a seller with
+/// hundreds of sales is not the reason an I/O thread is busy.
 pub struct PriceRead {
-    pub book: Book,
+    pub sold: Vec<Json>,
     /// A read this answer needed did not happen — no market database, a query that
     /// failed, or one that ran out its window. There is then no series to draw at
     /// all: the lists are still the seller's and still answered, with
@@ -247,16 +249,16 @@ pub struct PriceRead {
 }
 
 impl PriceRead {
-    fn complete(book: Book) -> Self {
+    fn complete(sold: Vec<Json>) -> Self {
         Self {
-            book,
+            sold,
             unavailable: false,
         }
     }
 
     fn unavailable() -> Self {
         Self {
-            book: Book::new(),
+            sold: Vec::new(),
             unavailable: true,
         }
     }
@@ -273,9 +275,10 @@ pub const SERIES_ERROR: &str = "prices_unavailable";
 /// the write applied — because a store that fails after a committed write must not
 /// turn a 200 into an error.
 ///
-/// The maths — every list against every day of the window — is parked on the blocking
-/// pool: it is pure arithmetic over data already in hand, and a seller with the full
-/// allowance of lists and cards would otherwise hold an I/O thread through it.
+/// The maths — the price book out of the sold rows, then every list against every day
+/// of the window — is parked on the blocking pool: it is pure arithmetic over data
+/// already in hand, and a seller with the full allowance of lists and cards would
+/// otherwise hold an I/O thread through it.
 async fn answer(
     state: &DomainState,
     collections: &[Collection],
@@ -287,7 +290,8 @@ async fn answer(
     let collections = collections.to_vec();
     let saved = saved.map(str::to_string);
     let body = tokio::task::spawn_blocking(move || {
-        let PriceRead { book, unavailable } = read;
+        let PriceRead { sold, unavailable } = read;
+        let book = sold_price_book(&sold);
         // A book that was not read prices nothing, and a line drawn beneath cards
         // this request never saw would be a graph of the wrong thing: the series is
         // left empty and the answer says why.
