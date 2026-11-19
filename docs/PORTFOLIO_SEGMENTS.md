@@ -222,6 +222,14 @@ list that exists from one that does not. A name the store reserves for its own
 markers — `__` on both ends, as `__namespace__` is spelled — is refused by that same
 404 out of the id shape, before the store is asked about it at all.
 
+A write's body is read strictly: JSON that cannot be parsed, or that parses to
+anything but an object, is the 400 the rest of this API answers unreadable input with
+— `Invalid JSON request body.`, no `code` — because `{"name":` is not a save that
+forgot its name and a body of garbage is not a delete of a list that does not exist.
+An absent body is not malformed input: it is the empty object, which each write then
+refuses for what it actually is. Every answer of the route, refusals included, is
+`private, no-store`.
+
 **A write is one Firestore transaction.** Its reads — the document being replaced
 and every other list of this seller — its checks (ownership, the name, the cap) and
 its write commit together, so two saves that would each be legal alone cannot both

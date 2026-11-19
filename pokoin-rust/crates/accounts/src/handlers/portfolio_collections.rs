@@ -58,6 +58,33 @@ fn unknown_action_error() -> Box<ApiError> {
     )
 }
 
+/// The body of a write, read strictly. [`super::parse_body`] is the lenient
+/// `req.body || {}` of the Node handlers, which turns a body that cannot be read into
+/// an empty one — so `{"name":` answered `collection_name_required` and a delete
+/// answered 404, both claiming to have understood a request that said nothing. The
+/// rest of this API refuses that input with the runtime's own words before a route
+/// ever runs, and a path that is not body-validated refuses it here.
+///
+/// An absent body is not malformed input: it is the empty object, which each write
+/// refuses for what it then is — a save with no name, a delete that names no list.
+fn write_body(body: &Bytes) -> Result<Json> {
+    if body.is_empty() {
+        return Ok(parse_body(body));
+    }
+    let parsed: Json = serde_json::from_slice(body).map_err(|_| Box::new(invalid_body_error()))?;
+    if !parsed.is_object() {
+        return Err(Box::new(invalid_body_error()));
+    }
+    Ok(parsed)
+}
+
+/// The 400 every other hop of this API answers an unreadable body with, in the same
+/// body: no `code`, because the request died before this route had an opinion about
+/// collections.
+fn invalid_body_error() -> ApiError {
+    ApiError::bad_request("Invalid JSON request body.")
+}
+
 /// The identity a list belongs to. A verified token without a `uid` addresses no
 /// seller, and storing a list under the empty string would hand it to the next such
 /// token to find.
@@ -216,7 +243,7 @@ async fn collections_inner(
     let (collections, saved) = match (method.as_str(), action) {
         ("GET" | "HEAD", "") => (list_collections(&firestore, uid).await?, None),
         ("POST", "save") => {
-            let save = Save::from_body(&parse_body(body))?;
+            let save = Save::from_body(&write_body(body)?)?;
             let (collections, id) = apply_save(
                 &firestore,
                 uid,
@@ -227,7 +254,7 @@ async fn collections_inner(
             (collections, Some(id))
         }
         ("POST", "delete") => {
-            let id = delete_body_id(&parse_body(body))?;
+            let id = delete_body_id(&write_body(body)?)?;
             (delete_collection(&firestore, uid, &id).await?, None)
         }
         _ => return Err(unknown_action_error()),
@@ -385,6 +412,35 @@ mod tests {
             "a uid-less token is not a seller"
         );
         assert_eq!(owner_uid("user-1").unwrap(), "user-1");
+    }
+
+    #[test]
+    fn a_body_that_cannot_be_read_is_not_treated_as_an_empty_one() {
+        // The lenient `req.body || {}` of the Node handlers turned `{"name":` into a
+        // save with no name and a garbage delete into a list that does not exist, so
+        // the route answered as if it had understood a request that said nothing.
+        for raw in [
+            r#"{"name":"#,
+            "null",
+            r#"[{ "name": "Vault" }]"#,
+            "not json",
+        ] {
+            let error = write_body(&Bytes::from(raw.to_string())).unwrap_err();
+            assert_eq!(error.status(), StatusCode::BAD_REQUEST, "body={raw}");
+            assert_eq!(
+                error.body(),
+                json!({ "error": "Invalid JSON request body." }),
+                "a malformed body is the runtime's own 400, with no code: body={raw}"
+            );
+        }
+
+        // An absent body is not malformed input: it is the empty object, which each
+        // write then refuses for what it is — a save with no name, a delete with no id.
+        assert_eq!(write_body(&Bytes::new()).unwrap(), json!({}));
+        assert_eq!(
+            write_body(&Bytes::from(r#"{"id":"a1"}"#)).unwrap(),
+            json!({ "id": "a1" })
+        );
     }
 
     #[test]

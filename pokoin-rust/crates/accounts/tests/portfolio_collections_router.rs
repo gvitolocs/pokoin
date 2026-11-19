@@ -421,6 +421,53 @@ async fn post(
     .await
 }
 
+/// A write whose body is the exact bytes a client sent, so a request the route must
+/// not be able to pretend it understands can be tested as it arrives.
+async fn post_raw(
+    app: &axum::Router,
+    action: &str,
+    body: &str,
+    uid: &str,
+) -> (StatusCode, Json, HashMap<String, String>) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/marketplace-portfolio-collections?action={action}"
+                ))
+                .header(header::AUTHORIZATION, format!("Bearer {}", token(uid)))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .expect("a test request is well formed"),
+        )
+        .await
+        .expect("the router answers");
+    let status = response.status();
+    let headers = response
+        .headers()
+        .iter()
+        .map(|(name, value)| {
+            (
+                name.as_str().to_lowercase(),
+                String::from_utf8_lossy(value.as_bytes()).to_string(),
+            )
+        })
+        .collect();
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("the body reads")
+        .to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Json::Null),
+        headers,
+    )
+}
+
 /// `[valuePkn, cardsPriced, cardsHeld]` of one collection of one day.
 fn segment(day: &Json, id: &str) -> Vec<f64> {
     day["segments"][format!("collection:{id}")]
@@ -824,8 +871,16 @@ async fn a_request_outside_the_contract_is_refused() {
         );
         assert_eq!(answer["code"], json!("unknown_action"), "action={action}");
     }
-    // A body of nothing is a save with no name, not an unknown verb.
-    let (status, answer, _) = post(&app, "save", Json::Null, SELLER).await;
+    // A request with no body at all is not malformed input: it is the empty object,
+    // which the save refuses for what it then is — a list with no name.
+    let (status, answer, _) = call(
+        &app,
+        Method::POST,
+        "/api/marketplace-portfolio-collections?action=save",
+        None,
+        Some(SELLER),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "answer={answer}");
     assert_eq!(answer["code"], json!("collection_name_required"));
     let (status, answer, _) = call(
@@ -1207,4 +1262,67 @@ async fn a_delete_of_a_document_gone_at_commit_answers_404() {
     assert_eq!(status, StatusCode::NOT_FOUND, "answer={answer}");
     assert_eq!(answer["code"], json!("collection_not_found"));
     assert_eq!(commits(&transport), 1, "no delete was committed twice");
+}
+
+#[tokio::test]
+async fn a_write_body_that_cannot_be_read_is_refused_as_malformed() {
+    let (state, _store, transport) = store_state(vec![document(
+        "mine",
+        SELLER,
+        "Vault",
+        "2026-09-01T10:00:00Z",
+        vec![card("11", 1)],
+    )]);
+    let app = router(state);
+
+    // Truncated JSON, and JSON that is not an object, are not a request that said
+    // nothing: a save of `{"name":` must not answer "give the list a name", and a
+    // delete of garbage must not answer "no such list". Both are the 400 the rest of
+    // this API answers unreadable input with, in the runtime's own words and with no
+    // `code`, because the request died before the route had an opinion.
+    for (action, raw) in [
+        ("save", r#"{"name":"#),
+        ("save", r#"{"name": "Vault",}"#),
+        ("save", "null"),
+        ("save", r#"[{ "name": "Vault" }]"#),
+        ("save", "\"Vault\""),
+        ("delete", "not json at all"),
+        ("delete", "42"),
+    ] {
+        transport.clear_requests();
+        let (status, answer, headers) = post_raw(&app, action, raw, SELLER).await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "action={action} body={raw} answer={answer}"
+        );
+        assert_eq!(
+            answer,
+            json!({ "error": "Invalid JSON request body." }),
+            "action={action} body={raw}"
+        );
+        assert_eq!(
+            headers.get("cache-control").map(String::as_str),
+            Some("private, no-store"),
+            "someone else's half-written request is not cacheable either"
+        );
+        assert_eq!(
+            store_calls(&transport),
+            Vec::<String>::new(),
+            "a body that cannot be read writes nothing: action={action} body={raw}"
+        );
+    }
+
+    // A write is refused by its verb before its body is ever read: a POST with no
+    // `?action=` is the unknown verb it has always been, whatever it carries.
+    let (status, answer, _) = call(
+        &app,
+        Method::POST,
+        "/api/marketplace-portfolio-collections",
+        None,
+        Some(SELLER),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "answer={answer}");
+    assert_eq!(answer["code"], json!("unknown_action"));
 }
