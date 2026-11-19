@@ -34,17 +34,6 @@ pub fn private_json(body: Value) -> Response {
     response
 }
 
-/// [`private_json`] with a status of the caller's choosing, for an answer that
-/// carries its own body instead of the [`crate::error::ApiError`] shape.
-pub fn private_json_status(status: StatusCode, body: Value) -> Response {
-    let mut response = (status, Json(body)).into_response();
-    response.headers_mut().insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static("private, no-store"),
-    );
-    response
-}
-
 pub fn public_json(body: Value, max_age_seconds: u32) -> Response {
     let mut response = (StatusCode::OK, Json(body)).into_response();
     if let Ok(value) = HeaderValue::from_str(&format!(

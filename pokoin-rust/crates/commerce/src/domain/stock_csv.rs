@@ -11,6 +11,7 @@ use regex::Regex;
 use serde_json::{json, Map, Value};
 
 use crate::domain::{js_number, truthy_flag};
+use pokoin_external::powertools as pt;
 
 pub const POWERTOOLS_HEADERS: [&str; 22] = [
     "cardmarketId", "quantity", "name", "set", "setCode", "cn", "condition", "language", "isFirstEd",
@@ -410,17 +411,11 @@ pub fn detect_powertools_location_style(locations: &[String]) -> LocationStyle {
         if examples.len() < 6 && !examples.contains(&text) {
             examples.push(text.clone());
         }
-        if re(r"[·•#]\d+").is_match(&text) {
-            structured += 1;
-            continue;
+        match pt::location_shape(&text) {
+            pt::LocationShape::Structured => structured += 1,
+            pt::LocationShape::TrailingNumber => trailing += 1,
+            pt::LocationShape::Plain => as_is += 1,
         }
-        if re(r"^.+?\s+-\s+\d+$").is_match(&text)
-            || (re(r"^.+?[\s_]+\d+$").is_match(&text) && re(r"[a-zA-ZÀ-ÿ]").is_match(&text))
-        {
-            trailing += 1;
-            continue;
-        }
-        as_is += 1;
     }
     let total = structured + trailing + as_is;
     let mut location_parse = "as_is";
@@ -443,22 +438,6 @@ pub fn detect_powertools_location_style(locations: &[String]) -> LocationStyle {
         ambiguous_examples: ambiguity.examples,
         confirmation_needed: ambiguity.confirmation_needed,
     }
-}
-
-/// The body a request that WRITES locations must answer with instead of
-/// writing while a trailing number is still the server's guess; `None` when the
-/// seller named a mode or the rows leave nothing to choose.
-pub fn location_style_refusal(style: &LocationStyle) -> Option<Value> {
-    if !style.confirmation_needed {
-        return None;
-    }
-    Some(json!({
-        "error": "location_style_unconfirmed",
-        "message": "Choose how to read locations that end in a number.",
-        "locationParse": style.location_parse,
-        "ambiguousCount": style.ambiguous_count,
-        "ambiguousExamples": style.ambiguous_examples.iter().map(pokoin_external::powertools::AmbiguousLocation::to_json).collect::<Vec<_>>(),
-    }))
 }
 
 /// `formatListingLocation`.
@@ -1285,11 +1264,6 @@ pub struct ImportResult {
     pub occupancy: Vec<Occupancy>,
     pub suggested_stack_size: i64,
     pub location_detection: Value,
-    /// [`location_style_refusal`] for the rows, set only when the request left
-    /// `locationParse` to detection: a caller that WRITES must answer with this
-    /// body instead of writing. `None` for a preview, an explicit mode, or rows
-    /// whose every trailing number is settled.
-    pub location_confirmation: Option<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -1345,19 +1319,18 @@ pub fn import_csv_text(text: &str, options: &ImportOptions) -> Result<ImportResu
     let mut occupancy = Vec::new();
     let mut suggested_stack_size = 1i64;
     let mut location_detection = Value::Null;
-    let mut location_confirmation: Option<Value> = None;
     let mut location_parse = clean_str(&options.location_parse, 40);
     if location_parse.is_empty() {
         location_parse = "auto".to_string();
     }
-    // Whether the request left the reading to detection, or named one.
-    let requested_auto = location_parse == "auto";
 
     let with_slots: Vec<Value> = if options.preserve_location {
         ok_rows
     } else if options.power_tools_sync {
-        // An absent or "auto" locationParse means the seller has not chosen a
-        // reading: detection's pick may only be previewed, never written.
+        // Detection only: it reports the style it would read and how many of
+        // these values could also be box names. A caller that WRITES these rows
+        // has to answer `confirmationNeeded` first — no caller of this branch
+        // exists yet, so nothing here decides that on a seller's behalf.
         if location_parse == "auto" || options.detect_location {
             let locations: Vec<String> = ok_rows
                 .iter()
@@ -1388,9 +1361,6 @@ pub fn import_csv_text(text: &str, options: &ImportOptions) -> Result<ImportResu
                     .collect::<Vec<_>>(),
                 "confirmationNeeded": style.confirmation_needed,
             });
-            if requested_auto {
-                location_confirmation = location_style_refusal(&style);
-            }
         }
         let stack_size = match options.stack_size {
             Some(size) if size > 0 => size,
@@ -1406,8 +1376,8 @@ pub fn import_csv_text(text: &str, options: &ImportOptions) -> Result<ImportResu
         occupancy = assigned.occupancy;
         suggested_stack_size = assigned.suggested_stack_size;
         if location_detection.is_null() {
-            // An explicit mode was named, so nothing is refused; the ambiguity
-            // of these rows is reported the same way all detection is.
+            // An explicit mode was named, so the rows are ambiguous but nothing
+            // is open: the seller already answered with the reading.
             let cleaned: Vec<String> = ok_rows
                 .iter()
                 .map(|row| {
@@ -1432,7 +1402,7 @@ pub fn import_csv_text(text: &str, options: &ImportOptions) -> Result<ImportResu
                 "counts": Value::Null,
                 "ambiguousCount": ambiguity.count,
                 "ambiguousExamples": ambiguity.examples_json(),
-                "confirmationNeeded": ambiguity.confirmation_needed,
+                "confirmationNeeded": false,
             });
         }
         assigned.rows
@@ -1461,7 +1431,6 @@ pub fn import_csv_text(text: &str, options: &ImportOptions) -> Result<ImportResu
         occupancy,
         suggested_stack_size,
         location_detection,
-        location_confirmation,
     })
 }
 
@@ -1507,6 +1476,16 @@ pub fn source_listing_id_for(format: &str, row: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A JSON array of location values as the detector takes them.
+    fn listed(values: &serde_json::Value) -> Vec<String> {
+        values
+            .as_array()
+            .expect("list")
+            .iter()
+            .map(|value| value.as_str().expect("text").to_string())
+            .collect()
+    }
 
     #[test]
     fn csv_round_trip_handles_quotes_and_crlf() {
@@ -1794,11 +1773,45 @@ mod tests {
                 ),
                 "{value}"
             );
+            // The reported stack reading is what this crate's parser stores.
+            let parsed = parse_powertools_location(value, "trailing_stack");
+            assert_eq!(
+                (parsed.box_name.as_str(), parsed.stack),
+                (
+                    case["asStack"]["box"].as_str().expect("stack box"),
+                    case["asStack"]["stack"].as_i64().expect("stack number")
+                ),
+                "{value} as trailing_stack"
+            );
+        }
+        for entry in table["detectorParity"].as_array().expect("detectorParity") {
+            let why = entry["why"].as_str().expect("why");
+            let style = detect_powertools_location_style(&listed(&entry["locations"]));
+            assert_eq!(
+                serde_json::json!(style.location_parse),
+                entry["locationParse"],
+                "locationParse — {why}"
+            );
+            assert_eq!(
+                serde_json::json!(style.ambiguous_count),
+                entry["ambiguousCount"],
+                "ambiguousCount — {why}"
+            );
+            assert_eq!(
+                serde_json::json!(style.confirmation_needed),
+                entry["confirmationNeeded"],
+                "confirmationNeeded — {why}"
+            );
         }
     }
 
+    /// What this branch REPORTS about the box reading. It decides nothing: no
+    /// route imports through it, and
+    /// `crates/commerce/tests/stock_csv_location_flow.rs` pins that the route's
+    /// own path keeps a box name that ends in a number whole. A caller that ever
+    /// wires this branch into a write has to answer `confirmationNeeded` first.
     #[test]
-    fn a_write_with_an_unconfirmed_box_reading_is_refused() {
+    fn the_box_reading_is_reported_never_decided() {
         let table: serde_json::Value = serde_json::from_str(include_str!(
             "../../../external/src/fixtures/location_style_cases.json"
         ))
@@ -1813,56 +1826,54 @@ mod tests {
             "{header}1,1,Darkrai,Base Set,45,NM,english,false,,1.50,,BOX 001 - 131\n\
              2,1,Cresselia,Base Set,46,NM,english,false,,1.50,,BOX 001 - 132\n"
         );
+        let options = |location_parse: &str| ImportOptions {
+            power_tools_sync: true,
+            location_parse: location_parse.to_string(),
+            ..Default::default()
+        };
 
-        // A request that named no mode and one that named "auto" are refused
-        // with the detection result the seller has to confirm.
+        // A request that named no mode and one that named "auto" get the reading
+        // detection had to guess, said out loud with `confirmationNeeded`.
         for parse in ["", "auto"] {
-            let options = ImportOptions {
-                power_tools_sync: true,
-                location_parse: parse.to_string(),
-                ..Default::default()
-            };
-            let plan = import_csv_text(&ambiguous, &options).expect("import");
+            let plan = import_csv_text(&ambiguous, &options(parse)).expect("import");
+            for key in [
+                "locationParse",
+                "ambiguousCount",
+                "confirmationNeeded",
+                "ambiguousExamples",
+            ] {
+                assert_eq!(
+                    plan.location_detection[key], table["ambiguousListDetection"][key],
+                    "locationParse {parse:?} reports {key}"
+                );
+            }
+        }
+
+        // A chosen mode is the seller's own reading: it imports, and the report
+        // still names the ambiguity without asking to be confirmed.
+        for (parse, box_name, stack) in [
+            ("as_is", "Focobomba 006", 1),
+            ("trailing_stack", "Focobomba", 6),
+        ] {
+            let plan = import_csv_text(&ambiguous, &options(parse)).expect("explicit import");
+            let row = plan.results[0].row.clone().expect("row");
             assert_eq!(
-                plan.location_confirmation,
-                Some(table["refusalOfAmbiguousList"].clone()),
-                "locationParse {parse:?} is a guess, not a choice"
+                (row["box"].as_str(), row["stack"].as_i64()),
+                (Some(box_name), Some(stack)),
+                "{parse}"
+            );
+            assert_eq!(plan.location_detection["locationParse"], parse, "{parse}");
+            assert_eq!(plan.location_detection["ambiguousCount"], 2, "{parse}");
+            assert_eq!(
+                plan.location_detection["confirmationNeeded"], false,
+                "{parse} is a choice, not a guess"
             );
         }
 
-        // A chosen mode is the seller's own reading, so the rows import.
-        let options = ImportOptions {
-            power_tools_sync: true,
-            location_parse: "as_is".to_string(),
-            ..Default::default()
-        };
-        let plan = import_csv_text(&ambiguous, &options).expect("as_is import");
-        assert_eq!(plan.location_confirmation, None);
-        let row = plan.results[0].row.clone().expect("as_is row");
-        assert_eq!(
-            (row["box"].as_str(), row["stack"].as_i64()),
-            (Some("Focobomba 006"), Some(1))
-        );
-        let options = ImportOptions {
-            power_tools_sync: true,
-            location_parse: "trailing_stack".to_string(),
-            ..Default::default()
-        };
-        let plan = import_csv_text(&ambiguous, &options).expect("trailing_stack import");
-        assert_eq!(plan.location_confirmation, None);
-        let row = plan.results[0].row.clone().expect("trailing_stack row");
-        assert_eq!(
-            (row["box"].as_str(), row["stack"].as_i64()),
-            (Some("Focobomba"), Some(6))
-        );
-
         // Nothing to confirm when every trailing number is settled.
-        let options = ImportOptions {
-            power_tools_sync: true,
-            ..Default::default()
-        };
-        let plan = import_csv_text(&settled, &options).expect("settled import");
-        assert_eq!(plan.location_confirmation, None);
+        let plan = import_csv_text(&settled, &options("auto")).expect("settled import");
+        assert_eq!(plan.location_detection["confirmationNeeded"], false);
+        assert_eq!(plan.location_detection["ambiguousCount"], 0);
         let row = plan.results[0].row.clone().expect("settled row");
         assert_eq!(
             (row["box"].as_str(), row["stack"].as_i64()),

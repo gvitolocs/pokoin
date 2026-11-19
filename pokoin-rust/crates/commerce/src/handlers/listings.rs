@@ -1,5 +1,5 @@
 //! Native listings reads and writer mutations, plus stock CSV import/export.
-use super::{private_json, private_json_status};
+use super::private_json;
 use crate::domain::box_slots::{self, Cursor, SlotRow};
 use crate::domain::stock_csv::{self, ImportOptions, PriceMode};
 use crate::error::ApiError;
@@ -7,7 +7,7 @@ use crate::state::{AuthedUser, DomainState};
 use crate::{listing_live as live, listing_sync as sync};
 use axum::body::Bytes;
 use axum::extract::{Query, State};
-use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::http::{HeaderMap, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use pokoin_api_common::http;
@@ -1746,6 +1746,11 @@ pub async fn marketplace_listings_csv_post(
         _ => "",
     };
 
+    // No `power_tools_sync` here, so this is the legacy allocator: a location
+    // that ends in a number keeps that number as part of the box name and only
+    // the slot is assigned. Nothing on this path reads a trailing number as a
+    // stack, so there is no guess to confirm;
+    // `tests/stock_csv_location_flow.rs` pins what an apply stores.
     let options = ImportOptions {
         format,
         price_mode,
@@ -1760,16 +1765,6 @@ pub async fn marketplace_listings_csv_post(
     let mut skipped: Vec<Value> = Vec::new();
     let mut failed: Vec<Value> = Vec::new();
     let mut preview: Vec<Value> = Vec::new();
-
-    // A trailing number that could be the box name is never written on a
-    // guess: an apply request whose reading was left to detection is refused
-    // before any row is written, while a dry run (which writes nothing) still
-    // gets its plan.
-    if !dry_run {
-        if let Some(refusal) = &parsed.location_confirmation {
-            return Ok(private_json_status(StatusCode::CONFLICT, refusal.clone()));
-        }
-    }
 
     for entry in &parsed.results {
         let raw_json = Value::Object(entry.raw.clone());
