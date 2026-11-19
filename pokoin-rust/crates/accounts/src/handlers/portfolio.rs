@@ -195,6 +195,10 @@ async fn read_game_prices(
 /// Pokémon join matched on their card id, and neither the series nor any other game
 /// is affected. [`games_to_price`] lists the games that never get asked at all, and
 /// they are cleared the same way.
+///
+/// The games that are asked are asked **at the same time**: one slow card server
+/// costs this request its own timeout, never the sum of every game the seller
+/// collects, which is what one read after another would have cost.
 pub(crate) async fn price_other_games(
     state: &DomainState,
     rows: &mut [Json],
@@ -207,8 +211,30 @@ pub(crate) async fn price_other_games(
         // game's card. Without them the cards are held and unpriced.
         apply_catalog_rows(&game, rows, &[]);
     }
+    let mut unanswered: BTreeSet<String> = priced.iter().map(|(game, _)| game.clone()).collect();
+    let mut joins = tokio::task::JoinSet::new();
     for (game, ids) in priced {
-        match tokio::time::timeout(OTHER_GAME_TIMEOUT, read_game_prices(state, &game, &ids)).await {
+        let state = state.clone();
+        joins.spawn(async move {
+            let outcome =
+                tokio::time::timeout(OTHER_GAME_TIMEOUT, read_game_prices(&state, &game, &ids))
+                    .await;
+            (game, outcome)
+        });
+    }
+    while let Some(joined) = joins.join_next().await {
+        let (game, outcome) = match joined {
+            Ok(done) => done,
+            // A task that died took its game's name with it; the pass below clears
+            // every game that never answered, so no row keeps an unconfirmed
+            // blueprint because a spawn failed.
+            Err(error) => {
+                tracing::error!(%error, "a portfolio game pricing task did not answer");
+                continue;
+            }
+        };
+        unanswered.remove(&game);
+        match outcome {
             Ok(Ok(prices)) => {
                 apply_catalog_rows(&game, rows, &prices.catalog);
                 sold.extend(prices.sold);
@@ -229,6 +255,13 @@ pub(crate) async fn price_other_games(
                 apply_catalog_rows(&game, rows, &[]);
             }
         }
+    }
+    for game in unanswered {
+        tracing::error!(
+            game = %game,
+            "portfolio game pricing never answered; its cards stay unpriced"
+        );
+        apply_catalog_rows(&game, rows, &[]);
     }
 }
 
@@ -1279,6 +1312,106 @@ mod tests {
         let (priced, cleared) = games_to_price(&rows);
         assert!(priced.is_empty(), "{priced:?}");
         assert!(cleared.is_empty(), "{cleared:?}");
+    }
+
+    /// One game's database URL aimed at a port that accepts a connection and never
+    /// answers it — the shape of a card server that has stopped responding. Removed
+    /// on the way out, panic included: an env left behind would make the game pricing
+    /// of the next test in this binary hang for its window as well.
+    struct HangingGame {
+        env: &'static str,
+    }
+
+    impl Drop for HangingGame {
+        fn drop(&mut self) {
+            std::env::remove_var(self.env);
+        }
+    }
+
+    /// A listener that takes connections and says nothing back, with the port it
+    /// listens on. The accepted sockets are held: dropping one would close the
+    /// connection and have the pool fail at once instead of waiting.
+    async fn black_hole() -> u16 {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("a loopback port opens");
+        let port = listener
+            .local_addr()
+            .expect("the listener knows its own address")
+            .port();
+        tokio::spawn(async move {
+            let mut accepted: Vec<tokio::net::TcpStream> = Vec::new();
+            while let Ok((socket, _)) = listener.accept().await {
+                accepted.push(socket);
+            }
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn three_unanswered_games_are_asked_at_the_same_time() {
+        // The cost finding, tested rather than argued: asked one after another, three
+        // card servers that never answer cost this request three waits; asked together
+        // they cost the one each is given. The bound is generous on both sides because
+        // a pool whose URL was never reached fails in milliseconds, which is the wrong
+        // answer to be measuring.
+        let port = black_hole().await;
+        let games = [
+            ("riftbound", "RIFTBOUND_MARKETPLACE_DATABASE_URL"),
+            ("gundam", "GUNDAM_MARKETPLACE_DATABASE_URL"),
+            ("lorcana", "LORCANA_MARKETPLACE_DATABASE_URL"),
+        ];
+        let _guards: Vec<HangingGame> = games
+            .iter()
+            .map(|(_, env)| {
+                std::env::set_var(
+                    env,
+                    format!("postgres://pokoin:pokoin@127.0.0.1:{port}/pokoin_test"),
+                );
+                HangingGame { env }
+            })
+            .collect();
+
+        let mut rows = vec![json!({
+            "card_id": "77", "blueprint_id": "999", "quantity": 2,
+            "game": "pokemon", "set_code": "sv1",
+        })];
+        for (game, _) in games {
+            rows.push(json!({
+                "card_id": "77", "blueprint_id": "999", "quantity": 1, "game": game,
+            }));
+        }
+        let state = DomainState::default();
+        let mut sold = Vec::new();
+        let started = std::time::Instant::now();
+        price_other_games(&state, &mut rows, &mut sold).await;
+        let waited = started.elapsed();
+
+        assert!(
+            waited >= std::time::Duration::from_secs(1),
+            "the three games were never actually asked, so this measured nothing: {waited:?}"
+        );
+        assert!(
+            waited < std::time::Duration::from_secs(6),
+            "three games that each wait on their own were asked one after another: {waited:?}"
+        );
+
+        // And a game that never answered is held, not priced off another game's card:
+        // its rows lost the blueprint the Pokémon join matched on their card id, while
+        // the Pokémon card of that id keeps its own.
+        assert!(sold.is_empty(), "{sold:?}");
+        assert_eq!(rows[0]["blueprint_id"], json!("999"));
+        let groups = segment_holdings(&rows);
+        assert_eq!(groups["game:pokemon"].iter().map(|h| h.qty).sum::<i64>(), 2);
+        for (game, _) in games {
+            let holdings = &groups[&format!("game:{game}")];
+            assert_eq!(holdings.len(), 1, "{game} lost its holding");
+            assert!(
+                holdings[0].key.starts_with("unpriced|"),
+                "{game} is priced by {}",
+                holdings[0].key
+            );
+        }
     }
 
     #[test]
