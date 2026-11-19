@@ -1225,6 +1225,7 @@ impl Clone for StoreError {
             StoreError::Cache(message) => StoreError::Cache(message.clone()),
             StoreError::Upstream(message) => StoreError::Upstream(message.clone()),
             StoreError::Conflict(message) => StoreError::Conflict(message.clone()),
+            StoreError::ReleaseExceedsLock => StoreError::ReleaseExceedsLock,
             StoreError::NotFound(message) => StoreError::NotFound(message.clone()),
             StoreError::Insufficient => StoreError::Insufficient,
             StoreError::Forbidden(message) => StoreError::Forbidden(message.clone()),

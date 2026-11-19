@@ -1,0 +1,24 @@
+[Unit]
+Description=Daily Cardmarket offer minima per condition — the card-page graph's series (docs/PRICE_DUMPS.md)
+After=network-online.target
+OnFailure=pokoin-notify@%n.service
+
+[Service]
+Type=oneshot
+# The loader's own writer login (POKOIN_CARDMARKET_PG_USER/PASSWORD) and
+# CM_DAILY_STATE_DIR, the collector's state directory: both come from the same
+# env file the price units read, and nothing secret is in this file.
+EnvironmentFile=-%h/.config/pokoin/cardmarket-prices.env
+# It holds daily/daily-minimums-YYYY-MM-DD.jsonl, which the collector rewrites
+# whole as its walk settles facets. Yesterday and today are the two days one run
+# is asked for, and both are loaded because neither is finished when this runs:
+# today's file is still growing, and yesterday's last facets were settled after
+# midnight. Loading a day twice is a check, not a rewrite — the load keeps the
+# newest observation per facet and refuses an older one, and `asked` stays true
+# once it was. A day whose file is not there at all fails the unit, so a feed
+# that stopped landing is not silent (docs/PRICE_DUMPS.md, "Gaps").
+# The two dates are GNU date's own ISO form, so no percent sign is written here
+# for systemd's specifiers to eat.
+ExecStart=/usr/bin/bash -c 'd=${CM_DAILY_STATE_DIR}; x=%h/pokoin-cardmarket/current/pokoin-cardmarket-catalog; for day in $(date -u -d yesterday --iso-8601=date) $(date -u --iso-8601=date); do "$$x" cm-daily --file "$$d/daily/daily-minimums-$$day.jsonl" --apply || exit 1; done'
+Nice=10
+TimeoutStartSec=10min

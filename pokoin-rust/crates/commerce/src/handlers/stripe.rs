@@ -438,6 +438,27 @@ pub(crate) async fn handle_marketplace_order_paid(
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
+    let discount_state = order
+        .get("pknDiscount")
+        .and_then(|discount| discount.get("state"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    // A return that never reached the ledger left the PKN on its lock, so that
+    // discount is still the order's to consume. Otherwise the hold is back with
+    // the buyer — the order ended, or the discount was released — and a payment
+    // that arrives afterwards is recorded for review instead of taken again.
+    // An order on the settlement model answers this report earlier, in
+    // `validate_versioned_marketplace_session`.
+    let restore_failed = order
+        .get("pknDiscount")
+        .and_then(|discount| discount.get("restoreError"))
+        .is_some();
+    let ended_by_status = matches!(
+        payment_status.as_str(),
+        "cancelled" | "canceled" | "expired" | "failed"
+    );
+    let discount_returned = !restore_failed && (ended_by_status || discount_state == "released");
 
     if order.get("settlementModel").and_then(Value::as_str)
         == Some(crate::domain::settlement::MODEL)
@@ -485,7 +506,7 @@ pub(crate) async fn handle_marketplace_order_paid(
         ));
     }
 
-    if discount_pkn > 0 {
+    if discount_pkn > 0 && !discount_returned {
         let op = LedgerOp::unlock(&buyer_uid, discount_pkn, "order_discount_consumed", false)
             .with_ref(order_id)
             .with_idempotency(format!("order_discount_consumed:{order_id}"));
@@ -493,6 +514,11 @@ pub(crate) async fn handle_marketplace_order_paid(
         // integer PKN hold is consumed. Returning an error releases the event
         // claim so Stripe's retry resumes this idempotent operation.
         store::apply(firestore, &op).await?;
+    } else if discount_pkn > 0 {
+        tracing::warn!(
+            order_id,
+            "paid report for an order whose PKN discount was already returned"
+        );
     }
 
     let mut patch = json!({
@@ -510,8 +536,13 @@ pub(crate) async fn handle_marketplace_order_paid(
                 .cloned()
                 .unwrap_or_else(|| json!({}));
             discount["pkn"] = json!(discount_pkn);
-            discount["state"] = json!("consumed");
-            discount["consumedAt"] = json!(store::now_iso());
+            if discount_returned {
+                discount["state"] = json!("released_before_payment");
+                discount["reviewAt"] = json!(store::now_iso());
+            } else {
+                discount["state"] = json!("consumed");
+                discount["consumedAt"] = json!(store::now_iso());
+            }
             object.insert("pknDiscount".into(), discount);
         }
     }
