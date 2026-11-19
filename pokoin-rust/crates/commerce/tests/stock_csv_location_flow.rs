@@ -106,7 +106,10 @@ impl TokenVerifier for UidToken {
         if token.is_empty() {
             return Err(AuthError::Invalid("empty".into()));
         }
-        Ok(Claims { uid: token.into(), ..Default::default() })
+        Ok(Claims {
+            uid: token.into(),
+            ..Default::default()
+        })
     }
 }
 
@@ -129,7 +132,11 @@ async fn setup() -> Option<(PgPool, Router)> {
         .connect(&url)
         .await
         .expect("test server");
-    run_sql(&admin, "drop database if exists stock_csv_location_flow with (force)").await;
+    run_sql(
+        &admin,
+        "drop database if exists stock_csv_location_flow with (force)",
+    )
+    .await;
     run_sql(&admin, "create database stock_csv_location_flow").await;
     let (server, _) = url.rsplit_once('/').expect("database url");
     let pool = PgPoolOptions::new()
@@ -161,7 +168,10 @@ async fn import(app: &Router, body: Value) -> (StatusCode, Value) {
     let response = app.clone().oneshot(request).await.expect("router");
     let status = response.status();
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 /// Every stored location of this seller, in import order.
@@ -177,8 +187,14 @@ async fn locations(pool: &PgPool) -> Vec<String> {
 
 #[tokio::test]
 async fn an_apply_keeps_a_box_name_that_ends_in_a_number_whole() {
-    let Some((pool, app)) = setup().await else { return };
-    let (status, body) = import(&app, json!({ "csv": CSV, "dryRun": false, "priceMode": "as_pkn" })).await;
+    let Some((pool, app)) = setup().await else {
+        return;
+    };
+    let (status, body) = import(
+        &app,
+        json!({ "csv": CSV, "dryRun": false, "priceMode": "as_pkn" }),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["counts"]["created"], 3, "{body}");
     let stored = locations(&pool).await;
@@ -194,9 +210,17 @@ async fn an_apply_keeps_a_box_name_that_ends_in_a_number_whole() {
     );
 
     // A dry run of the same rows writes nothing, and says the same thing.
-    let (status, body) = import(&app, json!({ "csv": CSV, "dryRun": true, "priceMode": "as_pkn" })).await;
+    let (status, body) = import(
+        &app,
+        json!({ "csv": CSV, "dryRun": true, "priceMode": "as_pkn" }),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["counts"]["preview"], 3, "{body}");
     assert_eq!(body["counts"]["created"], 0, "{body}");
-    assert_eq!(locations(&pool).await, stored, "a dry run writes no listing row");
+    assert_eq!(
+        locations(&pool).await,
+        stored,
+        "a dry run writes no listing row"
+    );
 }
