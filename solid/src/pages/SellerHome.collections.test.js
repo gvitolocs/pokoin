@@ -3,9 +3,11 @@ import fs from 'node:fs';
 import test from 'node:test';
 import {
   gameDisplayName,
+  nameProblem,
   newItem,
   normalizeCollections,
   rowsShowGame,
+  saveBody,
 } from '../../../market/src/portfolio-collections.js';
 import {
   PREVIEW_COLLECTIONS,
@@ -326,6 +328,17 @@ test('an added card is scrolled to, marked, and the field keeps the caret', () =
   assert.match(css, /\.collections-item\.is-touched \{\n\s*border-color: var\(--yellow\);/);
   assert.match(css, /@media \(prefers-reduced-motion: no-preference\) \{\n\s*\.collections-item\.is-touched \{\n\s*animation: collections-touch 1400ms/);
   assert.match(css, /@keyframes collections-touch \{/);
+});
+
+test('the name field counts the characters the server counts', () => {
+  // The rule is the server's: cleaned, code points, 1 to 40. The field keeps
+  // what the seller typed; the count and the body carry what is kept.
+  assert.match(editorSrc, /const nameLength = createMemo\(\(\) => Array\.from\(cleanCollectionName\(draft\(\)\.name\)\)\.length\)/);
+  assert.match(editorSrc, /cleanCollectionName,[\s\S]*\} from '@market\/portfolio-collections\.js';/);
+  assert.match(editorSrc, /\$\{nameLength\(\)\} \/ \$\{limits\(\)\.name\}/);
+  assert.doesNotMatch(editorSrc, /\$\{draft\(\)\.name\.length\}/);
+  assert.equal(nameProblem('  Charizard\n  ex  ', []), '');
+  assert.equal(saveBody({ name: '  Charizard\n  ex  ', items: [] }).name, 'Charizard ex');
 });
 
 test('a phone gives a collection name the room it needs', () => {

@@ -6,6 +6,7 @@ import {
   collectionErrorMessage,
   collectionIdFromKey,
   collectionKey,
+  cleanCollectionName,
   closeIntent,
   commitQuantity,
   draftChanged,
@@ -159,6 +160,40 @@ test('the game a row is named by, and when a row has to name it at all', () => {
   assert.equal(rowsShowGame(saved.items), false, 'a list of one game is that game list');
 });
 
+test('the condition is the listing forms’ vocabulary, and PO is Poor', () => {
+  // The server used to answer the slice it had stored, where Poor was `PO`.
+  // One condition cannot be two rows of one list, so both spellings read as
+  // the value the desk's own select holds (card-desk.js MOOD_CONDS).
+  const poor = itemIdOf({ cardId: '1', condition: 'Poor' });
+  assert.equal(itemIdOf({ cardId: '1', condition: 'PO' }), poor);
+  assert.equal(itemIdOf({ cardId: '1', condition: ' po ' }), poor);
+  assert.equal(itemIdOf({ cardId: '1', condition: 'Damaged' }), poor, 'and the word the desk calls it');
+  assert.match(poor, /\|Poor\|/);
+  assert.match(itemIdOf({ cardId: '1', condition: 'MP' }), /\|MP\|/, 'the four codes stay codes');
+  assert.equal(newItem({ cardId: '1', condition: 'PO' }).condition, 'Poor', 'the row the form edits');
+  const answered = normalizeCollections({
+    limits: DEFAULT_LIMITS,
+    collections: [{ id: 'c1', name: 'List', items: [
+      { cardId: '1', condition: 'PO', quantity: 1 },
+      { cardId: '1', condition: 'Poor', quantity: 2 },
+    ] }],
+  });
+  assert.equal(answered.collections[0].items.length, 1, 'two spellings of one slice are one row');
+  assert.equal(answered.collections[0].items[0].quantity, 1, 'the first of them is the list');
+});
+
+test('a card id is a number, so the zeros a padded printing carries come off', () => {
+  assert.equal(newItem({ cardId: '0012' }).cardId, '12');
+  assert.equal(newItem({ cardId: '000129552' }).cardId, '129552', 'the id the server keeps');
+  assert.equal(newItem({ cardId: '0' }), null, 'no card is id 0');
+  assert.equal(newItem({ cardId: '000' }), null);
+  assert.equal(itemIdOf({ cardId: '0012', condition: 'NM', language: 'EN' }), 'pokemon|12|NM|EN|-|-|-');
+  let draft = addItem(newDraft(), { cardId: '12' }, DEFAULT_LIMITS);
+  draft = addItem(draft, { cardId: '0012' }, DEFAULT_LIMITS);
+  assert.equal(draft.items.length, 1, 'two spellings of one card are one row');
+  assert.equal(draft.items[0].quantity, 2, 'and the copies add up');
+});
+
 test('newDraft starts from a saved list, and a card straight from search', () => {
   const saved = normalizeCollections(payload()).collections[0];
   const draft = newDraft(saved);
@@ -308,6 +343,22 @@ test('the name check: 1 to 40 characters, taken names compared case-insensitivel
   assert.equal(nameProblem('Anything', 'not a list'), '');
 });
 
+test('the name obeys the server’s rule: cleaned, counted in code points', () => {
+  assert.equal(cleanCollectionName('  Charizard\n  ex  '), 'Charizard ex', 'a pasted line break is a space');
+  assert.equal(cleanCollectionName('a\t\tb   c'), 'a b c');
+  assert.equal(cleanCollectionName('ok\u0007\b'), 'ok', 'control characters out');
+  assert.equal(cleanCollectionName(42), '42');
+  assert.equal(cleanCollectionName(null), '');
+  const flames = '🔥'.repeat(25);
+  assert.equal(flames.length, 50, 'utf-16 units, which is not what the rule counts');
+  assert.equal(nameProblem(flames, []), '', '25 characters is inside 40');
+  assert.match(nameProblem('🔥'.repeat(41), []), /at most 40/);
+  assert.match(nameProblem(' Sealed ', [{ name: 'SEALED' }]), /already have/i, 'the cleaned form is what is taken');
+  assert.match(nameProblem('Charizard  binder', [{ name: 'charizard binder' }]), /already have/i);
+  assert.equal(saveBody({ name: ' Charizard\n binder ', items: [] }).name, 'Charizard binder', 'the body sends the cleaned name');
+  assert.equal(draftChanged({ id: 'c1', name: ' Sealed ', items: [] }, { id: 'c1', name: 'Sealed', items: [] }), false, 'padding is not a change');
+});
+
 test('draftErrors lists every reason this draft cannot be saved', () => {
   const others = [{ name: 'Sealed' }];
   let draft = newDraft();
@@ -320,7 +371,7 @@ test('draftErrors lists every reason this draft cannot be saved', () => {
   assert.deepEqual(draftErrors(draft, others), ['The collection lists the same card twice.']);
   draft = { ...draft, items: [{ id: 'x', cardId: 'not-an-id', quantity: 2 }] };
   assert.deepEqual(draftErrors(draft, others), ['Every card in the collection needs its card id.']);
-  const full = Array.from({ length: 301 }, (_, index) => ({ id: `i${index}`, cardId: String(index), quantity: 1 }));
+  const full = Array.from({ length: 301 }, (_, index) => ({ id: `i${index}`, cardId: String(index + 1), quantity: 1 }));
   assert.deepEqual(draftErrors({ name: 'Huge', items: full }, others), ['A collection holds up to 300 cards.']);
   const atLimit = Array.from({ length: 20 }, (_, index) => ({ id: `c${index}`, name: `List ${index}` }));
   assert.deepEqual(

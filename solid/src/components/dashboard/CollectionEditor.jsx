@@ -4,6 +4,7 @@ import { cardFromCatalogRow, fetchSearch } from '@market/api.js';
 import { LIST_LANGS, MOOD_CONDS } from '@market/card-desk.js';
 import {
   addItem,
+  cleanCollectionName,
   closeIntent,
   commitQuantity,
   draftChanged,
@@ -406,6 +407,9 @@ export default function CollectionEditor(props) {
   });
   const reason = createMemo(() => problems()[0] || '');
   const copies = createMemo(() => draft().items.reduce((acc, item) => acc + (Number(item.quantity) || 0), 0));
+  // The count of the name the server keeps, not of what is in the field: the
+  // rule is the server's (cleaned, code points), and the field holds the typing.
+  const nameLength = createMemo(() => Array.from(cleanCollectionName(draft().name)).length);
 
   function edit(next) {
     setServerProblem('');
@@ -477,7 +481,7 @@ export default function CollectionEditor(props) {
               onInput={(event) => edit({ ...draft(), name: event.currentTarget.value })}
               data-testid="collections-name"
             />
-            <em class="collections-count">{`${draft().name.length} / ${limits().name}`}</em>
+            <em class="collections-count">{`${nameLength()} / ${limits().name}`}</em>
           </label>
 
           <div class="collections-add">

@@ -13,6 +13,7 @@
  */
 
 import { GAMES } from './game.js';
+import { conditionShort } from './listing-meta.js';
 import { normalizeSegmentDefs, normalizeSegments } from './portfolio-segments.js';
 
 /** What the server answers in `limits` when it says nothing. */
@@ -42,16 +43,32 @@ function text(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-/** A public card id, however the row came: digits only, nothing else. */
+/**
+ * A public card id, however the row came: digits only, nothing else. The
+ * server stores it as a number, so `0012` and `12` are one card — the zeros
+ * come off here too, or the same card would be two rows of one list.
+ */
 function cardIdText(value) {
   const clean = text(value);
-  if (/^\d+$/.test(clean)) return clean;
+  if (/^\d+$/.test(clean)) return clean.replace(/^0+/, '');
   const n = Number(value);
   return Number.isInteger(n) && n > 0 ? String(n) : '';
 }
 
 function languageText(value) {
   return (text(value) || DEFAULT_ITEM_LANGUAGE).toUpperCase();
+}
+
+/**
+ * The condition in the vocabulary the listing forms store: NM, SP, MP, PL,
+ * Poor (card-desk.js `MOOD_CONDS`). The server answered Poor as `PO`, and one
+ * condition cannot be two rows of one list: `PO` reads as `Poor`, the same way
+ * `moodCondition` in the desk does it. Anything else is what it was sent as.
+ */
+function conditionText(value) {
+  const clean = text(value);
+  if (!clean) return DEFAULT_ITEM_CONDITION;
+  return conditionShort(clean) === 'PO' ? 'Poor' : clean;
 }
 
 function numberOrNull(value) {
@@ -93,7 +110,7 @@ export function itemIdOf(item = {}) {
   return [
     text(item.game) || DEFAULT_ITEM_GAME,
     cardIdText(item.cardId),
-    text(item.condition) || DEFAULT_ITEM_CONDITION,
+    conditionText(item.condition),
     languageText(item.language),
     flag(item, 'reverse') ? 'R' : '-',
     flag(item, 'firstEdition') ? '1' : '-',
@@ -153,8 +170,8 @@ function normalizeItem(row, limits) {
   const item = {
     game: text(row?.game) || DEFAULT_ITEM_GAME,
     cardId,
-    // The listing forms' own vocabulary: NM/SP/MP/PL/Poor and the page codes.
-    condition: text(row?.condition) || DEFAULT_ITEM_CONDITION,
+    // The listing forms' own vocabulary, `PO` and all: NM/SP/MP/PL/Poor.
+    condition: conditionText(row?.condition),
     language: languageText(row?.language),
     reverse: flag(row, 'reverse'),
     firstEdition: flag(row, 'firstEdition'),
@@ -349,13 +366,27 @@ export function commitQuantity(typed, previous, limits = DEFAULT_LIMITS) {
   return Math.min(Math.max(1, n), clean.quantity);
 }
 
+/**
+ * The server's own name rule (`clean_text`), so what the seller keeps is what
+ * the desk validated: a character stays when it is whitespace or not a control
+ * character — a tab is a space, a BEL is nothing — then runs of whitespace
+ * collapse to one space and the ends go. Length is counted in code points,
+ * never UTF-16 units: an emoji is one character.
+ */
+export function cleanCollectionName(value) {
+  const kept = [...String(value ?? '')]
+    .filter((character) => /\s/.test(character) || !/[\p{Cc}]/u.test(character))
+    .join('');
+  return kept.trim().replace(/\s+/g, ' ');
+}
+
 /** The name's own problem, or '' when it is usable. Taken names ignore case. */
 export function nameProblem(name, others = [], limits = DEFAULT_LIMITS) {
-  const clean = text(name);
+  const clean = cleanCollectionName(name);
   if (!clean) return 'A collection needs a name.';
-  if (clean.length > limits.name) return `The name is at most ${limits.name} characters.`;
+  if (Array.from(clean).length > limits.name) return `The name is at most ${limits.name} characters.`;
   const taken = (Array.isArray(others) ? others : [])
-    .map((row) => text(typeof row === 'string' ? row : row?.name).toLowerCase())
+    .map((row) => cleanCollectionName(typeof row === 'string' ? row : row?.name).toLowerCase())
     .filter(Boolean);
   if (taken.includes(clean.toLowerCase())) return 'You already have a collection with that name.';
   return '';
@@ -400,12 +431,14 @@ export function draftErrors(draft, others = [], limits = DEFAULT_LIMITS) {
  * asked for.
  * Each item is normalized first, so a draft assembled by hand sends the same
  * shape the server answers with — the facets included, a card without a public
- * id left out (the checks above name it before a save is ever asked).
+ * id left out (the checks above name it before a save is ever asked). The name
+ * is the cleaned one: the field holds what the seller is typing, the body
+ * holds what the server keeps.
  */
 export function saveBody(draft) {
   const clean = draftOf(draft);
   const body = {
-    name: clean.name,
+    name: cleanCollectionName(clean.name),
     items: clean.items.reduce((acc, item) => {
       const row = normalizeItem(item, DEFAULT_LIMITS);
       if (!row) return acc;
