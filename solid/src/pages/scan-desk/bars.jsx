@@ -22,6 +22,7 @@ import {
   sizeCommit,
   STACK_OFF_PATCH,
   STACK_SETUP_OFF_ENABLED,
+  stackSplitPatch,
 } from './defaults-state.js';
 import { pricingChoicePatch, pricingChoiceValue, pricingHint, pricingOptions } from './pricing.js';
 
@@ -200,9 +201,18 @@ export function DefaultsBar(props) {
     rememberBoxNameChoice(reading.raw, choice);
     // "as typed" is what the field already holds; only the split moves anything.
     if (choice !== 'stack') return undefined;
-    applyLocation(reading.asStack.box);
-    setStackDraft(String(reading.asStack.stack));
-    return commitStack();
+    // Box and stack go out together: commitStack stays silent when the wanted
+    // stack already equals the current one, and a location patch without a
+    // stack is answered from the new box's stock — the number the seller wrote
+    // would be lost. One patch, so the desk's next-free-stack rule never runs.
+    const patch = {
+      ...locationPatch(reading.asStack.box),
+      ...stackSplitPatch({ wanted: reading.asStack.stack, size: size() }),
+    };
+    locationSent = String(patch.location);
+    setLocationDraft(patch.location);
+    setStackDraft(String(patch.stack));
+    return props.onChange(patch);
   };
   /**
    * Leaving the field: what was typed is applied, and nothing typed at all

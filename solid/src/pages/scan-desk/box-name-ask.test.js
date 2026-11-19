@@ -47,7 +47,10 @@ test('the split answer moves the box and the stack field, the keep answer moves 
   assert.match(answer, /rememberBoxNameChoice\(reading\.raw, choice\)/, 'the second time the desk does not ask');
   assert.match(answer, /if \(choice !== 'stack'\) return undefined;/, 'the name stays as typed');
   assert.match(answer, /setBoxAsk\(null\)/);
-  assert.match(answer, /applyLocation\(reading\.asStack\.box\);\s*setStackDraft\(String\(reading\.asStack\.stack\)\);\s*return commitStack\(\);/);
+  assert.match(answer, /const patch = \{\s*\.\.\.locationPatch\(reading\.asStack\.box\),\s*\.\.\.stackSplitPatch\(\{ wanted: reading\.asStack\.stack, size: size\(\) \}\),\s*\};/, 'box and stack leave in one patch');
+  assert.match(answer, /return props\.onChange\(patch\);/, 'one write carries both');
+  assert.doesNotMatch(answer, /commitStack\(\)/, 'never through the edit that stays silent when the stack already matches');
+  assert.match(answer, /setStackDraft\(String\(patch\.stack\)\);/, 'the field shows the stack that was written');
   // The box write and the stack write are the seller's own paths, not a third one.
   const apply = between(bars, 'const applyLocation = (next) => {', 'const suggestions');
   assert.match(apply, /props\.onChange\(locationPatch\(value\)\)/);
