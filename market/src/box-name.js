@@ -71,6 +71,12 @@ function entryName(entry) {
   return typeof entry === 'string' ? entry.trim() : String(entry?.box ?? '').trim();
 }
 
+/** The number the seller actually wrote, before any clamping, or null. */
+function stackNumberAsWritten(text) {
+  const hit = TRAILING_NUMBER.exec(text);
+  return hit ? Number(hit[2]) : null;
+}
+
 /** The names this browser has an answer for, whatever shape the caller holds them in. */
 function answeredNames(answered) {
   if (!answered || typeof answered !== 'object') return [];
@@ -81,11 +87,15 @@ function answeredNames(answered) {
 
 /**
  * Ask only for a name that is ambiguous, is not one of the seller's own boxes
- * and has not been answered before — the answer is stored per exact name.
+ * and has not been answered before — the answer is stored per exact name. A
+ * number that is not a stack the seller could have meant (0, or past 9999) is
+ * never offered: the name is kept whole and nothing is asked.
  */
 export function shouldAskBoxName({ name, boxes, answered } = {}) {
   const reading = ambiguousBoxName(name);
   if (!reading) return false;
+  const written = stackNumberAsWritten(reading.raw);
+  if (!(written >= 1 && written <= 9999)) return false;
   const owned = (Array.isArray(boxes) ? boxes : []).map(entryName).filter(Boolean);
   if (owned.some((box) => box.toLowerCase() === reading.raw.toLowerCase())) return false;
   if (answeredNames(answered).some((asked) => String(asked).trim() === reading.raw)) return false;
@@ -115,13 +125,18 @@ function examplesOf(answer) {
 /**
  * Whether an analyze or sync answer makes the seller confirm how their
  * locations are read, and the examples to show. An API older than the site
- * carries none of these fields, so the same rule is computed from its
- * `locationExamples`.
+ * carries none of these fields: its `locationExamples` is only a sample, so an
+ * empty sample proves nothing, and the detected `trailing_stack` — the one mode
+ * in which a trailing number is split — decides on its own. With no ambiguous
+ * example to show, the question comes without example rows. When the server
+ * does carry `confirmationNeeded`, its answer decides, as before.
  */
 export function needsLocationConfirmation(answer) {
   const carried = answer && typeof answer === 'object' ? answer : {};
   const examples = examplesOf(carried);
-  const needed = typeof carried.confirmationNeeded === 'boolean' ? carried.confirmationNeeded : examples.length > 0;
+  const needed = typeof carried.confirmationNeeded === 'boolean'
+    ? carried.confirmationNeeded
+    : (examples.length > 0 || String(carried.locationParse || '') === 'trailing_stack');
   const count = Number(carried.ambiguousCount);
   return { needed, count: Number.isFinite(count) && count > 0 ? count : examples.length, examples };
 }
@@ -158,13 +173,28 @@ function storage() {
   }
 }
 
+const CHOICES = ['box', 'stack'];
+
+/**
+ * The stored answers that count: a plain object of exact name → `box` or
+ * `stack`. An array, a string, null or any other value is read as no answer,
+ * so a damaged entry cannot silently suppress the question or block a write.
+ */
+function validChoices(entries) {
+  if (!entries || typeof entries !== 'object' || Array.isArray(entries)) return {};
+  const clean = {};
+  for (const [name, value] of Object.entries(entries)) {
+    if (CHOICES.includes(value)) clean[name] = value;
+  }
+  return clean;
+}
+
 /** The answers kept in this browser; an unreadable or missing store is none. */
 export function readBoxNameChoices() {
   const store = storage();
   if (!store) return {};
   try {
-    const parsed = JSON.parse(store.getItem(BOX_NAME_CHOICE_KEY) || '{}');
-    return parsed && typeof parsed === 'object' ? parsed : {};
+    return validChoices(JSON.parse(store.getItem(BOX_NAME_CHOICE_KEY) || '{}'));
   } catch (_) {
     return {};
   }
@@ -177,8 +207,9 @@ export function rememberBoxNameChoice(name, choice) {
   const store = storage();
   if (!store) return false;
   try {
-    const answers = readBoxNameChoices();
-    answers[text] = choice;
+    // Built from the validated read, so a malformed stored value is replaced
+    // by a clean object instead of being written back around the new answer.
+    const answers = { ...readBoxNameChoices(), [text]: choice };
     store.setItem(BOX_NAME_CHOICE_KEY, JSON.stringify(answers));
     return true;
   } catch (_) {

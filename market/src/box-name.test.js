@@ -208,6 +208,63 @@ test('Promo 2023 ends in a year and is still ambiguous, and a past 9999 clamps',
     raw: 'Promo 20231',
     asBox: 'Promo 20231',
     asStack: { box: 'Promo', stack: 9999 },
-  }, 'stack 20231 is out of reach, so the reading says the largest stack there is');
+  }, 'the rule still reports what the server would do with the row');
   assert.equal(locationReadingLabels(clamped).asStack, 'box Promo, stack 9999');
+  // …and the pop-up never offers that number: a stack past 9999 is not one the
+  // seller wrote, so the name is kept whole and nothing is asked (finding E).
+  assert.equal(shouldAskBoxName({ name: 'Promo 20231', boxes: [], answered: {} }), false);
+});
+
+// A stack number the seller cannot have meant is never offered (finding E), an older
+// API's empty sample no longer proves nothing is owed (finding B), and a damaged
+// stored answer is read as no answer at all (finding F).
+
+test('a trailing number outside a stack is kept whole and never asked', () => {
+  assert.equal(ambiguousBoxName('Box 0').asStack.stack, 1, 'the import still shows what the server would do');
+  assert.equal(shouldAskBoxName({ name: 'Box 0', boxes: [], answered: {} }), false, '0 is not a stack anyone wrote');
+  assert.equal(shouldAskBoxName({ name: 'Box 99999', boxes: [], answered: {} }), false, 'nor is 99999');
+  assert.equal(shouldAskBoxName({ name: 'Box 9999', boxes: [], answered: {} }), true, 'the last stack that exists is asked about');
+  assert.equal(shouldAskBoxName({ name: 'Box 1', boxes: [], answered: {} }), true);
+  assert.equal(shouldAskBoxName({ name: 'Promo 2023', boxes: [], answered: {} }), true, 'a year is inside the range');
+});
+
+test('an older API with no ambiguous example still owes the question when it detected a split', () => {
+  const empty = needsLocationConfirmation({ locationExamples: [], locationParse: 'trailing_stack' });
+  assert.equal(empty.needed, true, 'an empty sample is not proof that nothing is ambiguous');
+  assert.deepEqual(empty.examples, [], 'the question comes without example rows');
+  const ordinary = needsLocationConfirmation({ locationExamples: ['A1', 'box·2', 'Loose'], locationParse: 'trailing_stack' });
+  assert.equal(ordinary.needed, true, 'ambiguous rows may sit outside the sample');
+  assert.deepEqual(ordinary.examples, []);
+  const split = needsLocationConfirmation({ locationExamples: ['Focobomba 006'], locationParse: 'as_is' });
+  assert.equal(split.needed, true);
+  assert.deepEqual(split.examples.map((reading) => reading.raw), ['Focobomba 006']);
+  // A detected mode that never splits a trailing number needs no confirmation.
+  assert.equal(needsLocationConfirmation({ locationExamples: ['A1'], locationParse: 'structured' }).needed, false);
+  assert.equal(needsLocationConfirmation({ locationExamples: [], locationParse: '' }).needed, false);
+  // When the server answers, its answer decides, as before.
+  assert.equal(needsLocationConfirmation({ confirmationNeeded: false, locationExamples: [], locationParse: 'trailing_stack' }).needed, false);
+});
+
+test('a damaged stored answer is no answer and a write replaces it', () => {
+  const saved = globalThis.localStorage;
+  let stored = '{}';
+  globalThis.localStorage = {
+    getItem: (key) => (key === BOX_NAME_CHOICE_KEY ? stored : null),
+    setItem: (key, value) => { stored = value; },
+  };
+  try {
+    for (const damaged of ['[]', 'null', '"x"', '{"Box 6": false}', '{"Box 6": "boxx"}']) {
+      stored = damaged;
+      assert.deepEqual(readBoxNameChoices(), {}, `${damaged} is read as no answer`);
+      assert.equal(shouldAskBoxName({ name: 'Box 6', boxes: [], answered: readBoxNameChoices() }), true, `${damaged} does not suppress the question`);
+      assert.equal(rememberBoxNameChoice('Box 6', 'box'), true);
+      assert.deepEqual(JSON.parse(stored), { 'Box 6': 'box' }, `${damaged} is replaced by a clean object`);
+      assert.equal(shouldAskBoxName({ name: 'Box 6', boxes: [], answered: readBoxNameChoices() }), false);
+    }
+    stored = '{"A1": "stack", "Box 6": false}';
+    assert.deepEqual(readBoxNameChoices(), { A1: 'stack' }, 'only the two values count');
+  } finally {
+    if (saved === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = saved;
+  }
 });
