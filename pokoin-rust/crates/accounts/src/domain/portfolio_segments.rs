@@ -502,6 +502,30 @@ pub fn segment_holdings(rows: &[Json]) -> BTreeMap<String, Vec<Holding>> {
         .collect()
 }
 
+/// One game's holdings and the holdings of every other game in the same table, as
+/// `(what that game holds, what the rest of the collection holds)`, read off the
+/// `game:<id>` segments. A caller that prices one game apart from the collection has
+/// no other way back to the rows: a segment map is the only place the game of a
+/// holding survives the grouping.
+pub fn game_and_other_holdings(
+    segment_holdings: &BTreeMap<String, Vec<Holding>>,
+    game: &str,
+) -> (Vec<Holding>, Vec<Holding>) {
+    let mut own = Vec::new();
+    let mut other = Vec::new();
+    for (key, holdings) in segment_holdings {
+        let Some(segment_game) = key.strip_prefix(GAME_PREFIX) else {
+            continue;
+        };
+        if segment_game == game {
+            own.extend(holdings.iter().cloned());
+        } else {
+            other.extend(holdings.iter().cloned());
+        }
+    }
+    (own, other)
+}
+
 /// A slug read back as a name, for a set key whose stored label is gone.
 fn slug_label(slug: &str) -> String {
     slug.split('-')
