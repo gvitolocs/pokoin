@@ -17,7 +17,7 @@ use std::collections::HashMap;
 
 use serde_json::{json, Map, Value as Json};
 
-use crate::error::{ApiError, Result};
+use crate::error::ApiError;
 use crate::firestore::{DocData, Document, Firestore, Query as FirestoreQuery, Value};
 
 use super::collection::iso_timestamp;
@@ -26,6 +26,11 @@ use super::portfolio_history::{
     add_utc_days, condition_key, holding_slices, language_key, last_sold_for, num, round2,
     sold_slice_key, value_holdings_on, PricePoint, HISTORY_DAYS, PRICE_BASIS,
 };
+
+/// `ApiError` is wide, so every fallible function here hands the refusal over
+/// boxed and the handler answers from the unboxed error, as
+/// [`crate::handlers::poko_market`]'s boxed tools do.
+type Result<T> = std::result::Result<T, Box<ApiError>>;
 
 /// Firestore collection of the seller's own card lists: one document per
 /// collection, found by `uid`.
@@ -72,50 +77,62 @@ pub fn segment_key(id: &str) -> String {
 // Errors
 // ---------------------------------------------------------------------------
 
-fn name_missing_error() -> ApiError {
-    ApiError::bad_request(format!(
-        "A collection needs a name of 1–{MAX_NAME_LEN} characters."
-    ))
-    .with_code("collection_name_required")
+fn name_missing_error() -> Box<ApiError> {
+    Box::new(
+        ApiError::bad_request(format!(
+            "A collection needs a name of 1–{MAX_NAME_LEN} characters."
+        ))
+        .with_code("collection_name_required"),
+    )
 }
 
-fn limit_error() -> ApiError {
-    ApiError::bad_request(format!(
-        "You can keep {MAX_COLLECTIONS} collections. Delete one first."
-    ))
-    .with_code("collection_limit")
+fn limit_error() -> Box<ApiError> {
+    Box::new(
+        ApiError::bad_request(format!(
+            "You can keep {MAX_COLLECTIONS} collections. Delete one first."
+        ))
+        .with_code("collection_limit"),
+    )
 }
 
-fn items_limit_error() -> ApiError {
-    ApiError::bad_request(format!("A collection holds at most {MAX_ITEMS} cards."))
-        .with_code("collection_items_limit")
+fn items_limit_error() -> Box<ApiError> {
+    Box::new(
+        ApiError::bad_request(format!("A collection holds at most {MAX_ITEMS} cards."))
+            .with_code("collection_items_limit"),
+    )
 }
 
 /// The refused card is named by its position in the request, which is the only
 /// way a seller finds it in a list of 300.
-fn item_error(index: usize) -> ApiError {
-    ApiError::bad_request(format!(
-        "Collection card {} needs a card id of 1–12 digits and a quantity of \
-         1–{MAX_QUANTITY}.",
-        index + 1
-    ))
-    .with_code("collection_item_invalid")
+fn item_error(index: usize) -> Box<ApiError> {
+    Box::new(
+        ApiError::bad_request(format!(
+            "Collection card {} needs a card id of 1–12 digits and a quantity of \
+             1–{MAX_QUANTITY}.",
+            index + 1
+        ))
+        .with_code("collection_item_invalid"),
+    )
 }
 
-fn items_shape_error() -> ApiError {
-    ApiError::bad_request("The cards of a collection must be a list.")
-        .with_code("collection_item_invalid")
+fn items_shape_error() -> Box<ApiError> {
+    Box::new(
+        ApiError::bad_request("The cards of a collection must be a list.")
+            .with_code("collection_item_invalid"),
+    )
 }
 
 /// An unknown id, an already-deleted id and another seller's id answer this, so a
 /// collection id never leaks through an error.
-fn missing_error() -> ApiError {
-    ApiError::not_found("Collection not found.").with_code("collection_not_found")
+fn missing_error() -> Box<ApiError> {
+    Box::new(ApiError::not_found("Collection not found.").with_code("collection_not_found"))
 }
 
-fn name_taken_error() -> ApiError {
-    ApiError::conflict("You already have a collection with that name.")
-        .with_code("collection_name_taken")
+fn name_taken_error() -> Box<ApiError> {
+    Box::new(
+        ApiError::conflict("You already have a collection with that name.")
+            .with_code("collection_name_taken"),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -592,7 +609,8 @@ pub async fn delete_collection(firestore: &Firestore, uid: &str, id: &str) -> Re
     if owned_document(reference.get().await?.as_ref(), uid).is_none() {
         return Err(missing_error());
     }
-    reference.delete().await
+    reference.delete().await?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

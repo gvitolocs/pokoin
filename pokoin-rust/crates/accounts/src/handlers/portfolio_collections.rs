@@ -26,13 +26,18 @@ use crate::domain::portfolio_collections::{
 };
 use crate::domain::portfolio_history::{sold_price_book, utc_day_key_ms, SOLD_BY_BLUEPRINT_SQL};
 use crate::domain::portfolio_segments::{game_of, POKEMON};
-use crate::error::{ApiError, Result};
+use crate::error::ApiError;
 use crate::firestore::Firestore;
 use crate::sql::{row_text, SqlParam};
 use crate::state::DomainState;
 
 use super::portfolio::{numeric_id, price_other_games};
 use super::{json_cached, method_not_allowed, parse_body, require_claims};
+
+/// `ApiError` is wide, so the refusals of this route travel boxed, as
+/// [`crate::domain::portfolio_collections`]'s do, and [`collections_error`] answers
+/// from the unboxed error.
+type Result<T> = std::result::Result<T, Box<ApiError>>;
 
 /// The CardTrader blueprint of each Pokémon public card id — the one table that
 /// says which printing a `card_id` is, and the reason a client's card id is never
@@ -45,9 +50,13 @@ pub const POKEMON_BLUEPRINTS_SQL: &str = "\
 
 /// A `?action=` that is not one of the two writes, or a write attempted with the
 /// wrong method: the contract has no third verb.
-fn unknown_action_error() -> ApiError {
-    ApiError::bad_request("Collections are written by POST with ?action=save or ?action=delete.")
-        .with_code("unknown_action")
+fn unknown_action_error() -> Box<ApiError> {
+    Box::new(
+        ApiError::bad_request(
+            "Collections are written by POST with ?action=save or ?action=delete.",
+        )
+        .with_code("unknown_action"),
+    )
 }
 
 /// The identity a list belongs to. A verified token without a `uid` addresses no
@@ -55,7 +64,7 @@ fn unknown_action_error() -> ApiError {
 /// token to find.
 fn owner_uid(uid: &str) -> Result<&str> {
     if uid.is_empty() {
-        return Err(ApiError::unauthorized("Your account has no id."));
+        return Err(Box::new(ApiError::unauthorized("Your account has no id.")));
     }
     Ok(uid)
 }
@@ -239,7 +248,7 @@ pub async fn marketplace_portfolio_collections(
 ) -> Response {
     match collections_inner(&state, &method, &query, &headers, &body).await {
         Ok(response) => response,
-        Err(error) => collections_error(error),
+        Err(error) => collections_error(*error),
     }
 }
 
@@ -359,7 +368,7 @@ mod tests {
 
     #[test]
     fn an_answer_of_the_route_is_never_cacheable() {
-        let response = collections_error(unknown_action_error());
+        let response = collections_error(*unknown_action_error());
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         assert_eq!(
             response
