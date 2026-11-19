@@ -140,10 +140,17 @@ test('a live frame moves the cached answer without inventing one', () => {
   // A card nobody was selling: `[]` is an answer (P1), and the event that ends it
   // must land on the copy, not only on the painted cell.
   rememberListings('236234', { listings: [], total: 0, limit: 40 }, 0);
+  // CARD-11: the cache stamps its entries with the wall clock and takes no time
+  // from the caller — rememberListings' third argument is the fetch epoch — so the
+  // freshness is read through listingsAgeMs' own `now` seam against an instant
+  // taken before the patch. A restamped entry cannot be older than that instant,
+  // while `== 0` against the running clock lost any tick between write and read.
+  const beforePatch = Date.now();
   assert.deepEqual(rememberListingRows('236234', rows).listings, rows);
   assert.deepEqual(peekListings('236234').listings, rows);
   assert.equal(peekListings('236234').limit, 40, 'the answer stays the answer it was');
-  assert.equal(listingsAgeMs('236234'), 0, 'the patch is as fresh as the event that made it');
+  assert.equal(listingsAgeMs('236234', beforePatch), 0, 'the patch is as fresh as the event that made it');
+  assert.ok(listingsAgeMs('236234') < 1000, 'and fresh on the clock the desk really reads');
   // Nothing cached is nothing to correct: the desk cannot manufacture an answer
   // for a card it never asked about, or for rows that are not rows.
   assert.equal(rememberListingRows('999999', rows), null);

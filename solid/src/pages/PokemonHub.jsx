@@ -1,6 +1,6 @@
 import { createMemo, createSignal, For, Match, onSettled, Repeat, Show, Switch, untrack } from 'solid-js';
 import { useParams } from '@solidjs/router';
-import { fetchExactNameCards } from '@market/api.js';
+import { fetchSpeciesCards } from '@market/api.js';
 import { pokedexNumber } from '@market/pokedex.js';
 import { pokemonGenerations, pokemonHref, speciesFromSlug } from '@market/pokemon-hubs.js';
 import { filterSearchCards } from '@market/search-filters.js';
@@ -52,7 +52,7 @@ function PokemonIndex(props) {
   );
 }
 
-/** Every printing of one species (exact-name search, kept to that National Dex number), in Pokédex order. */
+/** Every single of one species (the National Dex number's own list), in Pokédex order. */
 function SpeciesCards(props) {
   const species = untrack(() => props.species);
   const lang = untrack(() => props.lang);
@@ -62,7 +62,7 @@ function SpeciesCards(props) {
   const [error, setError] = createSignal('');
   const ready = () => cards() != null;
   let disposed = false;
-  fetchExactNameCards(species.name, { lang, limit: 96 })
+  fetchSpeciesCards(species.n, { name: species.name, lang })
     .then((rows) => {
       if (disposed) return;
       setCards(() => rows.filter((card) => pokedexNumber(card) === species.n));

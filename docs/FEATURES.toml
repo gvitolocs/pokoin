@@ -201,7 +201,7 @@ id = "listings-csv"
 name = "Seller bulk-imports a stock CSV and exports stock"
 money = true
 entry = ["solid/src/pages/SellSpreadsheet.jsx", "solid/src/pages/Inventory.jsx"]
-proof = ["pokoin-rust/crates/external/src/stock_csv.rs::csv_round_trip_and_detect"]
+proof = ["pokoin-rust/crates/external/src/stock_csv.rs::csv_round_trip_and_detect", "pokoin-rust/crates/external/src/powertools.rs::a_trailing_number_two_readings_can_mean", "pokoin-rust/crates/commerce/tests/stock_csv_location_flow.rs::an_apply_keeps_a_box_name_that_ends_in_a_number_whole"]
 status = "partial"
 
 [[flow]]
@@ -225,7 +225,7 @@ id = "zero-picks"
 name = "Seller picks copies out of a CardTrader Zero line"
 money = true
 entry = ["solid/src/pages/CardTraderZero.jsx", "solid/src/pages/ZeroPicked.jsx"]
-proof = ["pokoin-rust/crates/commerce/tests/zero_picks_flow.rs::picks_move_inventory_once_and_undo_reverses_them", "market/src/zero-pick.test.js"]
+proof = ["pokoin-rust/crates/commerce/tests/zero_picks_flow.rs::picks_move_inventory_once_and_undo_reverses_them", "market/src/zero-pick.test.js", "pokoin-rust/crates/external/src/cardtrader/zero.rs::power_tools_location_names_rank_in_the_slot_model"]
 status = "proved"
 
 [[flow]]
@@ -241,7 +241,7 @@ id = "cardtrader-connect"
 name = "Seller connects CardTrader; webhooks decrement stock and write sales"
 money = true
 entry = ["solid/src/pages/CardTraderZero.jsx", "solid/src/pages/SyncReview.jsx", "solid/src/components/profile/CardTraderPowerToolsModal.jsx", "solid/src/components/profile/CardTraderConnectPanel.jsx", "solid/src/components/BoxNameAsk.jsx", "market/src/api.js", "market/src/box-name.js"]
-proof = ["pokoin-rust/crates/external/src/cardtrader/integration.rs::connect_disconnect_status_cycle", "solid/src/pages/SyncReview.test.js", "solid/src/components/profile/cardtrader-power-tools.test.js", "market/src/box-name.test.js"]
+proof = ["pokoin-rust/crates/external/src/cardtrader/integration.rs::connect_disconnect_status_cycle", "solid/src/pages/SyncReview.test.js", "solid/src/components/profile/cardtrader-power-tools.test.js", "market/src/box-name.test.js", "pokoin-rust/crates/external/src/cardtrader/link.rs::detection_names_the_trailing_numbers_it_cannot_read", "pokoin-rust/crates/external/src/cardtrader/link.rs::an_import_would_have_to_guess_the_box_name", "pokoin-rust/crates/external/tests/router_smoke.rs::cardtrader_sync_refuses_an_unconfirmed_box_reading", "pokoin-rust/crates/external/tests/router_smoke.rs::cardtrader_sync_refusal_changes_nothing_at_all"]
 status = "partial"
 
 [[flow]]
@@ -374,10 +374,10 @@ status = "partial"
 
 [[flow]]
 id = "browse-pages"
-name = "Visitor browses sets, eras, expansions and artists"
+name = "Visitor browses sets, eras, expansions, artists and Pokémon species"
 money = false
-entry = ["solid/src/pages/Sets.jsx", "solid/src/pages/Era.jsx", "solid/src/pages/Expansion.jsx", "solid/src/pages/Artist.jsx"]
-proof = ["pokoin-rust/crates/catalog-api/tests/satellite_marketplace_flow.rs", "market/src/browse-pages.test.js"]
+entry = ["solid/src/pages/Sets.jsx", "solid/src/pages/Era.jsx", "solid/src/pages/Expansion.jsx", "solid/src/pages/Artist.jsx", "solid/src/pages/PokemonHub.jsx", "market/src/api.js"]
+proof = ["pokoin-rust/crates/catalog-api/tests/satellite_marketplace_flow.rs", "market/src/browse-pages.test.js", "market/src/species-cards.test.js", "solid/src/pages/PokemonHub.test.js", "pokoin-rust/apps/api/src/lists.rs::species_lists_hold_every_single_of_the_dex_number_and_serve_like_name_lists", "pokoin-rust/apps/api/src/lists.rs::a_kind_cannot_read_leaves_the_other_kinds_to_build", "pokoin-rust/apps/api/src/lists.rs::a_species_without_cards_stops_answering_and_a_failed_read_deletes_nothing"]
 status = "partial"
 
 [[flow]]
