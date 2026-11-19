@@ -796,6 +796,12 @@ fn place_written(collections: &mut Vec<Collection>, written: Collection) {
 /// Nothing is read again after the commit: the answer is the state the transaction
 /// read, with this write applied to it in memory, so a store that fails one call
 /// later cannot turn a write that did happen into an error the client would retry.
+///
+/// The two write forms are the two cases, not one form with a flag: a replace
+/// `update`s and a create `create`s, so the commit itself carries the precondition
+/// the read only checked — `exists` for the one, `!exists` for the other. A replace
+/// then cannot write a list back from nothing even if the store had answered the
+/// read differently from the commit.
 pub async fn apply_save(
     firestore: &Firestore,
     uid: &str,
@@ -841,7 +847,7 @@ pub async fn apply_save(
                     Some(document) => {
                         let id = document.id();
                         let reference = transaction.doc(&doc_path(&id));
-                        transaction.set(&reference, data, false)?;
+                        transaction.update(&reference, data)?;
                         id
                     }
                     None => {

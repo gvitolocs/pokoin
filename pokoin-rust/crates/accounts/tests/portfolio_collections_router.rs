@@ -1170,6 +1170,19 @@ fn commits(transport: &ScriptedTransport) -> usize {
     transport.requests_to(":commit").len()
 }
 
+/// The document writes of every commit the route sent, in the wire shape the store
+/// was handed: this fake does not enforce `currentDocument`, so the precondition a
+/// commit carries is only observable here.
+fn committed_writes(transport: &ScriptedTransport) -> Vec<Json> {
+    transport
+        .requests_to(":commit")
+        .iter()
+        .filter_map(|request| serde_json::from_slice::<Json>(&request.body).ok())
+        .flat_map(|body| body["writes"].as_array().cloned().unwrap_or_default())
+        .filter(|write| write.get("currentDocument").is_some())
+        .collect()
+}
+
 /// The list names a seller's store holds, whatever order they were written in.
 fn stored_names(store: &Arc<Mutex<Db>>) -> Vec<String> {
     let mut names: Vec<String> = store
@@ -1604,5 +1617,59 @@ async fn twenty_one_stored_lists_answer_the_twenty_oldest() {
         body["collections"].as_array().map(Vec::len),
         body["limits"]["collections"].as_u64().map(|n| n as usize),
         "the answer holds to the ceiling it publishes"
+    );
+}
+
+#[tokio::test]
+async fn a_replace_commits_an_update_and_a_new_list_a_create() {
+    // The read check refuses a replace of a list that is not there, which is the half
+    // a client can be told. The commit has to say it too: a `set` of an id would write
+    // that list back from nothing on a store that answers the read and the commit
+    // differently. This fake enforces no preconditions — a create mints a fresh id
+    // every attempt — so what is proven here is the wire the store was handed.
+    let (state, _store, transport) = store_state(vec![document(
+        "mine",
+        SELLER,
+        "Vault",
+        "2026-09-01T10:00:00Z",
+        vec![card("11", 3)],
+    )]);
+    let app = router(state);
+
+    let (status, body, _) = post(
+        &app,
+        "save",
+        json!({ "id": "mine", "name": "Vault", "items": [ { "cardId": "11", "quantity": 4 } ] }),
+        SELLER,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    let replaced = committed_writes(&transport);
+    assert_eq!(replaced.len(), 1, "body={body}");
+    assert_eq!(
+        replaced[0]["currentDocument"],
+        json!({ "exists": true }),
+        "a replace updates a document that is there: {body}"
+    );
+    assert!(
+        replaced[0].get("updateMask").is_none(),
+        "and it writes the whole document, not only the fields it names: {body}"
+    );
+
+    transport.clear_requests();
+    let (status, body, _) = post(
+        &app,
+        "save",
+        json!({ "name": "Second", "items": [ { "cardId": "12", "quantity": 1 } ] }),
+        SELLER,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    let created = committed_writes(&transport);
+    assert_eq!(created.len(), 1, "body={body}");
+    assert_eq!(
+        created[0]["currentDocument"],
+        json!({ "exists": false }),
+        "a new list is a create, so it cannot land on top of one already there"
     );
 }
