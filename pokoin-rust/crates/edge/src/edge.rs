@@ -77,6 +77,43 @@ const UNCACHEABLE_MS: u64 = 5 * 60 * 1000;
 /// shared caches were already allowed to serve while revalidating is good enough
 /// to serve once revalidating has failed.
 const STALE_IF_ERROR: Duration = Duration::from_secs(600);
+/// The catalogue read routes a stale copy may answer when the origin fails.
+/// Every other path passes its error through even when this cache holds a copy
+/// of it: outside the catalogue reads there is no last-good answer whose being
+/// a little stale beats knowing the request failed.
+///
+/// An entry without a trailing `/` is one exact pathname, not a prefix —
+/// `/api/marketplace-list` is the prebuilt-list BFF, while
+/// `/api/marketplace-listings` is a seller's own route and must not inherit the
+/// catalogue's copy. `/api/marketplace-home/` is a prefix: the homepage rails
+/// (`new-cards`, `best-sellers`, `spotlight`), one entry each.
+const STALE_ERROR_PATHS: [&str; 12] = [
+    "/api/marketplace-card-page",
+    "/api/marketplace-card-tiles",
+    "/api/marketplace-search-page",
+    "/api/marketplace-list",
+    "/api/marketplace-suggest",
+    "/api/marketplace-version-set",
+    "/api/marketplace-expansion-page",
+    "/api/marketplace-card-url",
+    "/api/marketplace-card-versions",
+    "/api/marketplace-card-sales",
+    "/api/marketplace-rails",
+    "/api/marketplace-home/",
+];
+
+/// Whether `pathname` is one of [`STALE_ERROR_PATHS`]. A personal request never
+/// gets this far: `cache_key` refuses `Authorization` and `Cookie`, so those are
+/// forwarded and their error stays their own.
+fn is_stale_error_path(pathname: &str) -> bool {
+    STALE_ERROR_PATHS.iter().any(|route| {
+        if route.ends_with('/') {
+            pathname.starts_with(route)
+        } else {
+            pathname == *route
+        }
+    })
+}
 const HOP_HEADERS: [&str; 5] = ["connection", "keep-alive", "transfer-encoding", "content-length", "date"];
 const SITEMAP_FILES: [&str; 4] = ["sitemap.xml", "sitemap-hubs.xml", "sitemap-pokemon.xml", "sitemap-sets.xml"];
 const ORIGIN_LABEL: &str = "rust";
@@ -529,7 +566,11 @@ impl Edge {
     /// errors rather than being slow. A copy past that is a copy about a page
     /// nobody has seen in ten minutes, and the error is the truer answer.
     /// Reading a copy leaves its `fresh_until` and `stale_until` as they were.
-    fn last_good(&self, key: &str) -> Option<Arc<CacheEntry>> {
+    /// Only a path in [`STALE_ERROR_PATHS`] is answered from a copy at all.
+    fn last_good(&self, pathname: &str, key: &str) -> Option<Arc<CacheEntry>> {
+        if !is_stale_error_path(pathname) {
+            return None;
+        }
         let mut cache = self.inner.cache.lock().unwrap_or_else(|e| e.into_inner());
         let entry = cache.get(key)?;
         let overdue = Instant::now().saturating_duration_since(entry.stale_until);
@@ -548,8 +589,8 @@ impl Edge {
     /// body): the last good copy if the cache holds one, `502`/`504` if it does
     /// not. Either way the flight is settled, so every follower is told the same
     /// thing this request was.
-    fn fail_flight(&self, flight: FlightGuard, status: StatusCode) -> Response {
-        match self.last_good(&flight.key) {
+    fn fail_flight(&self, pathname: &str, flight: FlightGuard, status: StatusCode) -> Response {
+        match self.last_good(pathname, &flight.key) {
             Some(entry) => {
                 flight.finish(Flight::StaleError(entry.clone()));
                 self.send_last_good(&entry)
@@ -609,7 +650,7 @@ impl Edge {
             // The leader answered the failing origin out of the cache; this
             // follower is the same request, so it gets the same copy.
             Flight::StaleError(entry) => self.send_last_good(&entry),
-            Flight::Failed(status) => match self.last_good(&key) {
+            Flight::Failed(status) => match self.last_good(pathname, &key) {
                 Some(entry) => self.send_last_good(&entry),
                 None => gateway_error(status),
             },
@@ -636,7 +677,7 @@ impl Edge {
         let req = with_uri(req, &target);
         let Ok(response) = tokio::time::timeout_at(deadline, self.inner.api.clone().oneshot(req)).await else {
             tracing::warn!(path = pathname, timeout_s = self.inner.cfg.flight_timeout.as_secs(), "edge flight timed out");
-            return self.fail_flight(flight, StatusCode::GATEWAY_TIMEOUT);
+            return self.fail_flight(pathname, flight, StatusCode::GATEWAY_TIMEOUT);
         };
         let response = response.unwrap_or_else(|never| match never {});
         let status = response.status();
@@ -656,10 +697,10 @@ impl Edge {
         let (parts, body) = response.into_parts();
         let body = match tokio::time::timeout_at(deadline, to_bytes(body, usize::MAX)).await {
             Ok(Ok(body)) => body,
-            Ok(Err(_)) => return self.fail_flight(flight, StatusCode::BAD_GATEWAY),
+            Ok(Err(_)) => return self.fail_flight(pathname, flight, StatusCode::BAD_GATEWAY),
             Err(_) => {
                 tracing::warn!(path = pathname, timeout_s = self.inner.cfg.flight_timeout.as_secs(), "edge flight body timed out");
-                return self.fail_flight(flight, StatusCode::GATEWAY_TIMEOUT);
+                return self.fail_flight(pathname, flight, StatusCode::GATEWAY_TIMEOUT);
             }
         };
         let mut headers = HeaderMap::new();
@@ -674,7 +715,7 @@ impl Edge {
             // 5xx: every waiting follower gets this answer; the next request
             // fetches again. The cache's last good copy answers instead when it
             // holds one, and this error is never stored.
-            if let Some(entry) = self.last_good(&flight.key) {
+            if let Some(entry) = self.last_good(pathname, &flight.key) {
                 flight.finish(Flight::StaleError(entry.clone()));
                 return self.send_last_good(&entry);
             }
@@ -1507,5 +1548,183 @@ mod tests {
             0,
             "nothing was served from a copy"
         );
+    }
+
+    /// The origin of [`sick_api`] for any number of paths: each answers one
+    /// cacheable 200, then refuses every later caller with a 503 after 50 ms, so
+    /// a follower has time to coalesce behind the fetch that failed.
+    fn flaky_api(paths: &[&'static str]) -> Router {
+        let hits: Arc<Vec<AtomicU64>> =
+            Arc::new((0..paths.len()).map(|_| AtomicU64::new(0)).collect());
+        let mut router = Router::new();
+        for (index, path) in paths.iter().copied().enumerate() {
+            let hits = hits.clone();
+            router = router.route(
+                path,
+                get(move || {
+                    let hits = hits.clone();
+                    async move {
+                        if hits[index].fetch_add(1, Ordering::SeqCst) > 0 {
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                            return (
+                                StatusCode::SERVICE_UNAVAILABLE,
+                                [
+                                    (header::CACHE_CONTROL, "no-store"),
+                                    (header::CONTENT_TYPE, "application/json"),
+                                ],
+                                "{\"error\":\"catalog query failed\"}".to_owned(),
+                            );
+                        }
+                        good_answer()
+                    }
+                }),
+            );
+        }
+        router
+    }
+
+    /// Requirement 2 of the list: a request that carries a credential is never
+    /// answered from a copy. The cache already refuses to key such a request
+    /// (`cache_key`), so it has no entry to answer with and the error stays the
+    /// client's own — while the same path without the credential is answered from
+    /// the copy, which proves the copy was there for the asking.
+    #[tokio::test]
+    async fn a_credentialled_request_is_never_answered_from_a_copy() {
+        let (list, search) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+        let dir = tempfile::tempdir().unwrap();
+        let edge = Edge::new(
+            config(dir.path().to_path_buf(), Duration::from_secs(30)),
+            sick_api(list, search),
+            Router::new(),
+        );
+        let get = |edge: &Edge, headers: &'static [(&'static str, &'static str)]| {
+            let edge = edge.clone();
+            async move { proxy(State(edge), req("GET", "/api/marketplace-list", headers)).await }
+        };
+        let warm = get(&edge, &[]).await;
+        assert_eq!(warm.headers()["x-pokoin-edge-cache"], "MISS");
+        drop(warm);
+        tokio::time::sleep(PAST_THE_WINDOW).await;
+        for (name, answer) in [
+            (
+                "Authorization",
+                get(&edge, &[("authorization", "Bearer token")]).await,
+            ),
+            ("Cookie", get(&edge, &[("cookie", "session_id=abc")]).await),
+        ] {
+            assert_eq!(
+                answer.status(),
+                StatusCode::SERVICE_UNAVAILABLE,
+                "the 503 reaches the client of a {name} request"
+            );
+            assert_eq!(answer.headers()["cache-control"], "no-store");
+            assert!(
+                answer.headers().get("x-pokoin-edge-cache").is_none(),
+                "a personal request is streamed, not served by the cache: {name}"
+            );
+        }
+        assert_eq!(
+            edge.inner.stats.stale_error.load(Ordering::Relaxed),
+            0,
+            "neither credentialled request touched a copy"
+        );
+        let shared = get(&edge, &[]).await;
+        assert_eq!(
+            shared.headers()["x-pokoin-edge-cache"],
+            "STALE-ERROR",
+            "the same entry, for a request that may have it"
+        );
+    }
+
+    /// Requirement 1: a path that is not in the list passes its error exactly as
+    /// it did before, however good the copy of it is. `/api/marketplace-listings`
+    /// is here on purpose: it is a seller's own route and shares its opening with
+    /// the listed `/api/marketplace-list`, so it pins that the list matches paths
+    /// and not prefixes.
+    #[tokio::test]
+    async fn a_path_off_the_list_keeps_its_own_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let edge = Edge::new(
+            config(dir.path().to_path_buf(), Duration::from_secs(30)),
+            flaky_api(&[
+                "/api/marketplace-listings",
+                "/api/other",
+                "/api/marketplace-card-page",
+            ]),
+            Router::new(),
+        );
+        let get = |edge: &Edge, path: &'static str| {
+            let edge = edge.clone();
+            async move { proxy(State(edge), req("GET", path, &[])).await }
+        };
+        let paths = [
+            "/api/marketplace-listings",
+            "/api/other",
+            "/api/marketplace-card-page",
+        ];
+        let mut labels: Vec<String> = Vec::new();
+        for path in paths {
+            let warm = get(&edge, path).await;
+            assert_eq!(warm.headers()["x-pokoin-edge-cache"], "MISS", "{path}");
+            drop(warm);
+        }
+        tokio::time::sleep(PAST_THE_WINDOW).await;
+        for path in [paths[0], paths[1]] {
+            let (leader, follower) = tokio::join!(get(&edge, path), get(&edge, path));
+            for answer in [leader, follower] {
+                assert_eq!(
+                    answer.status(),
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "the origin's 503, not a copy of {path}"
+                );
+                assert_eq!(answer.headers()["cache-control"], "no-store");
+                labels.push(
+                    answer.headers()["x-pokoin-edge-cache"]
+                        .to_str()
+                        .unwrap()
+                        .to_owned(),
+                );
+            }
+        }
+        assert!(
+            labels.iter().all(|l| l == "BYPASS" || l == "COALESCED"),
+            "labelled as today: {labels:?}"
+        );
+        assert_eq!(
+            edge.inner.stats.stale_error.load(Ordering::Relaxed),
+            0,
+            "nothing was answered from a copy: {labels:?}"
+        );
+        // The listed path, in the same state and beside these two, is answered.
+        let listed = get(&edge, "/api/marketplace-card-page").await;
+        assert_eq!(listed.status(), StatusCode::OK);
+        assert_eq!(
+            listed.headers()["x-pokoin-edge-cache"],
+            "STALE-ERROR",
+            "the list is what separates these paths"
+        );
+    }
+
+    /// The list as matched: an entry without a trailing `/` is one pathname, and
+    /// only `/api/marketplace-home/` reaches past its own spelling.
+    #[test]
+    fn the_list_matches_paths_and_only_home_is_a_prefix() {
+        for route in STALE_ERROR_PATHS {
+            assert!(is_stale_error_path(route), "{route} answers itself");
+        }
+        assert!(is_stale_error_path("/api/marketplace-home/new-cards"));
+        assert!(is_stale_error_path("/api/marketplace-home/best-sellers"));
+        assert!(is_stale_error_path("/api/marketplace-home/spotlight"));
+        for path in [
+            "/api/marketplace-listings",
+            "/api/marketplace-list/extra",
+            "/api/marketplace-home",
+            "/api/marketplace-live",
+            "/api/marketplace-orders",
+            "/api/other",
+            "/",
+        ] {
+            assert!(!is_stale_error_path(path), "{path} keeps its own error");
+        }
     }
 }
