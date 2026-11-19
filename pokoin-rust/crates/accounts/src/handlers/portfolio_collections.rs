@@ -22,7 +22,7 @@ use serde_json::Value as Json;
 
 use crate::domain::portfolio_collections::{
     answer_body, apply_save, collection_days, delete_body_id, delete_collection, last_day,
-    list_collections, set_blueprint, Collection, Rows, Save,
+    list_collections, set_blueprint, Book, Collection, Rows, Save,
 };
 use crate::domain::portfolio_history::{sold_price_book, utc_day_key_ms, SOLD_BY_BLUEPRINT_SQL};
 use crate::domain::portfolio_segments::{game_of, POKEMON};
@@ -337,9 +337,9 @@ async fn read_collection_book(market: &impl Market, rows: &mut Rows) -> PriceRea
 pub struct PriceRead {
     pub sold: Vec<Json>,
     /// A read this answer needed did not happen — no market database, a query that
-    /// failed, or one that ran out its window. There is then no series to draw at
-    /// all: the lists are still the seller's and still answered, with
-    /// [`SERIES_ERROR`] beside them.
+    /// failed, or one that ran out its window. There is then no series to draw *and*
+    /// no price to show, whatever part of the market did answer: [`price_body`] is
+    /// what makes that true, and the answer carries [`SERIES_ERROR`] beside the lists.
     pub unavailable: bool,
 }
 
@@ -364,6 +364,40 @@ impl PriceRead {
 /// reason to tell them their collection is gone.
 pub const SERIES_ERROR: &str = "prices_unavailable";
 
+/// The body of an answer, from the rows the read left behind and what it brought back.
+///
+/// A market that did not answer prices **nothing**, not the part of it that did. The
+/// other games fill their own sold rows beside a Pokémon read that failed, and a book
+/// out of those would give a Riftbound card its `pricePkn` while the answer says there
+/// is no series to draw: a number beside `seriesError` is a number the client is
+/// simultaneously told not to trust. So the book is empty too, every item comes back
+/// unpriced, and the one thing the answer is confident about is the seller's own lists.
+fn price_body(
+    rows: &Rows,
+    sold: &[Json],
+    collections: &[Collection],
+    today: &str,
+    unavailable: bool,
+    saved: Option<&str>,
+) -> Json {
+    let book = if unavailable {
+        Book::new()
+    } else {
+        sold_price_book(sold)
+    };
+    let days = if unavailable {
+        Vec::new()
+    } else {
+        collection_days(rows, &book, today)
+    };
+    let day = last_day(&days, today);
+    let mut body = answer_body(collections, rows, &book, &days, &day, saved);
+    if unavailable {
+        body["seriesError"] = Json::from(SERIES_ERROR);
+    }
+    body
+}
+
 /// The answer of every method of this route: the seller's lists, each card priced
 /// as of the last day of its series, and the series of every list. The lists are the
 /// ones the caller read — or, after a write, the ones its own transaction read with
@@ -386,21 +420,14 @@ async fn answer(
     let saved = saved.map(str::to_string);
     let body = tokio::task::spawn_blocking(move || {
         let PriceRead { sold, unavailable } = read;
-        let book = sold_price_book(&sold);
-        // A book that was not read prices nothing, and a line drawn beneath cards
-        // this request never saw would be a graph of the wrong thing: the series is
-        // left empty and the answer says why.
-        let days = if unavailable {
-            Vec::new()
-        } else {
-            collection_days(&rows, &book, &today)
-        };
-        let day = last_day(&days, &today);
-        let mut body = answer_body(&collections, &rows, &book, &days, &day, saved.as_deref());
-        if unavailable {
-            body["seriesError"] = Json::from(SERIES_ERROR);
-        }
-        body
+        price_body(
+            &rows,
+            &sold,
+            &collections,
+            &today,
+            unavailable,
+            saved.as_deref(),
+        )
     })
     .await
     .map_err(|error| {
@@ -679,6 +706,11 @@ mod tests {
                 sold.push(json!({
                     "game": "riftbound",
                     "blueprint_id": "1777",
+                    "condition": "NM",
+                    "language": "en",
+                    "reverse": false,
+                    "first_edition": false,
+                    "graded": false,
                     "observed_day": "2026-10-04",
                     "median_pkn": 40.0,
                 }));
@@ -687,8 +719,8 @@ mod tests {
     }
 
     /// One list holding a Pokémon card and a Riftbound card of the same public id.
-    fn a_pokemon_and_a_riftbound() -> Rows {
-        Rows::new(&[Collection {
+    fn a_pokemon_and_a_riftbound() -> Vec<Collection> {
+        vec![Collection {
             id: "a1".into(),
             name: "Vault".into(),
             items: vec![
@@ -697,7 +729,7 @@ mod tests {
             ],
             created_at: String::new(),
             updated_at: String::new(),
-        }])
+        }]
     }
 
     /// The catalog that says card 11 is blueprint 500.
@@ -734,7 +766,8 @@ mod tests {
             sold_rows: Some(vec![sold_row("500", 30.0)]),
             games: std::time::Duration::from_secs(4),
         };
-        let mut rows = a_pokemon_and_a_riftbound();
+        let collections = a_pokemon_and_a_riftbound();
+        let mut rows = Rows::new(&collections);
         let started = tokio::time::Instant::now();
         let read = read_collection_book(&market, &mut rows).await;
 
@@ -767,7 +800,8 @@ mod tests {
             sold_rows: Some(vec![sold_row("500", 30.0)]),
             games: std::time::Duration::from_secs(4),
         };
-        let mut rows = a_pokemon_and_a_riftbound();
+        let collections = a_pokemon_and_a_riftbound();
+        let mut rows = Rows::new(&collections);
         let started = tokio::time::Instant::now();
         let read = read_collection_book(&market, &mut rows).await;
 
@@ -797,7 +831,8 @@ mod tests {
             sold_rows: Some(Vec::new()),
             games: std::time::Duration::ZERO,
         };
-        let mut rows = a_pokemon_and_a_riftbound();
+        let collections = a_pokemon_and_a_riftbound();
+        let mut rows = Rows::new(&collections);
         let read = read_collection_book(&market, &mut rows).await;
 
         assert!(read.unavailable, "no market is a reason to say so");
@@ -806,6 +841,84 @@ mod tests {
         // built with, and no game's catalog corrected the other row.
         assert_eq!(rows.rows()[0]["blueprint_id"], json!(""), "{rows:?}");
         assert_eq!(rows.rows()[1]["blueprint_id"], json!(""), "{rows:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_market_that_answered_partly_prices_nothing() {
+        // The Pokémon sold book failed while the Riftbound database answered. The rows
+        // it brought back do price that card — they are its own game's sales — and an
+        // answer that says there is no series to draw may not also offer a number to
+        // read beside the sentence.
+        let market = FakeMarket {
+            configured: true,
+            blueprints: std::time::Duration::ZERO,
+            found: catalog_naming_11(),
+            sold: std::time::Duration::ZERO,
+            sold_rows: None,
+            games: std::time::Duration::ZERO,
+        };
+        let collections = a_pokemon_and_a_riftbound();
+        let mut rows = Rows::new(&collections);
+        let read = read_collection_book(&market, &mut rows).await;
+
+        assert!(
+            read.unavailable,
+            "a sold book that did not answer was reported as one that did"
+        );
+        // The games answered, and their sale is in the read: what must not happen is
+        // the *answer* pricing from a book that is half of the market.
+        assert_eq!(read.sold.len(), 1, "{:?}", read.sold);
+        let body = price_body(
+            &rows,
+            &read.sold,
+            &collections,
+            "2026-10-05",
+            read.unavailable,
+            None,
+        );
+        assert_eq!(body["seriesError"], json!(SERIES_ERROR), "{body}");
+        assert_eq!(body["days"], json!([]), "{body}");
+        let items = body["collections"][0]["items"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(items.len(), 2, "{body}");
+        for item in &items {
+            assert_eq!(
+                item["pricePkn"],
+                Json::Null,
+                "a price offered beside a reported seriesError: {item}"
+            );
+        }
+
+        // The control: this list and these rows are priceable, so the nulls above come
+        // from the failed half of the market and not from a fixture that could never
+        // have priced anything.
+        let market = FakeMarket {
+            sold_rows: Some(vec![sold_row("500", 30.0)]),
+            ..market
+        };
+        let mut rows = Rows::new(&collections);
+        let read = read_collection_book(&market, &mut rows).await;
+        let body = price_body(
+            &rows,
+            &read.sold,
+            &collections,
+            "2026-10-05",
+            read.unavailable,
+            None,
+        );
+        assert_eq!(body["seriesError"], Json::Null, "{body}");
+        let items = body["collections"][0]["items"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(items[0]["pricePkn"], json!(30), "{body}");
+        assert_eq!(items[1]["pricePkn"], json!(40), "{body}");
+        assert!(
+            body["days"].as_array().is_some_and(|days| !days.is_empty()),
+            "a market that answered draws a series: {body}"
+        );
     }
 
     #[tokio::test]

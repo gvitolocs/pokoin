@@ -157,6 +157,15 @@ fn card(id: &str, quantity: i64) -> Json {
     })
 }
 
+/// One card of one list, of a game other than Pokémon: the same map shape with its own
+/// `game`, which is the only thing that decides whose catalog prices it and whose sales
+/// its price comes out of.
+fn card_of(id: &str, quantity: i64, game: &str) -> Json {
+    let mut item = card(id, quantity);
+    item["mapValue"]["fields"]["game"]["stringValue"] = json!(game);
+    item
+}
+
 /// A Firestore whose answers come from what it was last told, so a save really is
 /// read back and a foreign document really is another seller's — and whose commits
 /// really do fail when the state a transaction read has moved, which is the only
@@ -1513,4 +1522,49 @@ async fn a_price_read_that_failed_answers_the_lists_and_says_the_series_is_missi
         json!("prices_unavailable"),
         "a committed save reports the outage it could not price around"
     );
+}
+
+#[tokio::test]
+async fn an_unanswered_market_leaves_every_card_of_a_two_game_list_unpriced() {
+    // The other games' sales are filed in the same book as the Pokémon's, so "the
+    // series is missing" and "this card is worth 40" are two halves of one answer that
+    // must never appear together. Through the route this is what a client must never
+    // see; which half of the market failed to keep it that way is the handler's test.
+    let (state, _store, _transport) = store_state(vec![document(
+        "mine",
+        SELLER,
+        "Vault",
+        "2026-09-01T10:00:00Z",
+        vec![card("11", 3), card_of("11", 1, "riftbound")],
+    )]);
+    let state = state.with_marketplace_db(Some(
+        pokoin_accounts::sql::MarketplaceDb::connect_lazy(
+            "postgres://pokoin:pokoin@127.0.0.1:1/pokoin_test",
+            1,
+        )
+        .expect("a lazy pool never connects"),
+    ));
+    let app = router(state);
+
+    let (status, body, _) = get(&app, Some(SELLER)).await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    assert_eq!(names_of(&body), ["Vault"], "the seller keeps their lists");
+    assert_eq!(
+        body["seriesError"],
+        json!("prices_unavailable"),
+        "body={body}"
+    );
+    assert_eq!(body["days"], Json::Array(Vec::new()), "body={body}");
+    let items = body["collections"][0]["items"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(items.len(), 2, "body={body}");
+    for item in &items {
+        assert_eq!(
+            item["pricePkn"],
+            Json::Null,
+            "a price beside a reported seriesError: {item}"
+        );
+    }
 }
