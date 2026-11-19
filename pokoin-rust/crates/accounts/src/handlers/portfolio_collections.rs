@@ -30,7 +30,7 @@ use crate::error::ApiError;
 use crate::sql::{row_text, SqlParam};
 use crate::state::DomainState;
 
-use super::portfolio::{numeric_id, price_other_games};
+use super::portfolio::{numeric_id, price_other_games, BoxFuture};
 use super::{json_cached, method_not_allowed, parse_body, require_claims};
 
 /// `ApiError` is wide, so the refusals of this route travel boxed, as
@@ -49,10 +49,11 @@ pub const POKEMON_BLUEPRINTS_SQL: &str = "\
 
 /// How long both Pokémon reads of one request may take **together** — the catalog that
 /// names each printing and the sold book that prices it. The other games are bounded by
-/// their own window inside [`price_other_games`], so this route cannot be held open
-/// longer than these two windows plus a Firestore round trip, whatever the market
-/// database is doing. A read that runs out leaves its cards held and unpriced and the
-/// answer saying so, never a request that waits forever.
+/// their own window inside [`price_other_games`] and are asked *beside* these two, never
+/// between them, so the whole market read of a request costs at most these eight seconds
+/// plus a Firestore round trip, whatever any card server is doing. A read that runs out
+/// leaves its cards held and unpriced and the answer saying so, never a request that
+/// waits forever.
 const POKEMON_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 
 /// A `?action=` that is not one of the two writes, or a write attempted with the
@@ -144,94 +145,188 @@ fn pokemon_card_ids(rows: &[Json]) -> Vec<i64> {
         .collect()
 }
 
-/// The sold rows for every collection of this seller, and the blueprints its rows
-/// are now priced by.
+/// The market this route prices from: the two Pokémon reads, and beside them every
+/// other game's own database.
 ///
-/// This is the whole market read of a request: the Pokémon catalog pass, every other
-/// game's own database through [`price_other_games`], then one sold query for the
-/// blueprints both confirmed — the same three steps, in the same order, as the main
-/// series. Both Pokémon reads share [`POKEMON_READ_TIMEOUT`], and the other games
-/// share theirs, so the wait this route can add to a request is bounded whatever the
-/// market is doing. The rows are returned as they were read: dropping the outliers
-/// and keying them into a book is arithmetic over everything the seller sold, and
-/// [`answer`] does it on the blocking pool with the series.
+/// The seam exists for the same reason [`super::portfolio::GamePriceSource`] does —
+/// see [`price_other_games`] — but it buys something here that no socket could:
+/// whether one game's slowness spends the Pokémon window is a fact about *this*
+/// schedule, and a test that waits on real seconds cannot tell it apart from a loaded
+/// machine. The market of a test spends virtual seconds on a paused clock and the
+/// window is measured exactly.
+pub(crate) trait Market: Send + Sync {
+    /// Is there a marketplace database to price Pokémon from at all? A deployment
+    /// without one has no price read to attempt, which the answer reports as
+    /// [`SERIES_ERROR`] rather than as a graph of nothing.
+    fn is_configured(&self) -> bool;
+
+    /// `card_id → blueprint_id` for these Pokémon public ids.
+    fn pokemon_blueprints(
+        &self,
+        card_ids: Vec<i64>,
+    ) -> BoxFuture<'_, std::result::Result<HashMap<String, String>, String>>;
+
+    /// The sold rows of these Pokémon blueprints.
+    fn pokemon_sold(
+        &self,
+        blueprints: Vec<i64>,
+    ) -> BoxFuture<'_, std::result::Result<Vec<Json>, String>>;
+
+    /// Every game but Pokémon, out of its own database: its catalog corrects its
+    /// rows' blueprints in place and its sold medians are added to `sold`. There is
+    /// no error to report — a game that did not answer leaves its cards held and
+    /// unpriced, which is what [`price_other_games`] already does for the main
+    /// series, on its own window.
+    fn other_games<'a>(
+        &'a self,
+        rows: &'a mut Vec<Json>,
+        sold: &'a mut Vec<Json>,
+    ) -> BoxFuture<'a, ()>;
+}
+
+/// The real market: the marketplace pool of this state for Pokémon, the per-game
+/// pools for the rest.
+struct DatabaseMarket<'a> {
+    state: &'a DomainState,
+}
+
+impl DatabaseMarket<'_> {
+    /// The pool, or the reason this deployment has none, as the market's own error.
+    fn pool(&self) -> std::result::Result<crate::sql::MarketplaceDb, String> {
+        self.state
+            .marketplace_db()
+            .map_err(|error| error.message().to_string())
+    }
+}
+
+impl Market for DatabaseMarket<'_> {
+    fn is_configured(&self) -> bool {
+        self.state.marketplace_db().is_ok()
+    }
+
+    fn pokemon_blueprints(
+        &self,
+        card_ids: Vec<i64>,
+    ) -> BoxFuture<'_, std::result::Result<HashMap<String, String>, String>> {
+        Box::pin(async move {
+            let found = self
+                .pool()?
+                .query_json(POKEMON_BLUEPRINTS_SQL, &[SqlParam::IntArray(card_ids)])
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(pokemon_blueprints(&found))
+        })
+    }
+
+    fn pokemon_sold(
+        &self,
+        blueprints: Vec<i64>,
+    ) -> BoxFuture<'_, std::result::Result<Vec<Json>, String>> {
+        Box::pin(async move {
+            self.pool()?
+                .query_json(SOLD_BY_BLUEPRINT_SQL, &[SqlParam::IntArray(blueprints)])
+                .await
+                .map_err(|error| error.to_string())
+        })
+    }
+
+    fn other_games<'a>(
+        &'a self,
+        rows: &'a mut Vec<Json>,
+        sold: &'a mut Vec<Json>,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(async move { price_other_games(self.state, rows, sold).await })
+    }
+}
+
+/// The sold rows of this seller's cards, and the blueprints its rows are now priced
+/// by.
+///
+/// This is the whole market read of a request: the Pokémon catalog pass and the sold
+/// book that prices it, with every other game's own database through
+/// [`price_other_games`] beside both — the same three steps as the main series, run
+/// against each other. [`POKEMON_READ_TIMEOUT`] bounds the two Pokémon queries
+/// together and the other games share their own window, so the wait this route can
+/// add to a request is eight seconds whatever the market is doing. The rows are
+/// returned as they were read: dropping the outliers and keying them into a book is
+/// arithmetic over everything the seller sold, and the answer does it on the blocking
+/// pool with the series.
 ///
 /// A read that fails leaves its cards **held and unpriced** rather than failing the
 /// request: the lists themselves are Firestore data, and a graph that cannot price a
 /// card still shows the card. What it cannot do is pretend the series it then draws
 /// is the seller's worth, so a failed read is reported to the answer as well as the
 /// log.
-async fn read_collection_book(state: &DomainState, rows: &mut Rows) -> PriceRead {
+async fn read_collection_book(market: &impl Market, rows: &mut Rows) -> PriceRead {
     if rows.rows().is_empty() {
         return PriceRead::complete(Vec::new());
     }
-    let Ok(db) = state.marketplace_db() else {
+    if !market.is_configured() {
         tracing::warn!("portfolio collections have no marketplace database to price from");
         return PriceRead::unavailable();
-    };
+    }
     let deadline = tokio::time::Instant::now() + POKEMON_READ_TIMEOUT;
-    let mut unavailable = false;
+    let mut sold: Vec<Json> = Vec::new();
 
+    // The two Pokémon reads back to back on one window, and the other games beside
+    // them on their own. The halves share nothing to write: the sold query is asked
+    // for the blueprints this window's own catalog named, and a game corrects only the
+    // rows of its own game. Asked in sequence instead — or with the second Pokémon
+    // read waiting on the games the way a join that finishes both does — a game that
+    // spent its whole window took part of the Pokémon one with it and expired a market
+    // that had answered in time.
     let ids = pokemon_card_ids(rows.rows());
-    let mut by_card = HashMap::new();
-    if !ids.is_empty() {
-        let read = tokio::time::timeout_at(
-            deadline,
-            db.query_json(POKEMON_BLUEPRINTS_SQL, &[SqlParam::IntArray(ids)]),
-        )
-        .await;
-        match read {
-            Ok(Ok(found)) => by_card = pokemon_blueprints(&found),
+    let pokemon = async {
+        let by_card = match tokio::time::timeout_at(deadline, market.pokemon_blueprints(ids)).await
+        {
+            Ok(Ok(found)) => found,
             Ok(Err(error)) => {
                 tracing::warn!(
                     %error,
                     "collection blueprints are unavailable; those cards stay unpriced"
                 );
-                unavailable = true;
+                return (HashMap::new(), Vec::new(), true);
             }
             Err(_elapsed) => {
                 tracing::warn!("collection blueprints timed out; those cards stay unpriced");
-                unavailable = true;
+                return (HashMap::new(), Vec::new(), true);
             }
-        }
-    }
-    apply_pokemon_blueprints(rows.rows_mut(), &by_card);
-
-    // The other games next: their rows are only priceable once their own catalog
-    // has confirmed a blueprint, and the sold query below reads Pokémon's.
-    let mut sold: Vec<Json> = Vec::new();
-    price_other_games(state, rows.rows_mut(), &mut sold).await;
-
-    let blueprints = rows
-        .rows()
-        .iter()
-        .filter(|row| game_of(row) == POKEMON)
-        .filter_map(|row| numeric_id(&row_text(row, "blueprint_id")))
-        .collect::<BTreeSet<i64>>();
-    if !blueprints.is_empty() {
-        let read = tokio::time::timeout_at(
-            deadline,
-            db.query_json(
-                SOLD_BY_BLUEPRINT_SQL,
-                &[SqlParam::IntArray(blueprints.into_iter().collect())],
-            ),
-        )
-        .await;
+        };
+        // The blueprints the catalog named, not the ones the rows will carry once the
+        // games have had them: a Riftbound blueprint id has no business in a Pokémon
+        // sold query.
+        let blueprints = by_card
+            .values()
+            .filter_map(|blueprint| numeric_id(blueprint))
+            .collect::<BTreeSet<i64>>();
+        let read = if blueprints.is_empty() {
+            Ok(Ok(Vec::new()))
+        } else {
+            tokio::time::timeout_at(
+                deadline,
+                market.pokemon_sold(blueprints.into_iter().collect()),
+            )
+            .await
+        };
         match read {
-            Ok(Ok(found)) => sold.extend(found),
+            Ok(Ok(found)) => (by_card, found, false),
             Ok(Err(error)) => {
                 tracing::warn!(
                     %error,
                     "collection sold prices are unavailable; those cards stay unpriced"
                 );
-                unavailable = true;
+                (by_card, Vec::new(), true)
             }
             Err(_elapsed) => {
                 tracing::warn!("collection sold prices timed out; those cards stay unpriced");
-                unavailable = true;
+                (by_card, Vec::new(), true)
             }
         }
-    }
+    };
+    let ((by_card, pokemon_sold, unavailable), ()) =
+        tokio::join!(pokemon, market.other_games(rows.rows_mut(), &mut sold));
+    apply_pokemon_blueprints(rows.rows_mut(), &by_card);
+    sold.extend(pokemon_sold);
     PriceRead { sold, unavailable }
 }
 
@@ -285,7 +380,7 @@ async fn answer(
     saved: Option<&str>,
 ) -> Result<Response> {
     let mut rows = Rows::new(collections);
-    let read = read_collection_book(state, &mut rows).await;
+    let read = read_collection_book(&DatabaseMarket { state }, &mut rows).await;
     let today = utc_day_key_ms(state.clock().now().timestamp_millis());
     let collections = collections.to_vec();
     let saved = saved.map(str::to_string);
@@ -522,6 +617,195 @@ mod tests {
             vec![11, 12],
             "the Pokémon catalog is asked for both of its cards and not for the third"
         );
+    }
+
+    /// A market that spends virtual time and answers what the test says, so a window
+    /// is measured exactly instead of bounded from two sides. `None` is a read that
+    /// fails; the durations are what each of its three parts costs.
+    struct FakeMarket {
+        /// Is there a marketplace database to price Pokémon from at all?
+        configured: bool,
+        blueprints: std::time::Duration,
+        found: Option<HashMap<String, String>>,
+        sold: std::time::Duration,
+        sold_rows: Option<Vec<Json>>,
+        /// What the other games take between them, which is the work of their own
+        /// window and none of this route's.
+        games: std::time::Duration,
+    }
+
+    impl Market for FakeMarket {
+        fn is_configured(&self) -> bool {
+            self.configured
+        }
+
+        fn pokemon_blueprints(
+            &self,
+            _card_ids: Vec<i64>,
+        ) -> BoxFuture<'_, std::result::Result<HashMap<String, String>, String>> {
+            let (spent, found) = (self.blueprints, self.found.clone());
+            Box::pin(async move {
+                tokio::time::sleep(spent).await;
+                found.ok_or_else(|| "the catalog did not answer".to_string())
+            })
+        }
+
+        fn pokemon_sold(
+            &self,
+            _blueprints: Vec<i64>,
+        ) -> BoxFuture<'_, std::result::Result<Vec<Json>, String>> {
+            let (spent, rows) = (self.sold, self.sold_rows.clone());
+            Box::pin(async move {
+                tokio::time::sleep(spent).await;
+                rows.ok_or_else(|| "the sold book did not answer".to_string())
+            })
+        }
+
+        /// Every non-Pokémon row of these rows names one blueprint of its own and
+        /// brings one sale with it, which is what the real games' catalogs answer.
+        fn other_games<'a>(
+            &'a self,
+            rows: &'a mut Vec<Json>,
+            sold: &'a mut Vec<Json>,
+        ) -> BoxFuture<'a, ()> {
+            let spent = self.games;
+            Box::pin(async move {
+                tokio::time::sleep(spent).await;
+                for row in rows.iter_mut() {
+                    if game_of(row) != POKEMON {
+                        set_blueprint(row, "1777");
+                    }
+                }
+                sold.push(json!({
+                    "game": "riftbound",
+                    "blueprint_id": "1777",
+                    "observed_day": "2026-10-04",
+                    "median_pkn": 40.0,
+                }));
+            })
+        }
+    }
+
+    /// One list holding a Pokémon card and a Riftbound card of the same public id.
+    fn a_pokemon_and_a_riftbound() -> Rows {
+        Rows::new(&[Collection {
+            id: "a1".into(),
+            name: "Vault".into(),
+            items: vec![
+                item(json!({ "cardId": "11" })),
+                item(json!({ "cardId": "11", "game": "riftbound" })),
+            ],
+            created_at: String::new(),
+            updated_at: String::new(),
+        }])
+    }
+
+    /// The catalog that says card 11 is blueprint 500.
+    fn catalog_naming_11() -> Option<HashMap<String, String>> {
+        Some(
+            [("11".to_string(), "500".to_string())]
+                .into_iter()
+                .collect(),
+        )
+    }
+
+    /// One sold print of a blueprint, in the shape of the sold query's answer.
+    fn sold_row(blueprint: &str, median: f64) -> Json {
+        json!({
+            "game": "pokemon", "card_id": "11", "blueprint_id": blueprint,
+            "condition": "NM", "language": "en", "reverse": false,
+            "first_edition": false, "graded": false,
+            "observed_day": "2026-10-04", "median_pkn": median,
+        })
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_game_that_spends_its_window_leaves_the_pokemon_window_whole() {
+        // The scheduling finding, tested rather than argued. Asked *between* the two
+        // Pokémon reads, a game that used all four of its seconds spent four of the
+        // Pokémon eight as well, and a market that answered both its queries in three
+        // seconds each was reported as one that had failed. Asked beside them it
+        // costs the Pokémon reads nothing they had not already been given.
+        let market = FakeMarket {
+            configured: true,
+            blueprints: std::time::Duration::from_secs(3),
+            found: catalog_naming_11(),
+            sold: std::time::Duration::from_secs(3),
+            sold_rows: Some(vec![sold_row("500", 30.0)]),
+            games: std::time::Duration::from_secs(4),
+        };
+        let mut rows = a_pokemon_and_a_riftbound();
+        let started = tokio::time::Instant::now();
+        let read = read_collection_book(&market, &mut rows).await;
+
+        assert_eq!(
+            started.elapsed(),
+            std::time::Duration::from_secs(6),
+            "the other games ran between the two Pokémon reads instead of beside them"
+        );
+        assert!(
+            !read.unavailable,
+            "a market that answered both its reads is reported as one that failed"
+        );
+        assert_eq!(rows.rows()[0]["blueprint_id"], json!("500"), "{rows:?}");
+        assert_eq!(rows.rows()[1]["blueprint_id"], json!("1777"), "{rows:?}");
+        assert_eq!(read.sold.len(), 2, "{:?}", read.sold);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn both_pokemon_reads_share_the_one_window() {
+        // Five seconds each is ten seconds of a market that never failed, and the
+        // window this route gives a request is eight: the second read is cut at the
+        // deadline rather than carrying the request past it. The other games spend
+        // their whole four seconds beside that, so the worst case of the read — which
+        // was twelve when they ran between the two queries — is the window itself.
+        let market = FakeMarket {
+            configured: true,
+            blueprints: std::time::Duration::from_secs(5),
+            found: catalog_naming_11(),
+            sold: std::time::Duration::from_secs(5),
+            sold_rows: Some(vec![sold_row("500", 30.0)]),
+            games: std::time::Duration::from_secs(4),
+        };
+        let mut rows = a_pokemon_and_a_riftbound();
+        let started = tokio::time::Instant::now();
+        let read = read_collection_book(&market, &mut rows).await;
+
+        assert_eq!(
+            started.elapsed(),
+            POKEMON_READ_TIMEOUT,
+            "the read outlived the window it was given"
+        );
+        assert!(
+            read.unavailable,
+            "a read cut at its deadline answered as though it had completed"
+        );
+        // The games still answered on their own: their rows are corrected and their
+        // sales are in the read, which is why the answer must not price from a book
+        // whose Pokémon half never arrived.
+        assert_eq!(rows.rows()[1]["blueprint_id"], json!("1777"), "{rows:?}");
+        assert_eq!(read.sold.len(), 1, "{:?}", read.sold);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_deployment_without_a_market_is_said_so_before_anything_is_asked() {
+        let market = FakeMarket {
+            configured: false,
+            blueprints: std::time::Duration::ZERO,
+            found: catalog_naming_11(),
+            sold: std::time::Duration::ZERO,
+            sold_rows: Some(Vec::new()),
+            games: std::time::Duration::ZERO,
+        };
+        let mut rows = a_pokemon_and_a_riftbound();
+        let read = read_collection_book(&market, &mut rows).await;
+
+        assert!(read.unavailable, "no market is a reason to say so");
+        assert!(read.sold.is_empty(), "{:?}", read.sold);
+        // Nothing was asked of it: the Pokémon row keeps the empty blueprint it was
+        // built with, and no game's catalog corrected the other row.
+        assert_eq!(rows.rows()[0]["blueprint_id"], json!(""), "{rows:?}");
+        assert_eq!(rows.rows()[1]["blueprint_id"], json!(""), "{rows:?}");
     }
 
     #[tokio::test]
