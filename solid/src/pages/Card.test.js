@@ -52,6 +52,11 @@ test('the desk language list follows the printing nationality', () => {
   assert.doesNotMatch(page, /\[\.\.\.listedDealLangs\(\), shownLang/);
 });
 
+test('the desk asks its languages of the game it shows, not of Pokémon alone', () => {
+  assert.match(page, /return deskLanguageChoice\(\{\n\s*game: deskGame,/);
+  assert.match(page, /return deskLanguageChips\(\{\n\s*game: deskGame,/);
+});
+
 test('the gold sparkles swap the desk scan to the verified reverse holo and back', () => {
   assert.match(page, /const reverseScan = createMemo\(\(\) => reverseScanUrl\(card\(\)\)\)/);
   // The toggle is keyed by card id: the next desk opens on its regular scan.
