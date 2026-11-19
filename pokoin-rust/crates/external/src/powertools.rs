@@ -785,6 +785,120 @@ pub fn parse_power_tools_location(raw: &str, location_parse: &str) -> (String, i
     (text, 1, 1, false)
 }
 
+/// The explicit dash form `NAME - 16`: the seller wrote the stack number
+/// apart from the name, so the reading is not a guess.
+pub fn dash_stack_location(text: &str) -> Option<(String, i64)> {
+    static DASH: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let dash = DASH.get_or_init(|| Regex::new(r"^(.+?)\s+-\s+(\d+)$").expect("dash regex"));
+    let captures = dash.captures(text)?;
+    let box_name = clean_text(
+        Some(captures.get(1).map(|m| m.as_str()).unwrap_or_default()),
+        64,
+    );
+    let stack = captures
+        .get(2)
+        .map(|m| m.as_str())
+        .and_then(|digits| digits.parse::<i64>().ok())
+        .unwrap_or(1)
+        .clamp(1, 9999);
+    Some((box_name, stack))
+}
+
+/// One location value whose trailing digits could be a stack number or could
+/// be part of the box name, kept with both readings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AmbiguousLocation {
+    pub raw: String,
+    pub as_box: String,
+    pub box_name: String,
+    pub stack: i64,
+}
+
+impl AmbiguousLocation {
+    pub fn to_json(&self) -> Value {
+        json!({
+            "raw": self.raw,
+            "asBox": self.as_box,
+            "asStack": { "box": self.box_name, "stack": self.stack },
+        })
+    }
+}
+
+/// The one definition of the ambiguity every location parser and detector
+/// shares. `text` is the value as the caller already cleaned it. It is
+/// ambiguous when the text carries no `·`/`•`/`#`, is not the explicit dash
+/// form, and ends in a space or underscore plus digits with at least one ASCII
+/// letter in front: `Focobomba 006` is the box `Focobomba` stack 6 just as much
+/// as it is the box `Focobomba 006`, and the text cannot say which.
+pub fn ambiguous_location(text: &str) -> Option<AmbiguousLocation> {
+    if text.is_empty() || text.contains(['·', '•', '#']) {
+        return None;
+    }
+    if dash_stack_location(text).is_some() {
+        return None;
+    }
+    static TRAILING: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let trailing =
+        TRAILING.get_or_init(|| Regex::new(r"^(.+?)[\s_]+(\d+)$").expect("trailing number regex"));
+    let captures = trailing.captures(text)?;
+    let head = captures.get(1).map(|m| m.as_str()).unwrap_or_default();
+    if !head.chars().any(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    Some(AmbiguousLocation {
+        raw: text.to_string(),
+        as_box: text.to_string(),
+        box_name: clean_text(Some(head), 64),
+        stack: captures
+            .get(2)
+            .map(|m| m.as_str())
+            .and_then(|digits| digits.parse::<i64>().ok())
+            .unwrap_or(1)
+            .clamp(1, 9999),
+    })
+}
+
+/// The three fields every location-style detection reports beside the mode it
+/// picked: how many of the values are ambiguous, up to three distinct ones with
+/// both readings, and whether the seller must be asked before anything is read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocationAmbiguity {
+    pub count: i64,
+    pub examples: Vec<AmbiguousLocation>,
+    pub confirmation_needed: bool,
+}
+
+/// [`LocationAmbiguity`] over values the caller has already cleaned, in the
+/// order they arrived.
+pub fn location_ambiguity(clean_texts: &[String]) -> LocationAmbiguity {
+    const MAX_EXAMPLES: usize = 3;
+    let mut count = 0i64;
+    let mut examples: Vec<AmbiguousLocation> = Vec::new();
+    for text in clean_texts {
+        let Some(found) = ambiguous_location(text) else {
+            continue;
+        };
+        count += 1;
+        if examples.len() < MAX_EXAMPLES && !examples.iter().any(|kept| kept.raw == found.raw) {
+            examples.push(found);
+        }
+    }
+    LocationAmbiguity {
+        count,
+        confirmation_needed: count > 0,
+        examples,
+    }
+}
+
+impl LocationAmbiguity {
+    pub fn examples_json(&self) -> Vec<Value> {
+        self.examples
+            .iter()
+            .map(AmbiguousLocation::to_json)
+            .collect()
+    }
+}
+
 /// `formatListingLocation` for Power Tools rows.
 pub fn format_listing_location(box_name: &str, stack: i64, position: i64, stack_size: i64, numbered_in_stack: bool, include_stack: bool) -> String {
     let loc = clean_text(Some(box_name), 64);
@@ -1124,6 +1238,87 @@ mod tests {
         assert_eq!(stack, 2);
         assert_eq!(position, 5);
         assert!(structured);
+        // A chosen mode still splits an ambiguous value, guess-free.
+        let (box_name, stack, _, _) = parse_power_tools_location("Focobomba 006", "trailing_stack");
+        assert_eq!((box_name.as_str(), stack), ("Focobomba", 6));
+        let (box_name, stack, _, _) = parse_power_tools_location("Focobomba 006", "as_is");
+        assert_eq!((box_name.as_str(), stack), ("Focobomba 006", 1));
+    }
+
+    #[test]
+    fn a_trailing_number_two_readings_can_mean() {
+        // The one table every location reader is proved against.
+        let table: Value =
+            serde_json::from_str(include_str!("fixtures/location_style_cases.json")).unwrap();
+        for case in table["cases"].as_array().unwrap() {
+            let text = case["raw"].as_str().unwrap();
+            let Some(found) = ambiguous_location(text) else {
+                assert!(
+                    !case["ambiguous"].as_bool().unwrap(),
+                    "{text:?} reads as ambiguous"
+                );
+                continue;
+            };
+            assert!(
+                case["ambiguous"].as_bool().unwrap(),
+                "{text:?} should not be ambiguous"
+            );
+            assert_eq!(found.as_box, case["asBox"].as_str().unwrap(), "{text:?}");
+            assert_eq!(
+                found.box_name,
+                case["asStack"]["box"].as_str().unwrap(),
+                "{text:?}"
+            );
+            assert_eq!(
+                found.stack,
+                case["asStack"]["stack"].as_i64().unwrap(),
+                "{text:?}"
+            );
+        }
+
+        assert_eq!(
+            ambiguous_location("Focobomba 006").map(|found| (
+                found.raw,
+                found.as_box,
+                found.box_name,
+                found.stack
+            )),
+            Some((
+                "Focobomba 006".to_string(),
+                "Focobomba 006".to_string(),
+                "Focobomba".to_string(),
+                6
+            ))
+        );
+        assert_eq!(
+            dash_stack_location("BOX 001 - 131"),
+            Some(("BOX 001".to_string(), 131))
+        );
+        assert_eq!(dash_stack_location("Focobomba 006"), None);
+
+        let texts = [
+            "Focobomba 006",
+            "Focobomba 007",
+            "FUOCOBOMBA 006 - 16",
+            "Focobomba 006",
+        ]
+        .iter()
+        .map(|value| value.to_string())
+        .collect::<Vec<String>>();
+        let ambiguity = location_ambiguity(&texts);
+        assert_eq!(
+            ambiguity.count, 3,
+            "every ambiguous value counts, repeats included"
+        );
+        assert!(ambiguity.confirmation_needed);
+        assert_eq!(
+            ambiguity.examples_json(),
+            vec![
+                json!({ "raw": "Focobomba 006", "asBox": "Focobomba 006", "asStack": { "box": "Focobomba", "stack": 6 } }),
+                json!({ "raw": "Focobomba 007", "asBox": "Focobomba 007", "asStack": { "box": "Focobomba", "stack": 7 } }),
+            ],
+            "distinct examples only"
+        );
     }
 
     #[test]

@@ -1,0 +1,41 @@
+{
+  "_comment": "One table of location values for every location-style detector (external/cardtrader/link.rs, external/src/stock_csv.rs, commerce/src/domain/stock_csv.rs), so the copies cannot drift. ambiguous is what the rule says; asBox and asStack are the two readings of an ambiguous value.",
+  "cases": [
+    { "raw": "Focobomba 006", "ambiguous": true, "asBox": "Focobomba 006", "asStack": { "box": "Focobomba", "stack": 6 } },
+    { "raw": "Focobomba 007", "ambiguous": true, "asBox": "Focobomba 007", "asStack": { "box": "Focobomba", "stack": 7 } },
+    { "raw": "Focobomba_006", "ambiguous": true, "asBox": "Focobomba_006", "asStack": { "box": "Focobomba", "stack": 6 } },
+    { "raw": "Binder A 3", "ambiguous": true, "asBox": "Binder A 3", "asStack": { "box": "Binder A", "stack": 3 } },
+    { "raw": "FUOCOBOMBA 006 - 16", "ambiguous": false },
+    { "raw": "BOX 001 - 131", "ambiguous": false },
+    { "raw": "box·2", "ambiguous": false },
+    { "raw": "box·2·5", "ambiguous": false },
+    { "raw": "FUOCOBOMBA #16", "ambiguous": false },
+    { "raw": "A1", "ambiguous": false },
+    { "raw": "Loose", "ambiguous": false },
+    { "raw": "12", "ambiguous": false },
+    { "raw": "Box-12", "ambiguous": false },
+    { "raw": "2 stacks", "ambiguous": false }
+  ],
+  "ambiguousList": ["Focobomba 006", "Focobomba 007", "FUOCOBOMBA 006 - 16"],
+  "ambiguousListDetection": {
+    "locationParse": "trailing_stack",
+    "ambiguousCount": 2,
+    "confirmationNeeded": true,
+    "ambiguousExamples": [
+      { "raw": "Focobomba 006", "asBox": "Focobomba 006", "asStack": { "box": "Focobomba", "stack": 6 } },
+      { "raw": "Focobomba 007", "asBox": "Focobomba 007", "asStack": { "box": "Focobomba", "stack": 7 } }
+    ]
+  },
+  "dashOnly": ["FUOCOBOMBA 006 - 16", "FUOCOBOMBA 007 - 12"],
+  "structuredOnly": ["box·2", "box·3"],
+  "refusalOfAmbiguousList": {
+    "error": "location_style_unconfirmed",
+    "message": "Choose how to read locations that end in a number.",
+    "locationParse": "trailing_stack",
+    "ambiguousCount": 2,
+    "ambiguousExamples": [
+      { "raw": "Focobomba 006", "asBox": "Focobomba 006", "asStack": { "box": "Focobomba", "stack": 6 } },
+      { "raw": "Focobomba 007", "asBox": "Focobomba 007", "asStack": { "box": "Focobomba", "stack": 7 } }
+    ]
+  }
+}
