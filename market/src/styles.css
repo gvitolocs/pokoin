@@ -5204,11 +5204,67 @@ html:root:root .card-page.flutter-page .card-desk .desk-cell {
   cursor: pointer;
 }
 
-.lang-redirect-go {
+/* The filled action of a dialog card: one look for every dialog, and it is always
+   the safe answer — go to the language, or keep the box name as typed. */
+.lang-redirect-go,
+.box-name-ask-keep {
   background: #f5c518 !important;
   color: #1a1408 !important;
   border-color: transparent !important;
 }
+
+/* The "New box …?" question over the field the seller is typing in. */
+.box-name-ask {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.55);
+}
+
+.box-name-ask-card {
+  width: min(28rem, calc(100vw - 2rem));
+  background: #16141c;
+  border: 1px solid var(--g5);
+  border-radius: 16px;
+  padding: 1.1rem 1.15rem 1rem;
+  display: grid;
+  gap: 0.5rem;
+  color: #f4f1ea;
+}
+
+.box-name-ask-card p { margin: 0; }
+
+.box-name-ask-title { font-weight: 700; }
+
+.box-name-ask-note {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.box-name-ask-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+
+.box-name-ask-actions button {
+  border-radius: 10px;
+  border: 1px solid var(--g5);
+  background: transparent;
+  color: inherit;
+  padding: 0.45rem 0.75rem;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* The split is the answer that changes something, so it stays the outlined
+   secondary above inherits — never the filled one, which nudges the seller. */
+
 .sell-options-row .foil-pick { width: 7.4rem; }
 
 .sell-field input,
