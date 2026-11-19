@@ -458,6 +458,58 @@ export async function fetchExactNameCards(name, {
   return collected;
 }
 
+/**
+ * Every single of one species, chosen by National Dex number: the `kind=species`
+ * snapshot (Rust `build_species`), which holds the printings an exact-name read
+ * cannot — a hub titled "All Giratina" is 25 cards named "Giratina" and 86 cards
+ * of dex 487 (Giratina V, VSTAR, EX, LV.X, the Lv. printings). The builder stores
+ * the whole list under one key, so this one response is the complete species:
+ * nothing here is cut at a page size.
+ *
+ * Rows are the same objects a `name` list carries, so `cardFromCatalogRow` reads
+ * both. The hub answers with the UNION of the species list and the exact-name
+ * result (species rows first, de-duplicated by card id), never with the species
+ * list alone: a species snapshot is only as good as the last nightly build, so a
+ * stale or partial one must not hide cards the old path showed, and a single
+ * whose dex column is 0 or the sentinel never reaches a species list at all but
+ * does reach a name one. Both reads run at once; one that fails or is missing
+ * contributes nothing and the other answers alone, and both failing is exactly
+ * today's failed name read.
+ */
+export async function fetchSpeciesCards(dex, { name = '', lang, signal } = {}) {
+  const number = Number(dex);
+  // Species snapshots are English titles, like the `name` lists; a page in
+  // another title language keeps the localized live search.
+  const speciesRead = Number.isInteger(number) && number > 0 && (!lang || lang === 'en')
+    ? fetchListSnapshot('species', String(number), { signal })
+    : Promise.resolve(null);
+  // The name path keeps its own paging; its rejection is carried, not swallowed,
+  // so it can still fail the page when the species list has nothing to give.
+  const nameRead = fetchExactNameCards(name, { lang, signal })
+    .then((cards) => ({ cards }), (error) => ({ error }));
+  const [snapshot, named] = await Promise.all([speciesRead, nameRead]);
+  const speciesCards = (Array.isArray(snapshot?.cards) ? snapshot.cards : [])
+    .map(cardFromCatalogRow)
+    .filter((card) => card.id);
+  if (named.error) {
+    if (speciesCards.length) {
+      return speciesCards;
+    }
+    throw named.error;
+  }
+  const seen = new Set();
+  const cards = [];
+  for (const card of speciesCards.concat(named.cards)) {
+    const id = String(card.id);
+    if (seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    cards.push(card);
+  }
+  return cards;
+}
+
 /** SQL-backed candidate pool for ambiguous early set prefixes. The endpoint's
  * 1,000-row bound keeps hydration finite; the shared scorer chooses the popup. */
 export const fetchNamePrintings = createNamePrintingsFetcher({
@@ -1803,8 +1855,8 @@ function mergeExpansionPayload(base, page) {
 }
 
 /** The URL of a prebuilt list snapshot, or '' without a key.
- * `dictId` appends `&dict=` for set, artist and name. Seller books have no
- * dcb copy, so a dict id on `kind=seller` is ignored. */
+ * `dictId` appends `&dict=` for set, artist, name and species. Seller books
+ * have no dcb copy, so a dict id on `kind=seller` is ignored. */
 export function listSnapshotPath(kind, key, dictId = '') {
   const k = String(key || '').trim().toLowerCase();
   if (!k) return '';
@@ -1847,9 +1899,9 @@ export async function readSnapshotUrls(urls, read) {
 }
 
 /**
- * Prebuilt list snapshot (`kind` set, artist or name): the whole desk with
- * prices, built on nezopt every 15 min / daily and served from one key read as
- * c1 format 2 (template columns; a snapshot built before format 2 answers c1),
+ * Prebuilt list snapshot (`kind` set, artist, name or species): the whole desk
+ * with prices, built on nezopt every 15 min / daily and served from one key read
+ * as c1 format 2 (template columns; a snapshot built before format 2 answers c1),
  * pre-compressed with brotli 11. Read local-first (getJsonLocal options).
  * Null when that list is not built yet; callers then use the live routes.
  * With the dictionary flag on, Chromium tries `&dict=<id>` first and, if that

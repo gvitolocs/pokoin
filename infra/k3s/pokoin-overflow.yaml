@@ -874,7 +874,7 @@ spec:
   successfulJobsHistoryLimit: 1
   suspend: false
 ---
-# Artist desks (all cards, no cap) and versions name lineups: daily at 04:30, after the 04:10 medians (tile prices are built in).
+# Artist desks (all cards, no cap), versions name lineups and the species hub lists: daily at 04:30, after the 04:10 medians (tile prices are built in).
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -895,7 +895,7 @@ spec:
             - /app/pokoin-api
             - job
             - build-lists
-            - --kind=artist,name
+            - --kind=artist,name,species
             env:
             - name: POKOIN_RUST_BIND
               value: 127.0.0.1:18082
