@@ -23,7 +23,7 @@ use serde_json::Value as Json;
 
 use crate::domain::portfolio_collections::{
     answer_body, apply_save, collection_days, delete_body_id, delete_collection, last_day,
-    list_collections, set_blueprint, Book, Collection, Rows, Save,
+    list_collections, set_blueprint, valued_collections, Book, Collection, Rows, Save,
 };
 use crate::domain::portfolio_history::{sold_price_book, utc_day_key_ms, SOLD_BY_BLUEPRINT_SQL};
 use crate::domain::portfolio_segments::{game_of, POKEMON};
@@ -466,7 +466,10 @@ async fn on_blocking(
 /// as of the last day of its series, and the series of every list. The lists are the
 /// ones the caller read — or, after a write, the ones its own transaction read with
 /// the write applied — because a store that fails after a committed write must not
-/// turn a 200 into an error.
+/// turn a 200 into an error. At most
+/// [`MAX_COLLECTIONS`](crate::domain::portfolio_collections::MAX_COLLECTIONS) of
+/// them are valued and named: a read hands over more so the write check can count
+/// everything, and the newest past that ceiling are dropped rather than priced.
 ///
 /// The maths — the price book out of the sold rows, then every list against every day
 /// of the window — is parked on the blocking pool: it is pure arithmetic over data
@@ -475,12 +478,13 @@ async fn on_blocking(
 /// which is why this returns a response rather than a [`Result`]: everything it needs
 /// to answer is already in hand, and the only thing left to lose is the series.
 async fn answer(state: &DomainState, collections: &[Collection], saved: Option<&str>) -> Response {
-    let mut rows = Rows::new(collections);
+    let valued = valued_collections(collections);
+    let mut rows = Rows::new(valued);
     let read = read_collection_book(&DatabaseMarket { state }, &mut rows).await;
     let priced = Priced {
         rows: Arc::new(rows),
         sold: Arc::new(read.sold),
-        collections: Arc::new(collections.to_vec()),
+        collections: Arc::new(valued.to_vec()),
         saved: Arc::new(saved.map(str::to_string)),
         today: Arc::new(utc_day_key_ms(state.clock().now().timestamp_millis())),
         unavailable: read.unavailable,

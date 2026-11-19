@@ -1568,3 +1568,41 @@ async fn an_unanswered_market_leaves_every_card_of_a_two_game_list_unpriced() {
         );
     }
 }
+
+#[tokio::test]
+async fn twenty_one_stored_lists_answer_the_twenty_oldest() {
+    // The read reaches further than the valuation ceiling on purpose — sixty-four
+    // documents, because the write check has to count every list a save would
+    // overwrite or evict — and this store answers a `limit` by ignoring it, so all
+    // twenty-one really do arrive at the answer. What it values is the twenty oldest:
+    // twenty lists of up to three hundred cards, priced against four hundred days, is
+    // already the work one request is held to.
+    let seed = (0..=20)
+        .map(|day| {
+            document(
+                &format!("c{day:02}"),
+                SELLER,
+                &format!("list {day:02}"),
+                &format!("2026-08-{day_plus:02}T10:00:00Z", day_plus = day + 1),
+                vec![card("11", 1)],
+            )
+        })
+        .collect();
+    let (state, _store, _transport) = store_state(seed);
+    let app = router(state);
+
+    let (status, body, _) = get(&app, Some(SELLER)).await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    let expected: Vec<String> = (0..20).map(|day| format!("list {day:02}")).collect();
+    assert_eq!(names_of(&body), expected, "body={body}");
+    assert_eq!(
+        body["segmentDefs"].as_array().map(Vec::len),
+        Some(20),
+        "the defs are for the lists that were valued, not for the lists stored"
+    );
+    assert_eq!(
+        body["collections"].as_array().map(Vec::len),
+        body["limits"]["collections"].as_u64().map(|n| n as usize),
+        "the answer holds to the ceiling it publishes"
+    );
+}

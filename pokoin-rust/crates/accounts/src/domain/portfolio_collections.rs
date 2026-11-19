@@ -702,6 +702,18 @@ fn sort_collections(collections: &mut [Collection]) {
     });
 }
 
+/// The lists one answer values: at most [`MAX_COLLECTIONS`], oldest first.
+///
+/// The store read and a write's after-state already hand the lists over in that
+/// order, so this is only the cut. A read reaches further than the allowance on
+/// purpose — the write check has to count what it would overwrite or evict — but
+/// pricing a seller's whole history on every request is not a thing the answer does:
+/// the ceiling is the same one a save refuses at, and what goes past it is the
+/// newest, never a hole in the middle.
+pub fn valued_collections(collections: &[Collection]) -> &[Collection] {
+    &collections[..collections.len().min(MAX_COLLECTIONS)]
+}
+
 /// The document path of one list — what a transaction reads and writes it at.
 fn doc_path(id: &str) -> String {
     format!("{COLLECTION}/{id}")
