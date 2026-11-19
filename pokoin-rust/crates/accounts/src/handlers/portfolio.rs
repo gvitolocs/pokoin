@@ -72,7 +72,7 @@ const GAME_CATALOG_SQL: &str = "\
   where card_id = any($1::bigint[])";
 
 /// A `bigint` column that arrived as text, or nothing when it is not an id.
-fn numeric_id(text: &str) -> Option<i64> {
+pub(crate) fn numeric_id(text: &str) -> Option<i64> {
     if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
@@ -195,7 +195,11 @@ async fn read_game_prices(
 /// Pokémon join matched on their card id, and neither the series nor any other game
 /// is affected. [`games_to_price`] lists the games that never get asked at all, and
 /// they are cleared the same way.
-async fn price_other_games(state: &DomainState, rows: &mut [Json], sold: &mut Vec<Json>) {
+pub(crate) async fn price_other_games(
+    state: &DomainState,
+    rows: &mut [Json],
+    sold: &mut Vec<Json>,
+) {
     let (priced, cleared) = games_to_price(rows);
     for game in cleared {
         // This game's database was never asked, so the blueprint, set and product
