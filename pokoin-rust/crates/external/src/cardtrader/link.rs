@@ -179,8 +179,11 @@ pub fn location_style_refusal(import: &PowerToolsImport) -> Option<Value> {
 /// persists anything: an import that ends in a 409 must leave no
 /// integration-document change, no job and no listing row. `Ok(None)` when the
 /// body carries no Power Tools CSV or its rows leave nothing to choose.
-pub fn location_style_preflight(body: &Value) -> ApiResult<Option<Value>> {
-    let import = parse_power_tools_body(body)?;
+///
+/// The error travels boxed to keep this `Result` small; the route unboxes it
+/// unchanged, so a malformed body answers exactly as it did before.
+pub fn location_style_preflight(body: &Value) -> Result<Option<Value>, Box<ApiError>> {
+    let import = parse_power_tools_body(body).map_err(Box::new)?;
     Ok(import.as_ref().and_then(location_style_refusal))
 }
 

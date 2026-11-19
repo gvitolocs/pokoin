@@ -228,7 +228,8 @@ pub async fn sync_start(
             let payload = payload.clone();
             move || link::location_style_preflight(&payload)
         })
-        .await??;
+        .await?
+        .map_err(|error| *error)?;
         if let Some(refusal) = refusal {
             return Ok(json_response(409, refusal));
         }
