@@ -319,6 +319,11 @@ async fn price_a_wishlist(app: &axum::Router, token: &str, store: &Store) {
     // keeps no acquisition date, so every card is held from the first day: that is
     // the backtest.
     let days = days_of(&wishlist);
+    assert_eq!(
+        wishlist["seriesError"],
+        Json::Null,
+        "a market that answered has nothing to explain: body={wishlist}"
+    );
     let dates: Vec<&str> = days.iter().filter_map(|day| day["date"].as_str()).collect();
     assert_eq!(
         dates,

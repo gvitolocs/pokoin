@@ -282,3 +282,21 @@ than the 400 days the main graph draws) to today; a card whose slice has never s
 counts as held, not priced, and shows no `pricePkn`. With no price anywhere in the
 book the series is today alone. An empty collection keeps its `segmentDefs` entry and
 appears in no day's `segments`, exactly as an empty era does.
+
+**A price read that did not happen is reported, not drawn.** The market is down, the
+query ran out its window or there is no read model at all: the answer is still a 200 with
+the seller's own lists — those are Firestore data, and an outage is no reason to tell
+someone their collection is gone — but it draws no series and carries
+`"seriesError": "prices_unavailable"`. A line drawn beneath cards this request never
+priced would be read as the seller's worth having collapsed to zero, and a client that
+keeps the last good graph is the correct response to a market it cannot see. `days: []`
+*without* that key still means what it always meant: nothing is held.
+
+**What the reads may cost.** The two Pokémon queries of one request share a single
+eight-second deadline; the other games are asked **at the same time**, each inside its own
+four-second window, so a seller who collects several games waits on their slowest card
+server rather than on all of them. A game that runs out keeps its cards held and unpriced,
+its rows losing the blueprint the Pokémon join matched on their card ids. The day-by-day
+maths — every list against every day of the window, at the full allowance of 20 lists and
+300 cards — runs on the blocking pool, and a slice key, being a fact about a row rather
+than about a day, is built once per collection instead of once per day.

@@ -879,7 +879,8 @@ async fn a_token_that_names_no_account_is_refused_before_the_store() {
     // [`pokoin_accounts::handlers::portfolio_collections`] ever sees the claims, which
     // is why the route's own `owner_uid` guard is the second door rather than the only
     // one. Both are tested; only the verifier's is reachable from a request.
-    let (state, _store, transport) = store_state(vec![stored("mine", "", "Vault", "2026-09-01T10:00:00Z")]);
+    let (state, _store, transport) =
+        store_state(vec![stored("mine", "", "Vault", "2026-09-01T10:00:00Z")]);
     let app = router(state);
     let mut claims = id_token_claims(SELLER, "ash@pokoin.com", chrono::Utc::now().timestamp());
     claims["sub"] = json!("");
@@ -903,8 +904,7 @@ async fn a_token_that_names_no_account_is_refused_before_the_store() {
         let (status, answer, headers) = call_with_bearer(&app, method, uri, body, &nameless).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{case} answer={answer}");
         assert_eq!(
-            answer["error"],
-            "Invalid or expired sign-in token.",
+            answer["error"], "Invalid or expired sign-in token.",
             "{case}: the verifier refuses it, not this route's uid guard"
         );
         assert_eq!(

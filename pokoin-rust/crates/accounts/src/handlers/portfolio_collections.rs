@@ -188,9 +188,7 @@ async fn read_collection_book(state: &DomainState, rows: &mut Rows) -> PriceRead
                 unavailable = true;
             }
             Err(_elapsed) => {
-                tracing::warn!(
-                    "collection blueprints timed out; those cards stay unpriced"
-                );
+                tracing::warn!("collection blueprints timed out; those cards stay unpriced");
                 unavailable = true;
             }
         }
@@ -289,10 +287,7 @@ async fn answer(
     let collections = collections.to_vec();
     let saved = saved.map(str::to_string);
     let body = tokio::task::spawn_blocking(move || {
-        let PriceRead {
-            book,
-            unavailable,
-        } = read;
+        let PriceRead { book, unavailable } = read;
         // A book that was not read prices nothing, and a line drawn beneath cards
         // this request never saw would be a graph of the wrong thing: the series is
         // left empty and the answer says why.
@@ -505,10 +500,7 @@ mod tests {
         );
 
         let answered = collections_json(&collections, &rows, &book, "2026-10-05");
-        let items = answered[0]["items"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
+        let items = answered[0]["items"].as_array().cloned().unwrap_or_default();
         assert_eq!(items.len(), 3, "{answered:?}");
         assert_eq!(items[0]["pricePkn"], json!(30));
         assert_eq!(
