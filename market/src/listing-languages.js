@@ -1,12 +1,13 @@
 import releases from './set-release-languages.json' with { type: 'json' };
 
-/** Western listing codes. Asian printings are other cards, not languages of this set. */
+/** Every western code a listing carries, in sell order — a filter, not a default offer. */
 export const WESTERN_SELL_LANGS = ['EN', 'IT', 'FR', 'DE', 'ES', 'PT', 'NL', 'PL', 'RU'];
 
 /**
- * Every western printing can be listed in these. TCGdex release rows only say
- * which languages TCGdex has data for — Plasma Blast has no ES there, yet
- * CardTrader sellers list Spanish copies — so they only add NL/PL/RU.
+ * The languages every western printing can be listed in, and what one with no
+ * release data is offered. TCGdex release rows only say which languages TCGdex
+ * has data for — Plasma Blast has no ES there, yet CardTrader sellers list
+ * Spanish copies — so they only add NL/PL/RU.
  */
 const WESTERN_CORE_LANGS = ['EN', 'IT', 'FR', 'DE', 'ES', 'PT'];
 
@@ -81,7 +82,13 @@ export function releaseLanguagesForSet(setName) {
 /**
  * Languages a seller can list this printing in. An Asian printing follows its
  * nationality, then a game with its own print languages (GAME_SELL_LANGS) uses
- * theirs; anything else is Pokémon: EN/IT/FR/DE/ES/PT plus any NL/PL/RU release.
+ * theirs; anything else is Pokémon: the core EN/IT/FR/DE/ES/PT, plus NL, PL and
+ * RU only when release data names them. A set with no release row and no
+ * `releaseLanguages` gets the core alone — of the 703 rows of the release table
+ * Dutch sits on 6, Polish on 4 and Russian on 13, so they are exceptions and
+ * never a default: Mega Golurk ex of Delta Reign has no Dutch, Polish or Russian
+ * listing. A printing really released in them keeps them, and deskLanguageChips
+ * still adds a language the caller has real data for.
  */
 export function sellLanguages({ game, nationality, setName, releaseLanguages } = {}) {
   const printed = PRINT_LANG[String(nationality || '').toLowerCase()];
@@ -90,7 +97,7 @@ export function sellLanguages({ game, nationality, setName, releaseLanguages } =
   if (byGame) return byGame;
   const fromCard = cleanCodes(releaseLanguages);
   const released = fromCard.length ? fromCard : cleanCodes(releaseLanguagesForSet(setName));
-  if (!released.length) return WESTERN_SELL_LANGS.slice();
+  if (!released.length) return rank(WESTERN_CORE_LANGS);
   // A release row of only Asian codes is not a western printing's languages.
   const western = released.filter((code) => WESTERN_SELL_LANGS.includes(code));
   if (!western.length) return rank(released);
