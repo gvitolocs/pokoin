@@ -495,7 +495,7 @@ export default function SegmentTable(props) {
   return (
     <Show when={visible()}>
       <section
-        class="segment-table"
+        class={['segment-table', { 'is-collections': isCollections() }]}
         data-testid="segment-table"
         aria-label="Collection segments"
         ref={box}

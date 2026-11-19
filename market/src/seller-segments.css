@@ -423,6 +423,35 @@ button.segment-row:focus-visible,
   .segment-spark {
     width: 72px;
   }
+
+  /* The Collections level lists lists the seller named, and the name is the
+     row: unlike "Scarlet & Violet" it is not a word the desk chose and it is
+     not one of five. So the name takes the room before the sparkline — the
+     track narrows and the plot scales with it rather than clipping — and two
+     lines of it before anything is ellipsized. The head and every row share the
+     tracks, so the columns still line down the table. */
+  .segment-table.is-collections .segment-head,
+  .segment-table.is-collections .segment-row {
+    grid-template-columns: minmax(0, 1fr) 56px minmax(0, 4.75rem) 1rem;
+  }
+
+  .segment-table.is-collections .segment-spark {
+    width: 56px;
+  }
+
+  .segment-table.is-collections .segment-spark svg {
+    display: block;
+    width: 100%;
+    height: 26px;
+  }
+
+  .segment-table.is-collections .segment-name {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+    word-break: break-word;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

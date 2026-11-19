@@ -328,6 +328,27 @@ test('an added card is scrolled to, marked, and the field keeps the caret', () =
   assert.match(css, /@keyframes collections-touch \{/);
 });
 
+test('a phone gives a collection name the room it needs', () => {
+  // The level class is on the table itself, so the head and every row of it
+  // share one set of tracks and the columns still line down the table.
+  assert.match(tableSrc, /class=\{\['segment-table', \{ 'is-collections': isCollections\(\) \}\]\}/);
+  const phone = /@media \(max-width: 520px\)\s*\{([\s\S]*?)\n\}/.exec(segmentsCss)?.[1] || '';
+  const tracks = (block) => /grid-template-columns: ([^;]+)/.exec(block)?.[1] || '';
+  const px = (text) => [...text.matchAll(/(\d+(?:\.\d+)?)(px|rem)/g)]
+    .reduce((acc, m) => acc + Number(m[1]) * (m[2] === 'rem' ? 16 : 1), 0);
+  const wide = /\.segment-table\.is-collections \.segment-head,[\s\S]*?\.segment-row \{[\s\S]*?\n\s*\}/.exec(phone)?.[0] || '';
+  assert.ok(wide, 'the Collections level has no phone tracks of its own');
+  assert.match(wide, /grid-template-columns: minmax\(0, 1fr\) 56px minmax\(0, 4\.75rem\) 1rem;/);
+  // The room the name gets is what the sparkline and the amount give up.
+  assert.equal(px(tracks(wide)), 148, '56 px spark, 76 px amount, 16 px chevron');
+  const base = /\.segment-head,\n\s*\.segment-row \{[\s\S]*?\n\s*\}/.exec(phone)?.[0] || '';
+  assert.ok(tracks(base), 'no default phone tracks');
+  assert.ok(px(tracks(wide)) < px(tracks(base)), `${tracks(wide)} vs ${tracks(base)}`);
+  assert.match(phone, /\.segment-table\.is-collections \.segment-spark \{\n\s*width: 56px;/, 'the track the plot is drawn in');
+  assert.match(phone, /\.segment-table\.is-collections \.segment-spark svg \{\n\s*display: block;\n\s*width: 100%;/);
+  assert.match(phone, /\.segment-table\.is-collections \.segment-name \{\n\s*display: -webkit-box;\n\s*-webkit-box-orient: vertical;\n\s*-webkit-line-clamp: 2;\n\s*white-space: normal;/);
+});
+
 test('the game picker stays on the search field row while results paint under it', () => {
   const add = /\.collections-add \{([^}]*)\}/.exec(css)?.[1] || '';
   assert.match(add, /align-items: start;/, 'the row is pinned to its top, not to whatever the results made it');
