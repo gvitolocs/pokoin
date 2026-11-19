@@ -36,6 +36,10 @@ pub struct EdgeConfig {
     /// Longest a coalesced fetch may run, and a follower may wait for it,
     /// before both answer `504`. Below Cloudflare's 100 s origin timeout.
     pub flight_timeout: Duration,
+    /// How long past its stale window the cache will still answer a failing
+    /// origin with its last good copy. [`STALE_IF_ERROR`]; a field, not a use of
+    /// the constant, so a test can watch the window close.
+    pub stale_if_error: Duration,
 }
 
 impl EdgeConfig {
@@ -44,16 +48,35 @@ impl EdgeConfig {
     pub fn from_env() -> Self {
         let env = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
         Self {
-            seo_dir: PathBuf::from(env("POKOIN_SEO_DIR").unwrap_or_else(|| "/srv/pokoin/seo".into())),
-            cache_max_bytes: env("POKOIN_API_CACHE_MB").and_then(|v| v.parse::<f64>().ok()).map(|mb| (mb * 1024.0 * 1024.0) as usize).unwrap_or(64 * 1024 * 1024),
-            cache_max_ttl: env("POKOIN_API_CACHE_MAX_TTL").and_then(|v| v.parse().ok()).unwrap_or(300),
-            flight_timeout: Duration::from_secs(env("POKOIN_API_FLIGHT_TIMEOUT_SECS").and_then(|v| v.parse().ok()).filter(|s| *s > 0).unwrap_or(60)),
+            seo_dir: PathBuf::from(
+                env("POKOIN_SEO_DIR").unwrap_or_else(|| "/srv/pokoin/seo".into()),
+            ),
+            cache_max_bytes: env("POKOIN_API_CACHE_MB")
+                .and_then(|v| v.parse::<f64>().ok())
+                .map(|mb| (mb * 1024.0 * 1024.0) as usize)
+                .unwrap_or(64 * 1024 * 1024),
+            cache_max_ttl: env("POKOIN_API_CACHE_MAX_TTL")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(300),
+            flight_timeout: Duration::from_secs(
+                env("POKOIN_API_FLIGHT_TIMEOUT_SECS")
+                    .and_then(|v| v.parse().ok())
+                    .filter(|s| *s > 0)
+                    .unwrap_or(60),
+            ),
+            stale_if_error: STALE_IF_ERROR,
         }
     }
 }
 
 const CACHE_MAX_ENTRY: usize = 2 * 1024 * 1024;
 const UNCACHEABLE_MS: u64 = 5 * 60 * 1000;
+/// How long past its own stale window a cached entry may still answer, when the
+/// origin is answering an error rather than being slow. The same ten minutes the
+/// longest `stale-while-revalidate` buys (`cache_policy`'s 600 s cap): a copy the
+/// shared caches were already allowed to serve while revalidating is good enough
+/// to serve once revalidating has failed.
+const STALE_IF_ERROR: Duration = Duration::from_secs(600);
 const HOP_HEADERS: [&str; 5] = ["connection", "keep-alive", "transfer-encoding", "content-length", "date"];
 const SITEMAP_FILES: [&str; 4] = ["sitemap.xml", "sitemap-hubs.xml", "sitemap-pokemon.xml", "sitemap-sets.xml"];
 const ORIGIN_LABEL: &str = "rust";
@@ -307,6 +330,9 @@ enum Flight {
     Entry(Arc<CacheEntry>),
     /// The leader's 5xx: followers replay it, nothing is stored.
     Error(Arc<CacheEntry>),
+    /// The leader's answer came from the cache's last good copy while the
+    /// origin failed: followers replay that copy too, never the error.
+    StaleError(Arc<CacheEntry>),
     /// Personal or not storable: each follower forwards its own request.
     Uncacheable,
     /// The leader went away without an answer (client disconnect): elect a new one.
@@ -353,6 +379,8 @@ struct Stats {
     hits: AtomicU64,
     misses: AtomicU64,
     bypass: AtomicU64,
+    /// Answers of the last good copy while the origin returned an error.
+    stale_error: AtomicU64,
 }
 
 struct Inner {
@@ -379,13 +407,26 @@ pub fn edge_router(cfg: EdgeConfig, api: Router, cdn: Router) -> Router {
         loop {
             tokio::time::sleep(Duration::from_secs(60)).await;
             let s = &stats.inner.stats;
-            let (hits, misses, bypass) = (s.hits.swap(0, Ordering::Relaxed), s.misses.swap(0, Ordering::Relaxed), s.bypass.swap(0, Ordering::Relaxed));
-            if hits + misses + bypass > 0 {
+            let (hits, misses, bypass, stale_error) = (
+                s.hits.swap(0, Ordering::Relaxed),
+                s.misses.swap(0, Ordering::Relaxed),
+                s.bypass.swap(0, Ordering::Relaxed),
+                s.stale_error.swap(0, Ordering::Relaxed),
+            );
+            if hits + misses + bypass + stale_error > 0 {
                 let (entries, mb) = {
                     let cache = stats.inner.cache.lock().unwrap_or_else(|e| e.into_inner());
                     (cache.map.len(), cache.bytes as f64 / 1_048_576.0)
                 };
-                tracing::info!(hits, misses, bypass, entries, mb = format!("{mb:.1}"), "pokoin-api-edge minute");
+                tracing::info!(
+                    hits,
+                    misses,
+                    bypass,
+                    stale_error,
+                    entries,
+                    mb = format!("{mb:.1}"),
+                    "pokoin-api-edge minute"
+                );
             }
         }
     });
@@ -483,6 +524,43 @@ impl Edge {
         map.insert(pathname.to_owned(), Instant::now() + Duration::from_millis(UNCACHEABLE_MS));
     }
 
+    /// The cache's last good copy of `key`, when its stale window closed no more
+    /// than `stale_if_error` ago: what answers an origin that is answering
+    /// errors rather than being slow. A copy past that is a copy about a page
+    /// nobody has seen in ten minutes, and the error is the truer answer.
+    /// Reading a copy leaves its `fresh_until` and `stale_until` as they were.
+    fn last_good(&self, key: &str) -> Option<Arc<CacheEntry>> {
+        let mut cache = self.inner.cache.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = cache.get(key)?;
+        let overdue = Instant::now().saturating_duration_since(entry.stale_until);
+        (overdue <= self.inner.cfg.stale_if_error).then_some(entry)
+    }
+
+    /// [`last_good`]'s answer: the entry's own status and body, `age` telling how
+    /// old it is, and the stale replay's `cache-control` so no cache downstream
+    /// keeps an answer this one already knows is out of date.
+    fn send_last_good(&self, entry: &CacheEntry) -> Response {
+        self.inner.stats.stale_error.fetch_add(1, Ordering::Relaxed);
+        send_entry(entry, "STALE-ERROR")
+    }
+
+    /// A flight that got no answer from the API at all (timed out, unreadable
+    /// body): the last good copy if the cache holds one, `502`/`504` if it does
+    /// not. Either way the flight is settled, so every follower is told the same
+    /// thing this request was.
+    fn fail_flight(&self, flight: FlightGuard, status: StatusCode) -> Response {
+        match self.last_good(&flight.key) {
+            Some(entry) => {
+                flight.finish(Flight::StaleError(entry.clone()));
+                self.send_last_good(&entry)
+            }
+            None => {
+                flight.finish(Flight::Failed(status));
+                gateway_error(status)
+            }
+        }
+    }
+
     /// Streamed request (writes, personal or uncacheable GETs, SSE).
     async fn forward_api(&self, req: Request, target: &str) -> Response {
         self.inner.stats.bypass.fetch_add(1, Ordering::Relaxed);
@@ -528,7 +606,13 @@ impl Edge {
         };
         match outcome {
             Flight::Entry(entry) | Flight::Error(entry) => send_entry(&entry, "COALESCED"),
-            Flight::Failed(status) => gateway_error(status),
+            // The leader answered the failing origin out of the cache; this
+            // follower is the same request, so it gets the same copy.
+            Flight::StaleError(entry) => self.send_last_good(&entry),
+            Flight::Failed(status) => match self.last_good(&key) {
+                Some(entry) => self.send_last_good(&entry),
+                None => gateway_error(status),
+            },
             Flight::Uncacheable | Flight::Pending | Flight::Abandoned => self.forward_api(req, target).await,
         }
     }
@@ -552,8 +636,7 @@ impl Edge {
         let req = with_uri(req, &target);
         let Ok(response) = tokio::time::timeout_at(deadline, self.inner.api.clone().oneshot(req)).await else {
             tracing::warn!(path = pathname, timeout_s = self.inner.cfg.flight_timeout.as_secs(), "edge flight timed out");
-            flight.finish(Flight::Failed(StatusCode::GATEWAY_TIMEOUT));
-            return gateway_error(StatusCode::GATEWAY_TIMEOUT);
+            return self.fail_flight(flight, StatusCode::GATEWAY_TIMEOUT);
         };
         let response = response.unwrap_or_else(|never| match never {});
         let status = response.status();
@@ -573,14 +656,10 @@ impl Edge {
         let (parts, body) = response.into_parts();
         let body = match tokio::time::timeout_at(deadline, to_bytes(body, usize::MAX)).await {
             Ok(Ok(body)) => body,
-            Ok(Err(_)) => {
-                flight.finish(Flight::Failed(StatusCode::BAD_GATEWAY));
-                return gateway_error(StatusCode::BAD_GATEWAY);
-            }
+            Ok(Err(_)) => return self.fail_flight(flight, StatusCode::BAD_GATEWAY),
             Err(_) => {
                 tracing::warn!(path = pathname, timeout_s = self.inner.cfg.flight_timeout.as_secs(), "edge flight body timed out");
-                flight.finish(Flight::Failed(StatusCode::GATEWAY_TIMEOUT));
-                return gateway_error(StatusCode::GATEWAY_TIMEOUT);
+                return self.fail_flight(flight, StatusCode::GATEWAY_TIMEOUT);
             }
         };
         let mut headers = HeaderMap::new();
@@ -592,7 +671,13 @@ impl Edge {
         headers.insert(HeaderName::from_static("x-robots-tag"), HeaderValue::from_static("noindex"));
         let now = Instant::now();
         let Some(policy) = policy else {
-            // 5xx: every waiting follower gets this answer; the next request fetches again.
+            // 5xx: every waiting follower gets this answer; the next request
+            // fetches again. The cache's last good copy answers instead when it
+            // holds one, and this error is never stored.
+            if let Some(entry) = self.last_good(&flight.key) {
+                flight.finish(Flight::StaleError(entry.clone()));
+                return self.send_last_good(&entry);
+            }
             let entry = Arc::new(CacheEntry { status: parts.status, headers, body, stored_at: now, fresh_until: now, stale_until: now });
             flight.finish(Flight::Error(entry.clone()));
             return send_entry(&entry, "BYPASS");
@@ -636,7 +721,7 @@ fn send_entry(entry: &CacheEntry, label: &'static str) -> Response {
     *response.status_mut() = entry.status;
     let headers = response.headers_mut();
     *headers = entry.headers.clone();
-    if label == "STALE" {
+    if label == "STALE" || label == "STALE-ERROR" {
         let rewritten = headers
             .get(header::CACHE_CONTROL)
             .and_then(|v| v.to_str().ok())
@@ -881,7 +966,22 @@ mod tests {
     }
 
     fn config(seo: PathBuf, flight_timeout: Duration) -> EdgeConfig {
-        EdgeConfig { seo_dir: seo, cache_max_bytes: 1 << 20, cache_max_ttl: 300, flight_timeout }
+        EdgeConfig {
+            seo_dir: seo,
+            cache_max_bytes: 1 << 20,
+            cache_max_ttl: 300,
+            flight_timeout,
+            stale_if_error: STALE_IF_ERROR,
+        }
+    }
+
+    /// [`config`] with the last-good-copy window shortened to something a test
+    /// can watch close: production always gets [`STALE_IF_ERROR`].
+    fn stale_if_error(seo: PathBuf, flight_timeout: Duration, window: Duration) -> EdgeConfig {
+        EdgeConfig {
+            stale_if_error: window,
+            ..config(seo, flight_timeout)
+        }
     }
 
     fn edge(counter: Arc<AtomicU64>, seo: PathBuf) -> Router {
@@ -1173,5 +1273,239 @@ mod tests {
         let res = app.oneshot(req("GET", "/api/health", &[])).await.unwrap();
         let body = to_bytes(res.into_body(), 1024).await.unwrap();
         assert_eq!(&body[..], b"cdn:/api/health");
+    }
+
+    /// A URL whose `s-maxage` lives a second and whose stale window closes the
+    /// second after: [`STALE_IF_ERROR`] is still open, so a fetch that comes back
+    /// an error answers from the copy instead.
+    const ONCE_GOOD: &str = "public, max-age=30, s-maxage=1, stale-while-revalidate=1";
+    const GOOD_BODY: &str = "{\"ok\":true}";
+    const GOOD: &str = "public, max-age=30, s-maxage=0";
+
+    fn good_answer() -> (StatusCode, [(HeaderName, &'static str); 2], String) {
+        (
+            StatusCode::OK,
+            [
+                (header::CACHE_CONTROL, ONCE_GOOD),
+                (header::CONTENT_TYPE, "application/json"),
+            ],
+            GOOD_BODY.to_owned(),
+        )
+    }
+
+    /// The origin that has gone bad: both paths answer one cacheable 200, then
+    /// `/api/marketplace-list` refuses every caller with a 503 (after 50 ms, so a
+    /// follower has time to coalesce) and `/api/marketplace-search-page` never
+    /// comes back at all.
+    fn sick_api(list: Arc<AtomicU64>, search: Arc<AtomicU64>) -> Router {
+        let (l, s) = (list, search);
+        Router::new()
+            .route(
+                "/api/marketplace-list",
+                get(move || {
+                    let l = l.clone();
+                    async move {
+                        if l.fetch_add(1, Ordering::SeqCst) > 0 {
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                            return (
+                                StatusCode::SERVICE_UNAVAILABLE,
+                                [
+                                    (header::CACHE_CONTROL, "no-store"),
+                                    (header::CONTENT_TYPE, "application/json"),
+                                ],
+                                "{\"error\":\"catalog query failed\"}".to_owned(),
+                            );
+                        }
+                        good_answer()
+                    }
+                }),
+            )
+            .route(
+                "/api/marketplace-search-page",
+                get(move || {
+                    let s = s.clone();
+                    async move {
+                        if s.fetch_add(1, Ordering::SeqCst) > 0 {
+                            std::future::pending::<()>().await;
+                        }
+                        good_answer()
+                    }
+                }),
+            )
+    }
+
+    /// Past the second of freshness and the second of stale-while-revalidate, the
+    /// copy is only worth serving for an origin that is failing.
+    const PAST_THE_WINDOW: Duration = Duration::from_millis(2_300);
+
+    #[tokio::test]
+    async fn a_failing_origin_answers_its_last_good_copy() {
+        let (list, search) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+        let dir = tempfile::tempdir().unwrap();
+        let edge = Edge::new(
+            config(dir.path().to_path_buf(), Duration::from_secs(30)),
+            sick_api(list.clone(), search),
+            Router::new(),
+        );
+        let get = |edge: &Edge| {
+            let edge = edge.clone();
+            async move { proxy(State(edge), req("GET", "/api/marketplace-list", &[])).await }
+        };
+        let warm = get(&edge).await;
+        assert_eq!(warm.headers()["x-pokoin-edge-cache"], "MISS");
+        let key = cache_key(&Method::GET, &HeaderMap::new(), "/api/marketplace-list", "").unwrap();
+        let stored = edge
+            .inner
+            .cache
+            .lock()
+            .unwrap()
+            .map
+            .get(&key)
+            .cloned()
+            .expect("warm stored the page")
+            .0;
+        let stale_until = stored.stale_until;
+        drop(warm);
+        tokio::time::sleep(PAST_THE_WINDOW).await;
+        let (leader, follower) = tokio::join!(get(&edge), get(&edge));
+        for answer in [leader, follower] {
+            assert_eq!(
+                answer.status(),
+                StatusCode::OK,
+                "the copy's own status, not the 503"
+            );
+            assert_eq!(answer.headers()["x-pokoin-edge-cache"], "STALE-ERROR");
+            assert_eq!(
+                answer.headers()["cache-control"],
+                GOOD,
+                "nothing downstream may keep it"
+            );
+            let age: u64 = answer.headers()["age"].to_str().unwrap().parse().unwrap();
+            assert!((2..=3).contains(&age), "the copy says how old it is: {age}");
+            let body = to_bytes(answer.into_body(), 1024).await.unwrap();
+            assert_eq!(&body[..], GOOD_BODY.as_bytes());
+        }
+        assert_eq!(
+            list.load(Ordering::SeqCst),
+            2,
+            "the pair is one fetch, and it failed"
+        );
+        assert_eq!(
+            edge.inner.stats.stale_error.load(Ordering::Relaxed),
+            2,
+            "leader and follower both counted"
+        );
+        // The failure is nowhere in the cache, and serving the copy bought it no
+        // time: the next healthy fetch replaces it on its own schedule.
+        let after = edge
+            .inner
+            .cache
+            .lock()
+            .unwrap()
+            .map
+            .get(&key)
+            .cloned()
+            .expect("still the same copy")
+            .0;
+        assert_eq!(after.status, StatusCode::OK);
+        assert_eq!(&after.body[..], GOOD_BODY.as_bytes());
+        assert_eq!(
+            after.stale_until, stale_until,
+            "a stale-error answer does not extend the entry"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_origin_that_never_answers_answers_its_last_good_copy() {
+        let (list, search) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+        let dir = tempfile::tempdir().unwrap();
+        let edge = Edge::new(
+            config(dir.path().to_path_buf(), Duration::from_millis(200)),
+            sick_api(list, search.clone()),
+            Router::new(),
+        );
+        let get = |edge: &Edge| {
+            let edge = edge.clone();
+            async move { proxy(State(edge), req("GET", "/api/marketplace-search-page", &[])).await }
+        };
+        get(&edge).await;
+        tokio::time::sleep(PAST_THE_WINDOW).await;
+        let (leader, follower) = tokio::join!(get(&edge), get(&edge));
+        for answer in [leader, follower] {
+            assert_eq!(
+                answer.status(),
+                StatusCode::OK,
+                "the 504 of the hung fetch never reaches the client"
+            );
+            assert_eq!(answer.headers()["x-pokoin-edge-cache"], "STALE-ERROR");
+            assert_eq!(answer.headers()["cache-control"], GOOD);
+        }
+        assert_eq!(
+            search.load(Ordering::SeqCst),
+            2,
+            "one hung fetch for the pair"
+        );
+        assert_eq!(edge.inner.stats.stale_error.load(Ordering::Relaxed), 2);
+    }
+
+    #[tokio::test]
+    async fn a_copy_older_than_the_window_and_a_key_never_seen_answer_the_error() {
+        let (list, search) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+        let dir = tempfile::tempdir().unwrap();
+        // The ten-minute window cut to 100 ms, which is the only way to watch it
+        // close in a test; production always uses `STALE_IF_ERROR`.
+        let edge = Edge::new(
+            stale_if_error(
+                dir.path().to_path_buf(),
+                Duration::from_secs(30),
+                Duration::from_millis(100),
+            ),
+            sick_api(list.clone(), search),
+            Router::new(),
+        );
+        let get = |edge: &Edge, page: &'static str| {
+            let edge = edge.clone();
+            async move { proxy(State(edge), req("GET", page, &[])).await }
+        };
+        get(&edge, "/api/marketplace-list?a=1").await;
+        assert_eq!(list.load(Ordering::SeqCst), 1);
+        tokio::time::sleep(PAST_THE_WINDOW).await;
+        let (leader, follower) = tokio::join!(
+            get(&edge, "/api/marketplace-list?a=1"),
+            get(&edge, "/api/marketplace-list?a=1")
+        );
+        let mut labels: Vec<String> = Vec::new();
+        for answer in [leader, follower] {
+            assert_eq!(
+                answer.status(),
+                StatusCode::SERVICE_UNAVAILABLE,
+                "the copy is past what it is worth answering with"
+            );
+            assert_eq!(answer.headers()["cache-control"], "no-store");
+            labels.push(
+                answer.headers()["x-pokoin-edge-cache"]
+                    .to_str()
+                    .unwrap()
+                    .to_owned(),
+            );
+        }
+        assert!(
+            labels.contains(&"BYPASS".to_owned()) && labels.contains(&"COALESCED".to_owned()),
+            "{labels:?}"
+        );
+        // A key the cache never held has no copy to hide the failure behind.
+        let cold = get(&edge, "/api/marketplace-list?a=2").await;
+        assert_eq!(cold.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(cold.headers()["x-pokoin-edge-cache"], "BYPASS");
+        assert_eq!(
+            list.load(Ordering::SeqCst),
+            3,
+            "one fetch for the pair, one for the cold key"
+        );
+        assert_eq!(
+            edge.inner.stats.stale_error.load(Ordering::Relaxed),
+            0,
+            "nothing was served from a copy"
+        );
     }
 }
