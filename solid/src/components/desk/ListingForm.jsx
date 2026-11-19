@@ -13,6 +13,12 @@ import {
   updateListing,
 } from '@market/api.js';
 import { blankListingForm, listingFormFromOffer, MOOD_CONDS, nextBoxLocation, offerLanguage } from '@market/card-desk.js';
+import {
+  ambiguousBoxName,
+  readBoxNameChoices,
+  rememberBoxNameChoice,
+  shouldAskBoxName,
+} from '@market/box-name.js';
 import { groupPriceNote, leftGroupLine, listingPricingGroup } from '@market/pricing-group-note.js';
 import {
   CUSTOM_PRICING,
@@ -56,6 +62,7 @@ import { sellerNameOf } from '@market/auth-session.js';
 import InventoryTargets from './InventoryTargets.jsx';
 import ListingLangPick, { dismissWhileOpen } from './ListingLangPick.jsx';
 import ShipFromCountryGate from './ShipFromCountryGate.jsx';
+import BoxNameAsk from '../BoxNameAsk.jsx';
 import QtyStepper from '../QtyStepper.jsx';
 import StrategyEditor, { createStrategyEditor } from '../pricer/StrategyEditor.jsx';
 
@@ -123,6 +130,9 @@ function CameraIcon() {
 // of these codes; the seller reads the server's message, never the code.
 const CARDTRADER_REFUSALS = new Set(['cardtrader_facet_unsupported', 'cardtrader_refused', 'cardtrader_unreachable']);
 
+/** No stack the seller confirmed: the listing takes its box's next free slot. */
+const NO_BOX_SLOT = { box: '', suffix: '' };
+
 /**
  * "List your card" / "Edit listing".
  * Effects mirror the React dependency lists through memoized keys, so a card
@@ -157,6 +167,10 @@ export default function ListingForm(props) {
   const [chips, setChips] = createSignal(blank.chips);
   const [comment, setComment] = createSignal(blank.comment);
   const [box, setBox] = createSignal('');
+  /** The "New box …?" question about a location name that ends in a number. */
+  const [boxAsk, setBoxAsk] = createSignal(null);
+  /** The stack confirmed for a chosen box, so the listing lands there and not in the next slot. */
+  const [boxSlot, setBoxSlot] = createSignal(NO_BOX_SLOT);
   // The seller's boxes with their next free slot, from the server.
   const [stockBoxes, setStockBoxes] = createSignal([]);
   const [stockReady, setStockReady] = createSignal(false);
@@ -657,9 +671,40 @@ export default function ListingForm(props) {
   const locationValue = () => {
     const current = box();
     if (!current) return '';
+    const slot = boxSlot();
+    if (slot.suffix && slot.box.toLowerCase() === current.toLowerCase()) return `${current}${slot.suffix}`;
     const sameBox = listingBox(keptLocation()).toLowerCase() === current.toLowerCase();
     return sameBox ? keptLocation() : nextBoxLocation(stockBoxes(), current);
   };
+  /** A box the seller picked: their own edits own it, and the save waits while a question is open. */
+  function chooseBox(name) {
+    boxTouched = true;
+    setBoxSlot(NO_BOX_SLOT);
+    setBox(name);
+    askBoxName(name);
+  }
+  /** Ask once about an ambiguous name that is not one of the seller's own boxes. */
+  function askBoxName(name) {
+    const reading = ambiguousBoxName(name);
+    if (!reading) return false;
+    if (!shouldAskBoxName({ name, boxes: stockBoxes(), answered: readBoxNameChoices() })) return false;
+    setBoxAsk(reading);
+    return true;
+  }
+  function answerBoxName(choice) {
+    const reading = boxAsk();
+    setBoxAsk(null);
+    if (!reading) return;
+    rememberBoxNameChoice(reading.raw, choice);
+    if (choice !== 'stack') {
+      setBoxSlot(NO_BOX_SLOT);
+      return;
+    }
+    // The split is the seller's own: the box loses the number and takes it as its stack.
+    boxTouched = true;
+    setBoxSlot({ box: reading.asStack.box, suffix: `·${reading.asStack.stack}` });
+    setBox(reading.asStack.box);
+  }
 
   /** The PATCH body of an edit, or null when the form does not validate. */
   function editDraft() {
@@ -1296,10 +1341,7 @@ export default function ListingForm(props) {
               <span class="sell-drawer-label">Location · private</span>
               <select
                 value={box()}
-                onChange={(event) => {
-                  boxTouched = true;
-                  setBox(event.currentTarget.value);
-                }}
+                onChange={(event) => chooseBox(event.currentTarget.value)}
               >
                 <option value="" selected={!box()}>None</option>
                 <For each={boxOptions()}>
@@ -1340,7 +1382,7 @@ export default function ListingForm(props) {
             <button
               type="button"
               class="btn list-btn sell-save"
-              disabled={saving() || (!props.preview && !ready())}
+              disabled={saving() || Boolean(boxAsk()) || (!props.preview && !ready())}
               title="Save listing changes"
               onClick={() => submit()}
             >
@@ -1441,7 +1483,7 @@ export default function ListingForm(props) {
           <button
             type="button"
             class="btn list-btn"
-            disabled={saving() || (!props.preview && (!ready() || !signedIn()))}
+            disabled={saving() || Boolean(boxAsk()) || (!props.preview && (!ready() || !signedIn()))}
             title={props.preview || signedIn() ? 'Save listing changes' : 'Sign in to list'}
             onClick={() => submit()}
           >
@@ -1470,7 +1512,7 @@ export default function ListingForm(props) {
             mode="list"
             counts={{ cards: Number.parseInt(qty(), 10) || 1 }}
             intent="list"
-            disabled={!ready() || (!signedIn() && ready())}
+            disabled={!ready() || (!signedIn() && ready()) || Boolean(boxAsk())}
             busy={saving()}
             busyLabel="Listing…"
             onSubmit={(targets) => {
@@ -1533,10 +1575,7 @@ export default function ListingForm(props) {
           Location
           <select
             value={box()}
-            onChange={(event) => {
-              boxTouched = true;
-              setBox(event.currentTarget.value);
-            }}
+            onChange={(event) => chooseBox(event.currentTarget.value)}
           >
             <option value="" selected={!box()}>None</option>
             <For each={boxOptions()}>
@@ -1580,6 +1619,9 @@ export default function ListingForm(props) {
             </div>
           </div>
         </Portal>
+      </Show>
+      <Show when={boxAsk()} keyed>
+        {(reading) => <BoxNameAsk reading={reading} onAnswer={answerBoxName} />}
       </Show>
       <ShipFromCountryGate
         open={shipGateOpen()}

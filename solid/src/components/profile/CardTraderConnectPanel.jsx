@@ -5,6 +5,7 @@ import {
   fetchCardTraderStatus,
   syncCardTraderInventory,
 } from '@market/api.js';
+import { isLocationStyleUnconfirmed } from '@market/box-name.js';
 import { MIN_CARDTRADER_TOKEN_LENGTH, describeCardTraderToken } from '@market/cardtrader-token.js';
 import { DASHBOARD_HOME } from '@market/punchouts.js';
 import { getBearer } from '../../stores/auth.js';
@@ -259,11 +260,13 @@ export default function CardTraderConnectPanel(props) {
     }
   }
 
-  async function runSync(options = {}, startedMessage = '') {
+  async function runSync(options = {}, startedMessage = '', { holdModalOpen = false } = {}) {
     setBusy(true);
     setError('');
     setMessage('');
-    setPtModalOpen(false);
+    // The import dialog keeps its CSV while the request it starts may come back
+    // asking how a location is to be read; every other start closes it right away.
+    if (!holdModalOpen) setPtModalOpen(false);
     try {
       const bearer = await getBearer();
       const data = await syncCardTraderInventory(bearer, options);
@@ -273,6 +276,7 @@ export default function CardTraderConnectPanel(props) {
         setMessage(startedMessage || (options.powerToolsCsv
           ? 'Importing Power Tools locations…'
           : 'Sync started — this stays on the page while it runs.'));
+        setPtModalOpen(false);
         startPolling();
         return;
       }
@@ -287,10 +291,14 @@ export default function CardTraderConnectPanel(props) {
       } else {
         setMessage(`CardTrader synced. ${formatSyncSummary(data.summary)}`);
       }
+      setPtModalOpen(false);
       setBusy(false);
     } catch (err) {
-      setError(err.message || 'Could not sync CardTrader inventory.');
       setBusy(false);
+      // A style the seller never chose is the dialog's own question, not an error line.
+      if (holdModalOpen && isLocationStyleUnconfirmed(err)) throw err;
+      setPtModalOpen(false);
+      setError(err.message || 'Could not sync CardTrader inventory.');
     }
   }
 
@@ -527,7 +535,7 @@ export default function CardTraderConnectPanel(props) {
         onPreviewGames={onPreviewGames}
         onPreviewSample={onPreviewPowerToolsSample}
         onClearPreview={() => setPtPreview(null)}
-        onConfirmWithCsv={(opts) => runSync(opts)}
+        onConfirmWithCsv={(opts) => runSync(opts, '', { holdModalOpen: true })}
       />
     </div>
   );
