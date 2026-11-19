@@ -4,6 +4,13 @@ import { encodeQr, qrLogoLayout, qrPath } from '@market/qr.js';
 import { phoneConnectUrl } from '@market/scan-api.js';
 import { CONDITIONS, FINISHES, LANGUAGES, STACK_SIZES } from '@market/scan-model.js';
 import { HELP_SECTIONS } from '@market/scan-shortcuts.js';
+import {
+  ambiguousBoxName,
+  readBoxNameChoices,
+  rememberBoxNameChoice,
+  shouldAskBoxName,
+} from '@market/box-name.js';
+import BoxNameAsk from '../../components/BoxNameAsk.jsx';
 import { FIELD_LABEL, perfRows, perfSink } from './version-sets.js';
 import {
   draftValue,
@@ -15,6 +22,7 @@ import {
   sizeCommit,
   STACK_OFF_PATCH,
   STACK_SETUP_OFF_ENABLED,
+  stackSplitPatch,
 } from './defaults-state.js';
 import { pricingChoicePatch, pricingChoiceValue, pricingHint, pricingOptions } from './pricing.js';
 
@@ -89,6 +97,10 @@ export function DefaultsBar(props) {
   const [posDraft, setPosDraft] = createSignal(untrack(() => String(d().startPosition ?? 1)));
   const [sizeDraft, setSizeDraft] = createSignal(untrack(() => String(size())));
   const [sizeOpen, setSizeOpen] = createSignal(false);
+  /** The "New box …?" question about a name that ends in a number. */
+  const [boxAsk, setBoxAsk] = createSignal(null);
+  /** Which name has already been asked about, so one commit is one question. */
+  let askedBoxName = '';
   /** Which draft field the seller has a hand on; only then does their text win over an answer. */
   const [editingField, setEditingField] = createSignal('');
   let sizeMenu;
@@ -164,7 +176,43 @@ export function DefaultsBar(props) {
   };
   const commitLocation = () => {
     const next = pendingDraft({ draft: locationDraft(), applied: locationSent });
-    return next === null ? undefined : applyLocation(next);
+    const applied = next === null ? undefined : applyLocation(next);
+    // What was typed is applied first: a scan while the question is open lands
+    // in the box as the seller wrote it, never in a stack nobody chose.
+    askBoxName(locationDraft());
+    return applied;
+  };
+  /** Ask once about an ambiguous name that is not one of the seller's own boxes. */
+  const askBoxName = (value) => {
+    if (boxAsk()) return false;
+    const name = String(value ?? '').trim();
+    if (!name || name === askedBoxName) return false;
+    const reading = ambiguousBoxName(name);
+    if (!reading) return false;
+    if (!shouldAskBoxName({ name, boxes: props.boxes || [], answered: readBoxNameChoices() })) return false;
+    askedBoxName = name;
+    setBoxAsk(reading);
+    return true;
+  };
+  const answerBoxName = (choice) => {
+    const reading = boxAsk();
+    setBoxAsk(null);
+    if (!reading) return undefined;
+    rememberBoxNameChoice(reading.raw, choice);
+    // "as typed" is what the field already holds; only the split moves anything.
+    if (choice !== 'stack') return undefined;
+    // Box and stack go out together: commitStack stays silent when the wanted
+    // stack already equals the current one, and a location patch without a
+    // stack is answered from the new box's stock — the number the seller wrote
+    // would be lost. One patch, so the desk's next-free-stack rule never runs.
+    const patch = {
+      ...locationPatch(reading.asStack.box),
+      ...stackSplitPatch({ wanted: reading.asStack.stack, size: size() }),
+    };
+    locationSent = String(patch.location);
+    setLocationDraft(patch.location);
+    setStackDraft(String(patch.stack));
+    return props.onChange(patch);
   };
   /**
    * Leaving the field: what was typed is applied, and nothing typed at all
@@ -397,6 +445,9 @@ export function DefaultsBar(props) {
                 )}
               </For>
             </ul>
+          </Show>
+          <Show when={boxAsk()} keyed>
+            {(reading) => <BoxNameAsk reading={reading} onAnswer={answerBoxName} />}
           </Show>
           <Show when={sizeOpen()}>
             <div class="sd-stack-menu" role="dialog" aria-label="Stack setup">

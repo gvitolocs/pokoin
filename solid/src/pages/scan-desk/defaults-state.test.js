@@ -18,6 +18,7 @@ import {
   sizeCommit,
   STACK_OFF_PATCH,
   STACK_SETUP_OFF_ENABLED,
+  stackSplitPatch,
 } from './defaults-state.js';
 
 // The Location seed and the "Off" switches. `locationSuggestion` is the whole
@@ -169,4 +170,23 @@ test('a batch worked on again is never the one dropped from the store', () => {
   flags = setBatchFlag(flags, 'current', 'locationTouched', true);
   assert.equal(batchFlag(flags, 'current', 'stackOff'), true);
   assert.equal(Object.keys(flags).length, MAX_TRACKED_BATCHES);
+});
+
+// The split answer of the "New box …?" question (CARD-07): the box and the stack
+// the seller named leave together in one defaults patch, or the desk answers the
+// stack from the new box's stock and the number they wrote is lost.
+
+test('the split answer always carries the stack the seller named', () => {
+  // The failing case: the wanted stack already equals the current one, so a
+  // stack edit would stay silent — here it must not.
+  assert.deepEqual(stackSplitPatch({ wanted: 6, size: 1, current: 6 }), { stack: 6, startPosition: 1 });
+  assert.equal(stackSplitPatch({ wanted: 6, size: 1, current: 6 }).stack, 6);
+  assert.deepEqual(stackSplitPatch({ wanted: 3, size: 1, current: 6 }), { stack: 3, startPosition: 1 });
+  // With a divider the position of a box nobody has entered yet is the desk's
+  // to answer; the stack still goes out, which is what stops its own rule.
+  assert.deepEqual(stackSplitPatch({ wanted: 6, size: 8, current: 6 }), { stack: 6 });
+  assert.deepEqual(stackSplitPatch({ wanted: 12, size: 8, current: 4 }), { stack: 12 });
+  // Junk never reaches a patch as 0 or as a huge number.
+  assert.deepEqual(stackSplitPatch({ wanted: 'x', size: 1 }), { stack: 1, startPosition: 1 });
+  assert.equal(stackSplitPatch({ wanted: 99999, size: 8 }).stack, 9999);
 });
