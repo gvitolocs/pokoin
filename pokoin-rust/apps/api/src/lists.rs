@@ -510,9 +510,17 @@ async fn build_sellers(state: &AppState, o: &Options, game: &str) -> anyhow::Res
     let started = std::time::Instant::now();
     use pokoin_commerce::handlers::seller_book;
     let directory = seller_book::FirestoreDirectory(&commerce);
-    let built = seller_book::build_all(&commerce, &directory, game, brotli11, o.key.as_deref(), o.force, o.dry_run)
-        .await
-        .map_err(|error| anyhow::anyhow!(error.message))?;
+    let built = seller_book::build_all(
+        &commerce,
+        &directory,
+        game,
+        brotli11,
+        o.key.as_deref(),
+        o.force,
+        o.dry_run,
+    )
+    .await
+    .map_err(|error| anyhow::anyhow!(error.message))?;
     tracing::info!(
         %game, sellers = built.sellers, built = built.built, skipped = built.skipped, failed = built.failed,
         removed = built.removed, dry_run = o.dry_run, seconds = started.elapsed().as_secs_f64(), "build-lists sellers"
