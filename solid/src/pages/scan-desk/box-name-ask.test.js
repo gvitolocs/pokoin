@@ -79,3 +79,13 @@ test('the pop-up is a modal whose first answer is what was already applied', () 
   assert.match(ask, /Nothing is split unless you say so\./);
   assert.match(css, /\.box-name-ask\s*\{[^}]*position: fixed/, 'the pop-up covers the desk');
 });
+
+test('the filled button is keep the name as typed, never the split', () => {
+  // One dialog primary style for the whole app, and this pop-up shares it.
+  assert.match(css, /\.lang-redirect-go,\n\.box-name-ask-keep \{[^}]*background: #f5c518/s, 'keep is the app dialog primary');
+  assert.doesNotMatch(css, /\.box-name-ask-split[^{]*\{[^}]*background:/s, 'the split gets no fill of its own');
+  // So the split is the outlined secondary the actions row already defines.
+  assert.match(css, /\.box-name-ask-actions button \{[^}]*background: transparent/s);
+  assert.equal(ask.indexOf('class="box-name-ask-keep"') < ask.indexOf('class="box-name-ask-split"'), true, 'the order is unchanged');
+  assert.match(ask, /first: \(\) => box\?\.querySelector\('\.box-name-ask-keep'\)/, 'and focus still starts on the filled one');
+});

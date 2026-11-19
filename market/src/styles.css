@@ -5204,7 +5204,10 @@ html:root:root .card-page.flutter-page .card-desk .desk-cell {
   cursor: pointer;
 }
 
-.lang-redirect-go {
+/* The filled action of a dialog card: one look for every dialog, and it is always
+   the safe answer — go to the language, or keep the box name as typed. */
+.lang-redirect-go,
+.box-name-ask-keep {
   background: #f5c518 !important;
   color: #1a1408 !important;
   border-color: transparent !important;
@@ -5259,11 +5262,9 @@ html:root:root .card-page.flutter-page .card-desk .desk-cell {
   cursor: pointer;
 }
 
-.box-name-ask-split {
-  background: #f5c518 !important;
-  color: #1a1408 !important;
-  border-color: transparent !important;
-}
+/* The split is the answer that changes something, so it stays the outlined
+   secondary above inherits — never the filled one, which nudges the seller. */
+
 .sell-options-row .foil-pick { width: 7.4rem; }
 
 .sell-field input,
