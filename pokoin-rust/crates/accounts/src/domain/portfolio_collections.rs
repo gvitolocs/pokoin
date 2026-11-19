@@ -535,12 +535,20 @@ fn stored_iso(document: &Document, field: &str) -> String {
 /// other oddity of a stored card — a game the platform stopped listing, a facet no
 /// slice carries — is kept, so the line stays on the graph at nothing rather than
 /// disappearing.
+///
+/// The items are merged by slice like a write's are, because two stored rows can
+/// name one slice after a rule changed underneath them: a `0012` and a `12` written
+/// before the zeros came off, or two copies one later sanitiser folds into one
+/// facet. Read apart they price the same sales twice and the graph counts the card
+/// twice; merged they are one line with the copies added.
 pub fn collection_from_document(document: &Document) -> Collection {
     let items = match document.get("items") {
-        Some(Value::Array(values)) => values
-            .iter()
-            .filter_map(|value| Item::stored(&value.to_plain_json()))
-            .collect(),
+        Some(Value::Array(values)) => merge_items(
+            values
+                .iter()
+                .filter_map(|value| Item::stored(&value.to_plain_json()))
+                .collect(),
+        ),
         _ => Vec::new(),
     };
     Collection {
@@ -1632,6 +1640,46 @@ mod tests {
             !written.created_at.is_empty(),
             "the timestamps written by [`doc_data`] read back as timestamps"
         );
+    }
+
+    #[test]
+    fn a_stored_list_merges_the_rows_that_are_one_slice() {
+        // What a document written before today's rules can hold: one card spelled two
+        // ways, a copy whose condition is the scale's own long name, and a card of
+        // another game that only looks alike by its public id.
+        let long_condition = {
+            let mut row = stored_item("12", 1);
+            row["mapValue"]["fields"]["condition"] = json!({ "stringValue": "Near Mint" });
+            row
+        };
+        let other_game = {
+            let mut row = stored_item("12", 5);
+            row["mapValue"]["fields"]["game"] = json!({ "stringValue": "keyforge" });
+            row
+        };
+        let collection = collection_from_document(&document(
+            "seller-1",
+            "Vault",
+            "2026-09-01T10:00:00",
+            vec![
+                stored_item("0012", 3),
+                stored_item("12", 4),
+                long_condition,
+                other_game,
+            ],
+        ));
+        assert_eq!(
+            collection.items.len(),
+            2,
+            "three spellings of one Pokémon slice, then the card of another game"
+        );
+        assert_eq!(collection.items[0].card_id, "12");
+        assert_eq!(collection.items[0].quantity, 8, "the copies add up");
+        assert_eq!(
+            collection.items[1].game, "keyforge",
+            "a game the table does not list keeps its own line, apart"
+        );
+        assert_eq!(collection.items[1].quantity, 5);
     }
 
     #[test]
