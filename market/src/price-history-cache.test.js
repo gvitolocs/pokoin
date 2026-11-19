@@ -180,13 +180,13 @@ test('the Cardmarket floor and language are part of the key', () => {
   assert.deepEqual(nm, peekCardPriceHistory('813622', '3m'), 'the default facet needs no option');
   assert.deepEqual([...store.keys()].sort(), [
     `${PREFIX}813622.3m`,
-    `${PREFIX}813622.3m.DE`,
-    `${PREFIX}813622.3m.POOR.JP`,
-    `${PREFIX}813622.3m.SP`,
+    `${PREFIX}813622.3m.NM-DE`,
+    `${PREFIX}813622.3m.POOR-JP`,
+    `${PREFIX}813622.3m.SP-EN`,
   ]);
   // The foil facet and the grade facet are one key each of their own.
   const reverseSp = saveCardPriceHistory('813622', '3m', asked('SP', 'EN'), { reverse: true, condition: 'SP' });
-  assert.ok(store.has(`${PREFIX}813622.3m.r.SP`), 'the reverse window of the same floor');
+  assert.ok(store.has(`${PREFIX}813622.3m.r.SP-EN`), 'the reverse window of the same floor');
   assert.deepEqual(peekCardPriceHistory('813622', '3m', { reverse: true, condition: 'SP' }), reverseSp);
   assert.deepEqual(rememberStaleCardPriceHistory('813622', '3m', { condition: 'SP' }), sp);
   // A floor nobody stored, and the same floor of another window.
@@ -206,6 +206,71 @@ test('a window stored without a grade facet is read as the default one', () => {
   saveCardPriceHistory('813622', '3m', { ...known, history: { cardtrader: { days: [{ day: '2026-11-16', lowestAskPkn: 1 }] } } }, { condition: 'SP' });
   assert.deepEqual(peekCardPriceHistory('813622', '3m'), known, 'the default window is still the old one');
   assert.equal(store.size, 2);
+});
+
+test('the floor and the language are both in the key, so PL/EN and NM/PL are two windows', () => {
+  // A key that left out whichever part happened to be the default made these two
+  // the same string: the second answer overwrote the first, and the visitor of
+  // the second facet was painted the first one's lines.
+  const facet = (condition, language, pkn) => ({
+    ...entryOf(),
+    condition,
+    language,
+    history: { cardmarketOffers: { status: 'available', series: [{ condition, language, days: [{ day: '2026-11-16', lowestPkn: pkn }] }] } },
+  });
+  const plEn = saveCardPriceHistory('813622', '3m', facet('PL', 'EN', 900), { condition: 'PL', language: 'EN' });
+  const nmPl = saveCardPriceHistory('813622', '3m', facet('NM', 'PL', 1300), { condition: 'NM', language: 'PL' });
+  assert.deepEqual([...store.keys()].sort(), [`${PREFIX}813622.3m.NM-PL`, `${PREFIX}813622.3m.PL-EN`]);
+  assert.equal(peekCardPriceHistory('813622', '3m', { condition: 'PL', language: 'EN' }).history.cardmarketOffers.series[0].days[0].lowestPkn, 900);
+  assert.equal(peekCardPriceHistory('813622', '3m', { condition: 'NM', language: 'PL' }).history.cardmarketOffers.series[0].days[0].lowestPkn, 1300);
+  assert.deepEqual(peekCardPriceHistory('813622', '3m', { condition: 'PL', language: 'EN' }), plEn);
+  assert.deepEqual(rememberStaleCardPriceHistory('813622', '3m', { condition: 'NM', language: 'PL' }), nmPl);
+  assert.equal(peekCardPriceHistory('813622', '3m', { condition: 'PL', language: 'PL' }), null, 'a third facet is neither of these');
+  assert.equal(peekCardPriceHistory('813622', '3m'), null, 'nor is the default facet');
+});
+
+test('no pair of floor and language shares a key with another', () => {
+  const floors = ['NM', 'SP', 'MP', 'PL', 'Poor'];
+  const languages = ['EN', 'PL', 'FR', '*'];
+  const keys = new Set();
+  for (const condition of floors) {
+    for (const language of languages) {
+      const before = store.size;
+      saveCardPriceHistory('813622', '3m', entryOf(), { condition, language });
+      assert.equal(store.size, before + 1, `${condition}/${language} wrote over another facet's window`);
+    }
+  }
+  for (const key of store.keys()) {
+    keys.add(key);
+  }
+  assert.equal(keys.size, floors.length * languages.length);
+});
+
+test('the default facet keeps the key of every window already stored', () => {
+  store.set(`${PREFIX}813622.3m`, JSON.stringify({ entry: entryOf(), savedAt: Date.now() }));
+  const known = entryOf();
+  assert.deepEqual(peekCardPriceHistory('813622', '3m'), known);
+  assert.deepEqual(peekCardPriceHistory('813622', '3m', { condition: 'NM', language: 'EN' }), known);
+  // The same key the default save writes: nothing is duplicated beside it.
+  saveCardPriceHistory('813622', '3m', known, { condition: 'NM', language: 'EN' });
+  assert.deepEqual([...store.keys()], [`${PREFIX}813622.3m`]);
+  for (const [condition, language] of [['SP', 'EN'], ['NM', 'PL'], ['PL', 'EN'], ['Poor', 'FR'], ['NM', 'FR']]) {
+    assert.equal(peekCardPriceHistory('813622', '3m', { condition, language }), null, `${condition}/${language} is not the default facet`);
+  }
+});
+
+test('an entry that names another facet than its key is read as absent', () => {
+  const stored = { ...entryOf(), condition: 'PL', language: 'FR' };
+  store.set(`${PREFIX}813622.3m.SP-EN`, JSON.stringify({ entry: stored, savedAt: Date.now() }));
+  assert.equal(peekCardPriceHistory('813622', '3m', { condition: 'SP', language: 'EN' }), null);
+  assert.equal(rememberStaleCardPriceHistory('813622', '3m', { condition: 'SP', language: 'EN' }), null);
+  assert.equal(peekCardPriceHistory('813622', '3m', { condition: 'PL', language: 'FR' }), null, 'the facet it names lives under another key');
+  store.set(`${PREFIX}813622.3m.NM-PL`, JSON.stringify({ entry: { ...entryOf(), condition: 'SP', language: 'PL' }, savedAt: Date.now() }));
+  assert.equal(peekCardPriceHistory('813622', '3m', { condition: 'NM', language: 'PL' }), null, 'one agreeing part is not enough');
+  // The read that follows is a fresh ask, and its answer takes that key.
+  const corrected = { ...entryOf(), condition: 'SP', language: 'EN' };
+  assert.deepEqual(saveCardPriceHistory('813622', '3m', corrected, { condition: 'SP', language: 'EN' }), corrected);
+  assert.deepEqual(peekCardPriceHistory('813622', '3m', { condition: 'SP', language: 'EN' }), corrected);
 });
 
 test('a v1 window is never read and goes with the first write', () => {
