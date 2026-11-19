@@ -362,10 +362,8 @@ impl Item {
     }
 
     fn read(object: &Map<String, Json>, at: Where) -> Result<Self> {
-        let card_id = sanitize_card_id(
-            object.get("cardId").or_else(|| object.get("card_id")),
-        )
-        .ok_or_else(|| at.unusable())?;
+        let card_id = sanitize_card_id(object.get("cardId").or_else(|| object.get("card_id")))
+            .ok_or_else(|| at.unusable())?;
         let quantity = sanitize_quantity(object.get("quantity")).ok_or_else(|| at.unusable())?;
         Ok(Self {
             game: sanitize_game(object.get("game"), at)?,
