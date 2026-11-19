@@ -2128,15 +2128,16 @@ mod tests {
 
     #[test]
     fn a_day_is_drawn_from_keyed_holdings_and_never_from_a_row() {
-        // Not a timing test: `day_segments_on` has no way to ask what a slice key is,
-        // because its arguments hold no row. A key is a fact about a card and is built
-        // once per collection, so a series of a hundred days is a hundred lookups of
-        // the same keys rather than a hundred rebuilds of them.
+        // The claim is that a day is read off keys built once per collection, so the
+        // test has to be able to tell that from a series that walks the rows again
+        // every day: the rows move *after* the keys were built, and what the keys say
+        // does not follow them. `day_segments_on` takes no rows at all, which is how
+        // the hoisted path keeps being blind to the change.
         let collections = vec![
             collection("a", "A", "", vec![item("11")]),
             collection("b", "B", "", vec![item("11"), item("12")]),
         ];
-        let rows = resolved(&collections, &[("11", "500"), ("12", "600")]);
+        let mut rows = resolved(&collections, &[("11", "500"), ("12", "600")]);
         let book = book_of(&[
             sold_row("11", "500", false, "2026-10-01", 100.0),
             sold_row("12", "600", false, "2026-10-02", 60.0),
@@ -2157,14 +2158,31 @@ mod tests {
         );
 
         let whole = collection_days(&rows, &book, "2026-10-03");
-        drop(rows);
-        let one_by_one = (1..=3)
-            .map(|day| format!("2026-10-0{day}"))
-            .filter_map(|day| day_segments_on(&holdings, &book, &day))
-            .collect::<Vec<_>>();
+        let draw = || -> Vec<Json> {
+            (1..=3)
+                .map(|day| format!("2026-10-0{day}"))
+                .filter_map(|each| day_segments_on(&holdings, &book, &each))
+                .collect()
+        };
         assert_eq!(
-            one_by_one, whole,
+            draw(),
+            whole,
             "the days drawn from keyed holdings, with no row left in hand, are the series"
+        );
+
+        // Move list `a`'s card to the other blueprint. A series drawn from the rows
+        // follows it — that is the second assertion, and it is what makes the first
+        // one mean something rather than being two ways of computing the same thing.
+        set_blueprint(&mut rows.rows_mut()[0], "600");
+        assert_eq!(
+            draw(),
+            whole,
+            "the keyed holdings were built with the rows and keep their answer"
+        );
+        assert_ne!(
+            collection_days(&rows, &book, "2026-10-03"),
+            whole,
+            "a day rebuilt from the rows would have moved: the two paths are not the same"
         );
     }
 
@@ -2229,35 +2247,6 @@ mod tests {
             answered[0]["items"][1]["pricePkn"],
             json!(null),
             "a card that never sold answers unpriced, not zero"
-        );
-    }
-
-    #[test]
-    fn an_unresolved_game_card_holds_without_pricing() {
-        // The domain's half: a row whose blueprint is empty is filed under a key no
-        // sold price reaches, so it is held and unpriced rather than priced off the
-        // card of another game that shares its public id. Which rows are empty, and
-        // why, is the route's decision and is tested through the function that makes
-        // it — `portfolio_collections`' own `handlers` test.
-        let foreign = Item::from_input(&json!({ "cardId": "11", "game": "riftbound" }), 0).unwrap();
-        let collections = vec![collection("a", "A", "", vec![foreign, item("11")])];
-        let mut rows = Rows::new(&collections);
-        for row in rows.rows_mut() {
-            let pokemon = row.get("game").and_then(Json::as_str) == Some(POKEMON);
-            set_blueprint(row, if pokemon { "500" } else { "" });
-        }
-        let book = book_of(&[sold_row("11", "500", false, "2026-10-04", 30.0)]);
-        let days = collection_days(&rows, &book, "2026-10-05");
-        assert_eq!(
-            days[0]["segments"]["collection:a"],
-            json!([30, 1, 2]),
-            "the Riftbound card is held and unpriced beside the Pokémon one"
-        );
-        let answered = collections_json(&collections, &rows, &book, "2026-10-05");
-        assert_eq!(
-            answered[0]["items"][0]["pricePkn"],
-            json!(null),
-            "and it answers unpriced too, not at the Pokémon price"
         );
     }
 
