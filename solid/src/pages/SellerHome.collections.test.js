@@ -239,7 +239,13 @@ test('a close asks once, inline, about a draft the server has never seen', () =>
   // The question sits in the footer, names its two answers, and the dialog does
   // not close on the way to them.
   assert.match(editorSrc, /data-testid="collections-discard-ask">Discard changes\?</);
-  assert.match(editorSrc, /class="btn is-danger" onClick=\{\(\) => props\.onClose\(\)\} data-testid="collections-discard"/);
+  // Point 6 of the lead's browser list changed these two answers over: keeping
+  // the draft is the primary button, and Discard must not be the gold one.
+  assert.match(editorSrc, /class="btn ghost is-danger" onClick=\{\(\) => props\.onClose\(\)\} data-testid="collections-discard"/);
+  assert.match(editorSrc, /class="btn" onClick=\{\(\) => leave\(\)\} data-testid="collections-keep-editing"/);
+  assert.doesNotMatch(editorSrc, /class="btn" onClick=\{\(\) => props\.onClose\(\)\}/, 'nothing that throws work away is primary');
+  assert.doesNotMatch(editorSrc, /class="btn ghost" onClick=\{\(\) => leave\(\)\} data-testid="collections-keep-editing"/);
+  assert.match(css, /\.collections-confirm \.btn\.is-danger \{\n\s*border-color: rgb\(196 92 92 \/ 55%\);\n\s*color: rgb\(224 138 138\);/);
   assert.match(editorSrc, /data-testid="collections-keep-editing"/);
   // Escape is about the query while one is in the field, so the field lives with
   // the decision and not inside either search component.

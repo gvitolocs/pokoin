@@ -210,6 +210,22 @@
   gap: 0.5rem;
 }
 
+/* The two answers are not one kind of button: keeping the draft is the primary
+   action and wears the dashboard's gold, while the one that throws the draft
+   away must not outshout it. The destructive button is the outline form in the
+   red the desk already uses for a danger row — there is no red token, so the
+   colour is literal here and nowhere else. */
+.collections-confirm .btn.is-danger {
+  border-color: rgb(196 92 92 / 55%);
+  color: rgb(224 138 138);
+}
+
+.collections-confirm .btn.is-danger:hover:not(:disabled),
+.collections-confirm .btn.is-danger:focus-visible {
+  border-color: rgb(196 92 92 / 90%);
+  color: rgb(255 155 143);
+}
+
 .collections-field {
   display: grid;
   gap: 0.25rem;

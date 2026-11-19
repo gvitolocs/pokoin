@@ -571,10 +571,10 @@ export default function CollectionEditor(props) {
           >
             <p class="collections-ask" data-testid="collections-discard-ask">Discard changes?</p>
             <span class="collections-confirm">
-              <button type="button" class="btn is-danger" onClick={() => props.onClose()} data-testid="collections-discard">
+              <button type="button" class="btn ghost is-danger" onClick={() => props.onClose()} data-testid="collections-discard">
                 Discard
               </button>
-              <button type="button" class="btn ghost" onClick={() => leave()} data-testid="collections-keep-editing">
+              <button type="button" class="btn" onClick={() => leave()} data-testid="collections-keep-editing">
                 Keep editing
               </button>
             </span>
