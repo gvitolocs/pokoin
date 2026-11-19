@@ -1,7 +1,18 @@
 import { createEffect, createMemo, createSignal, For, Match, Show, Switch } from 'solid-js';
 import { GAMES } from '@market/game.js';
+import {
+  isLocationStyleUnconfirmed,
+  LOCATION_ASK_PENDING,
+  LOCATION_ASK_QUESTION,
+  locationAskFromRefusal,
+  locationParseToSend,
+  locationReadingLabels,
+  needsLocationConfirmation,
+} from '@market/box-name.js';
 
 const GAME_LABEL = Object.fromEntries(Object.values(GAMES).map((game) => [game.id, game.name]));
+
+const NO_CONFIRMATION = { needed: false, count: 0, examples: [] };
 
 const UNRESOLVED_REASON = {
   unknown_cardmarket_id: 'No catalog match for this Cardmarket id',
@@ -34,6 +45,8 @@ export default function CardTraderPowerToolsModal(props) {
   const [localError, setLocalError] = createSignal('');
   const [stackSizeTouched, setStackSizeTouched] = createSignal(false);
   const [locationTouched, setLocationTouched] = createSignal(false);
+  /** The question the import itself refused to answer for (the server's 409). */
+  const [ask, setAsk] = createSignal(null);
 
   function clearPreview() {
     props.onClearPreview?.();
@@ -42,6 +55,7 @@ export default function CardTraderPowerToolsModal(props) {
   function invalidateUploadState() {
     clearPreview();
     setStep('upload');
+    setAsk(null);
     setAnalyzeToken((n) => n + 1);
   }
 
@@ -57,16 +71,22 @@ export default function CardTraderPowerToolsModal(props) {
     setStackSize(0);
     setStackSizeTouched(false);
     setLocationTouched(false);
+    setAsk(null);
     setAnalyzeToken(0);
     clearPreview();
   });
 
-  // After analyze, adopt what the CSV actually contains unless the seller already chose.
+  // After analyze, adopt what the CSV actually contains unless the seller already
+  // chose. A trailing number is never read as a stack without the seller saying so,
+  // so nothing is preselected while the reading is ambiguous: the question comes
+  // first and the import waits for a choice.
   createEffect(
     () => (step() === 'preview' && props.preview?.ok ? props.preview : null),
     (preview) => {
       if (!preview) return;
-      if (!locationTouched() && preview.locationParse) setLocationParse(preview.locationParse);
+      if (!locationTouched() && !needsLocationConfirmation(preview).needed && preview.locationParse) {
+        setLocationParse(preview.locationParse);
+      }
       const suggested = Number(preview.suggestedStackSize) || 0;
       if (!stackSizeTouched() && suggested > 0) setStackSize(suggested);
     },
@@ -97,6 +117,15 @@ export default function CardTraderPowerToolsModal(props) {
     numberedInStack: numberedInStack(),
     locationParse: locationParse() === 'auto' ? 'auto' : locationParse(),
   }));
+
+  /** What the seller has to confirm about their locations, from the answer or the 409. */
+  const confirmation = createMemo(() => {
+    if (ask()) return ask();
+    if (!props.preview?.ok) return NO_CONFIRMATION;
+    return needsLocationConfirmation(props.preview);
+  });
+  /** Confirmation is owed and nothing picked yet: no reading is applied, no import starts. */
+  const awaitingChoice = createMemo(() => confirmation().needed && locationParse() === 'auto');
 
   const visibleOverflows = () => {
     const capacity = stackSize() > 0 ? stackSize() : Number(props.preview?.suggestedStackSize) || 0;
@@ -164,11 +193,26 @@ export default function CardTraderPowerToolsModal(props) {
 
   async function confirmFull() {
     setLocalError('');
+    // A reading the seller has not chosen is not sent, and it is not guessed here either.
+    const parse = locationParseToSend({
+      chosen: locationParse(),
+      detected: props.preview?.locationParse,
+      needed: confirmation().needed,
+    });
+    if (!parse) return false;
     const capacity = stackSize() > 0 ? stackSize() : Number(props.preview?.suggestedStackSize) || 1;
-    const parse = locationParse() === 'auto' ? (props.preview?.locationParse || 'as_is') : locationParse();
     const payload = { ...syncOptions(), stackSize: capacity, locationParse: parse };
     if (unresolvedCount() > 0) payload.powerToolsRecognizedOnly = true;
-    await props.onConfirmWithCsv?.(payload);
+    try {
+      await props.onConfirmWithCsv?.(payload);
+    } catch (err) {
+      // Only the style the server was never given is this dialog's to answer.
+      if (!isLocationStyleUnconfirmed(err)) throw err;
+      setLocationTouched(false);
+      setLocationParse('auto');
+      setAsk(locationAskFromRefusal(err));
+    }
+    return true;
   }
 
   const close = () => props.onClose?.();
@@ -360,7 +404,37 @@ export default function CardTraderPowerToolsModal(props) {
                 </div>
               </Show>
 
-              <fieldset class="ct-pt-fieldset">
+              <Show when={confirmation().needed}>
+                <div class="ct-pt-ask">
+                  <p class="page-lede"><strong id="ct-pt-ask-title">{LOCATION_ASK_QUESTION}</strong></p>
+                  <Show when={confirmation().examples.length}>
+                    <ul class="ct-pt-ask-examples">
+                      <For each={confirmation().examples}>
+                        {(reading) => {
+                          const labels = () => locationReadingLabels(reading);
+                          return (
+                            <li>
+                              <code>{reading.raw}</code>
+                              {' → '}
+                              <span class="ct-pt-reading">{labels().asBox}</span>
+                              <span class="page-lede muted"> / </span>
+                              <span class="ct-pt-reading">{labels().asStack}</span>
+                            </li>
+                          );
+                        }}
+                      </For>
+                    </ul>
+                  </Show>
+                  <Show when={confirmation().count > confirmation().examples.length}>
+                    <p class="page-lede muted">Showing {confirmation().examples.length} of {confirmation().count}.</p>
+                  </Show>
+                  <Show when={awaitingChoice()}>
+                    <p class="ct-pt-ask-note">{LOCATION_ASK_PENDING}</p>
+                  </Show>
+                </div>
+              </Show>
+
+              <fieldset class="ct-pt-fieldset" aria-describedby={confirmation().needed ? 'ct-pt-ask-title' : undefined}>
                 <legend>How should we read those locations?</legend>
                 <For each={LOCATION_MODES}>
                   {(mode) => (
@@ -373,6 +447,7 @@ export default function CardTraderPowerToolsModal(props) {
                         onChange={() => {
                           setLocationTouched(true);
                           setLocationParse(mode.id);
+                          setAsk(null);
                           reAnalyzeWith({ locationParse: mode.id });
                         }}
                       />
@@ -480,7 +555,13 @@ export default function CardTraderPowerToolsModal(props) {
               </Show>
               <Show when={localError()}><p class="ct-connect-err">{localError()}</p></Show>
               <div class="ct-connect-actions">
-                <button type="button" class="btn btn-cardtrader" disabled={busyAll() || !canImport()} onClick={confirmFull}>
+                <button
+                  type="button"
+                  class="btn btn-cardtrader"
+                  disabled={busyAll() || !canImport() || awaitingChoice()}
+                  title={awaitingChoice() ? LOCATION_ASK_PENDING : undefined}
+                  onClick={confirmFull}
+                >
                   {props.busy
                     ? 'Starting…'
                     : unresolvedCount() > 0

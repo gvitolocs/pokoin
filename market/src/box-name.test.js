@@ -7,6 +7,8 @@ import {
   boxNameAskTitle,
   boxNameChoiceLabels,
   isLocationStyleUnconfirmed,
+  locationAskFromRefusal,
+  locationParseToSend,
   locationReadingLabels,
   needsLocationConfirmation,
   readBoxNameChoices,
@@ -143,4 +145,22 @@ test('a browser with no storage neither reads nor throws', () => {
   } finally {
     if (saved !== undefined) globalThis.localStorage = saved;
   }
+});
+
+test('the mode sent is the one the seller chose, never an unchosen auto', () => {
+  assert.equal(locationParseToSend({ chosen: 'structured', detected: 'trailing_stack', needed: true }), 'structured');
+  assert.equal(locationParseToSend({ chosen: 'as_is', detected: 'trailing_stack', needed: false }), 'as_is', 'a choice beats the detected mode');
+  assert.equal(locationParseToSend({ chosen: 'auto', detected: 'trailing_stack', needed: false }), 'trailing_stack', 'auto borrows the detected mode when nothing is ambiguous');
+  assert.equal(locationParseToSend({ chosen: 'auto', detected: '', needed: false }), 'as_is', 'with nothing detected the locations stay as written');
+  assert.equal(locationParseToSend({ chosen: 'auto', detected: 'trailing_stack', needed: true }), null, 'an ambiguous book with no choice sends nothing');
+  assert.equal(locationParseToSend({ chosen: '', detected: 'trailing_stack', needed: true }), null);
+});
+
+test('the refusal asks the question again even when it carries no examples', () => {
+  const body = { error: 'location_style_unconfirmed', locationExamples: ['Focobomba 006'] };
+  const ask = locationAskFromRefusal({ status: 409, body });
+  assert.equal(ask.needed, true);
+  assert.deepEqual(ask.examples.map((reading) => reading.raw), ['Focobomba 006'], 'the answer is the seller’s own example');
+  assert.equal(locationAskFromRefusal({ status: 409, body: { error: 'other' } }).needed, true, 'the question is asked regardless of the examples it brings');
+  assert.equal(locationAskFromRefusal({ status: 409, body: {} }).needed, true, 'no examples still means the style was never chosen');
 });

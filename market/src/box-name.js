@@ -133,6 +133,23 @@ export function isLocationStyleUnconfirmed(err) {
   return String(body.error || '') === LOCATION_STYLE_UNCONFIRMED;
 }
 
+/** What that refusal asks: the same question, and it is always owed an answer. */
+export function locationAskFromRefusal(err) {
+  return { ...needsLocationConfirmation(err?.body), needed: true };
+}
+
+/**
+ * The style an import sends: what the seller picked. Nothing is sent while a
+ * confirmation is owed and nobody has answered — the detected style is a guess,
+ * and `null` says so. Without a confirmation the dialog keeps its old reading.
+ */
+export function locationParseToSend({ chosen, detected, needed } = {}) {
+  const picked = String(chosen || '');
+  if (picked && picked !== 'auto') return picked;
+  if (needed) return null;
+  return String(detected || '') || 'as_is';
+}
+
 function storage() {
   try {
     return globalThis.localStorage || null;
