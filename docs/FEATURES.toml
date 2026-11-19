@@ -176,16 +176,16 @@ status = "partial"
 id = "listing-create"
 name = "Seller lists copies of a card"
 money = true
-entry = ["solid/src/components/desk/ListingForm.jsx", "market/src/api.js", "market/src/listing-languages.js"]
-proof = ["pokoin-rust/crates/commerce/tests/listing_game_flow.rs::a_listing_is_stored_under_the_catalog_that_holds_its_card", "pokoin-rust/crates/commerce/tests/seller_api_flow.rs::a_grant_connects_sets_stock_lists_and_hears_every_event", "market/src/listing-languages.test.js", "solid/src/components/desk/ListingForm.test.js"]
+entry = ["solid/src/components/desk/ListingForm.jsx", "solid/src/components/BoxNameAsk.jsx", "market/src/api.js", "market/src/box-name.js", "market/src/listing-languages.js"]
+proof = ["pokoin-rust/crates/commerce/tests/listing_game_flow.rs::a_listing_is_stored_under_the_catalog_that_holds_its_card", "pokoin-rust/crates/commerce/tests/seller_api_flow.rs::a_grant_connects_sets_stock_lists_and_hears_every_event", "market/src/listing-languages.test.js", "market/src/box-name.test.js", "solid/src/components/desk/ListingForm.test.js"]
 status = "proved"
 
 [[flow]]
 id = "listing-edit-stock"
 name = "Seller edits price, quantity, status, condition, language or properties of a listing"
 money = true
-entry = ["solid/src/components/desk/ListingForm.jsx", "solid/src/components/inventory/ListingEditDrawer.jsx", "solid/src/lib/dialog-focus.js", "solid/src/components/pricer/StrategyEditor.jsx", "solid/src/pages/Inventory.jsx", "solid/src/components/inventory/InventoryBoard.jsx", "market/src/listing-row-edit.js", "market/src/inventory-price.js", "market/src/desk.css", "market/src/api.js"]
-proof = ["pokoin-rust/crates/commerce/tests/price_ownership_flow.rs::po1_one_owner_a_typed_price_takes_the_listing_out_of_its_group", "pokoin-rust/crates/commerce/tests/owner_book_stamp_flow.rs::the_owner_book_stamp_moves_with_every_change", "pokoin-rust/crates/commerce/tests/listing_ct_facets_flow.rs::a_language_edit_puts_the_product_before_the_row_is_saved", "pokoin-rust/crates/commerce/tests/listing_ct_facets_flow.rs::a_flag_turned_off_is_sent_as_false", "pokoin-rust/crates/commerce/tests/listing_ct_facets_flow.rs::an_import_only_seller_is_never_refused_a_facet", "market/src/listing-row-edit.test.js", "solid/src/components/inventory/row-actions.test.js", "solid/src/components/inventory/listing-edit-drawer.test.js", "solid/src/components/pricer/strategy-editor-shared.test.js", "market/src/inventory-price.test.js", "solid/src/components/inventory/market-cell.test.js"]
+entry = ["solid/src/components/desk/ListingForm.jsx", "solid/src/components/BoxNameAsk.jsx", "solid/src/components/inventory/ListingEditDrawer.jsx", "solid/src/lib/dialog-focus.js", "solid/src/components/pricer/StrategyEditor.jsx", "solid/src/pages/Inventory.jsx", "solid/src/components/inventory/InventoryBoard.jsx", "market/src/listing-row-edit.js", "market/src/inventory-price.js", "market/src/box-name.js", "market/src/desk.css", "market/src/api.js"]
+proof = ["pokoin-rust/crates/commerce/tests/price_ownership_flow.rs::po1_one_owner_a_typed_price_takes_the_listing_out_of_its_group", "pokoin-rust/crates/commerce/tests/owner_book_stamp_flow.rs::the_owner_book_stamp_moves_with_every_change", "pokoin-rust/crates/commerce/tests/listing_ct_facets_flow.rs::a_language_edit_puts_the_product_before_the_row_is_saved", "pokoin-rust/crates/commerce/tests/listing_ct_facets_flow.rs::a_flag_turned_off_is_sent_as_false", "pokoin-rust/crates/commerce/tests/listing_ct_facets_flow.rs::an_import_only_seller_is_never_refused_a_facet", "market/src/listing-row-edit.test.js", "solid/src/components/inventory/row-actions.test.js", "solid/src/components/inventory/listing-edit-drawer.test.js", "solid/src/components/pricer/strategy-editor-shared.test.js", "market/src/inventory-price.test.js", "solid/src/components/inventory/market-cell.test.js", "market/src/box-name.test.js", "solid/src/components/desk/ListingForm.test.js"]
 status = "proved"
 
 [[flow]]
@@ -232,16 +232,16 @@ status = "proved"
 id = "scan-batch-submit"
 name = "Scanned rows become listings; unpriced rows join the batch pricing group"
 money = true
-entry = ["solid/src/pages/ScanDesk.jsx", "market/src/scan-api.js", "market/src/scan-model.js"]
-proof = ["pokoin-rust/crates/external/tests/scan_batch_pricing_flow.rs::an_unpriced_row_is_listed_paused_and_joins_the_batch_group"]
+entry = ["solid/src/pages/ScanDesk.jsx", "solid/src/pages/scan-desk/bars.jsx", "solid/src/components/BoxNameAsk.jsx", "market/src/scan-api.js", "market/src/scan-model.js", "market/src/box-name.js"]
+proof = ["pokoin-rust/crates/external/tests/scan_batch_pricing_flow.rs::an_unpriced_row_is_listed_paused_and_joins_the_batch_group", "solid/src/pages/scan-desk/box-name-ask.test.js", "solid/src/pages/scan-desk/defaults-write-source.test.js", "market/src/box-name.test.js"]
 status = "proved"
 
 [[flow]]
 id = "cardtrader-connect"
 name = "Seller connects CardTrader; webhooks decrement stock and write sales"
 money = true
-entry = ["solid/src/pages/CardTraderZero.jsx", "solid/src/pages/SyncReview.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/crates/external/src/cardtrader/integration.rs::connect_disconnect_status_cycle", "solid/src/pages/SyncReview.test.js"]
+entry = ["solid/src/pages/CardTraderZero.jsx", "solid/src/pages/SyncReview.jsx", "solid/src/components/profile/CardTraderPowerToolsModal.jsx", "solid/src/components/profile/CardTraderConnectPanel.jsx", "solid/src/components/BoxNameAsk.jsx", "market/src/api.js", "market/src/box-name.js"]
+proof = ["pokoin-rust/crates/external/src/cardtrader/integration.rs::connect_disconnect_status_cycle", "solid/src/pages/SyncReview.test.js", "solid/src/components/profile/cardtrader-power-tools.test.js", "market/src/box-name.test.js"]
 status = "partial"
 
 [[flow]]
