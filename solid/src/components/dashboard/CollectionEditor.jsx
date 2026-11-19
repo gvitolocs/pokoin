@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, Show, onSettled } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, Show, onCleanup, onSettled } from 'solid-js';
 import { Portal } from '@solidjs/web';
 import { cardFromCatalogRow, fetchSearch } from '@market/api.js';
 import { LIST_LANGS, MOOD_CONDS } from '@market/card-desk.js';
@@ -29,6 +29,13 @@ const GAME_CHOICES = Object.values(GAMES)
 const SEARCH_LIMIT = 12;
 /** Two hundred ms: the seller is typing a name, not running a query. */
 const SEARCH_DEBOUNCE = 200;
+/** How long the row a search result just touched stays marked. */
+const TOUCHED_MS = 1400;
+
+/** The motion preference, read when it is needed rather than watched. */
+function reducedMotion() {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
+}
 
 /** What the price cell says for the three lines that are not an amount. */
 const PRICE_TEXT = {
@@ -79,6 +86,7 @@ function SearchUi(props) {
         <span>Find a card</span>
         <input
           type="search"
+          ref={(el) => props.bindField?.(el)}
           value={props.query()}
           placeholder={props.placeholder}
           disabled={props.atCap}
@@ -123,6 +131,7 @@ function HostCardSearch(props) {
     <SearchUi
       query={props.query}
       onQuery={props.onQuery}
+      bindField={props.bindField}
       rows={searchRows(found(), props.gameId)}
       placeholder="Pokémon card name, set or number"
       onPick={props.onPick}
@@ -171,6 +180,7 @@ function CatalogCardSearch(props) {
     <SearchUi
       query={props.query}
       onQuery={props.onQuery}
+      bindField={props.bindField}
       rows={busy() ? [] : rows()}
       placeholder="Card name in this game"
       onPick={props.onPick}
@@ -188,6 +198,10 @@ function CatalogCardSearch(props) {
  * `props.item` is the row's accessor: the row is keyed on its own id, so this
  * component is never re-made by an edit of its own and every focus in it
  * survives the edit.
+ *
+ * `props.showGame` is whether a row has to name its game at all, and
+ * `props.touched` marks the row a search result just joined or increased —
+ * which one moved is otherwise invisible in a list that scrolled to it.
  */
 function ItemRow(props) {
   const item = () => props.item;
@@ -215,7 +229,7 @@ function ItemRow(props) {
   // four lines the cell says, this only writes it.
   const line = createMemo(() => itemPriceLine(item(), { currencyPending: Boolean(props.currencyPending) }));
   return (
-    <li class="collections-item" data-testid="collections-item">
+    <li class={['collections-item', { 'is-touched': props.touched }]} data-testid="collections-item">
       <div class="collections-item-identity">
         <strong>{item().name || 'Card'}</strong>
         <em>{meta()}</em>
@@ -331,7 +345,31 @@ export default function CollectionEditor(props) {
 
   let box;
   let nameBox;
+  let searchBox;
+  let itemBox;
+  let touchTimer;
+  const [flashed, setFlashed] = createSignal('');
   const dirty = createMemo(() => draftChanged(draft(), book().saved()));
+  const bindSearch = (el) => {
+    searchBox = el;
+  };
+
+  // The dialog owns its own scroll, so a row joined at the bottom of a long
+  // list is off screen with nothing to say where it went: bring it into view,
+  // mark it for a moment, and leave the caret in the field the seller is
+  // still typing into. The DOM work waits for the list to have been written.
+  function touchRow(rowId, index) {
+    setFlashed(rowId);
+    clearTimeout(touchTimer);
+    touchTimer = setTimeout(() => setFlashed(''), TOUCHED_MS);
+    queueMicrotask(() => {
+      const row = itemBox?.children?.[index];
+      if (row) row.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' });
+      searchBox?.focus({ preventScroll: true });
+    });
+  }
+
+  onCleanup(() => clearTimeout(touchTimer));
 
   function leave(key = '') {
     switch (closeIntent({ key, search: searchText(), dirty: dirty(), asking: asking() })) {
@@ -390,10 +428,14 @@ export default function CollectionEditor(props) {
     // The list grew, or this row was already in it, or the cap refused the add:
     // only the third case has to say something, because the field just did
     // nothing at all.
-    const merged = before.items.some((entry) => entry.id === row.id);
-    if (next.items.length === before.items.length && !merged) {
+    const at = next.items.findIndex((entry) => entry.id === row.id);
+    if (at < 0) {
       setServerProblem(`A collection holds up to ${limits().items} cards.`);
+      return;
     }
+    // A new slice joins at the end; an existing one keeps its place and only
+    // its copies count moves. Either way that row is what the seller just did.
+    touchRow(next.items[at].rowId, at);
   }
 
   async function save() {
@@ -453,6 +495,7 @@ export default function CollectionEditor(props) {
               <CatalogCardSearch
                 query={searchText}
                 onQuery={setSearchText}
+                bindField={bindSearch}
                 gameId={pickedGame()}
                 onPick={add}
                 atCap={atCap()}
@@ -463,6 +506,7 @@ export default function CollectionEditor(props) {
               <HostCardSearch
                 query={searchText}
                 onQuery={setSearchText}
+                bindField={bindSearch}
                 gameId={pickedGame()}
                 onPick={add}
                 atCap={atCap()}
@@ -477,7 +521,7 @@ export default function CollectionEditor(props) {
           </p>
 
           <Show when={draft().items.length}>
-            <ul class="collections-items" data-testid="collections-items">
+            <ul class="collections-items" ref={(el) => { itemBox = el; }} data-testid="collections-items">
               {/* Keyed on the row, not the slice: a facet edit writes a new object
                   into the list, and a row re-made for it loses the focus in it. */}
               <For each={draft().items} keyed={(row) => row.rowId}>
@@ -485,6 +529,7 @@ export default function CollectionEditor(props) {
                   <ItemRow
                     item={item()}
                     showGame={rowsShowGame(draft().items)}
+                    touched={flashed() === item().rowId}
                     limits={limits()}
                     currency={props.currency}
                     currencyPending={Boolean(props.currencyPending)}

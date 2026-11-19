@@ -297,6 +297,31 @@ test('one card in the draft is one row, and keeps what is typed in it', () => {
   assert.doesNotMatch(editorSrc, /onInput=\{\(event\) => patch\(\{ quantity: Number/);
 });
 
+test('an added card is scrolled to, marked, and the field keeps the caret', () => {
+  // The row a search result touched is the one whose slice is in the list: a
+  // new slice joins at the end, an existing one keeps its place with more copies.
+  assert.match(editorSrc, /const at = next\.items\.findIndex\(\(entry\) => entry\.id === row\.id\);/);
+  assert.match(editorSrc, /touchRow\(next\.items\[at\]\.rowId, at\)/);
+  assert.match(editorSrc, /setServerProblem\(`A collection holds up to \$\{limits\(\)\.items\} cards\.`\);\n\s*return;/);
+  // Both happen after the list has been written, and inside the dialog's own
+  // scroll: `nearest` moves the body, not the page behind it.
+  assert.match(editorSrc, /queueMicrotask\(\(\) => \{\n\s*const row = itemBox\?\.children\?\.\[index\];/);
+  assert.match(editorSrc, /row\.scrollIntoView\(\{ block: 'nearest', behavior: reducedMotion\(\) \? 'auto' : 'smooth' \}\)/);
+  assert.match(editorSrc, /searchBox\?\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(editorSrc, /ref=\{\(el\) => props\.bindField\?\.\(el\)\}/);
+  assert.match(editorSrc, /bindField=\{bindSearch\}/);
+  assert.match(editorSrc, /touched=\{flashed\(\) === item\(\)\.rowId\}/);
+  assert.match(editorSrc, /touchTimer = setTimeout\(\(\) => setFlashed\(''\), TOUCHED_MS\)/);
+  assert.match(editorSrc, /const TOUCHED_MS = 1400;/, 'the mark lasts as long as the animation');
+  assert.match(editorSrc, /onCleanup\(\(\) => clearTimeout\(touchTimer\)\)/);
+  assert.match(editorSrc, /window\.matchMedia\?\.\('\(prefers-reduced-motion: reduce\)'\)\?\.matches === true/);
+  // The mark: an edge that stays for the length of the mark, and a ring that is
+  // only ever an arrival, so reduced motion reads the same sentence.
+  assert.match(css, /\.collections-item\.is-touched \{\n\s*border-color: var\(--yellow\);/);
+  assert.match(css, /@media \(prefers-reduced-motion: no-preference\) \{\n\s*\.collections-item\.is-touched \{\n\s*animation: collections-touch 1400ms/);
+  assert.match(css, /@keyframes collections-touch \{/);
+});
+
 test('the game picker stays on the search field row while results paint under it', () => {
   const add = /\.collections-add \{([^}]*)\}/.exec(css)?.[1] || '';
   assert.match(add, /align-items: start;/, 'the row is pinned to its top, not to whatever the results made it');

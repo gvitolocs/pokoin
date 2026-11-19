@@ -358,6 +358,31 @@
   background: var(--g2);
 }
 
+/* The row a search result just joined or increased. It is often at the bottom
+   of a long list, so the editor scrolls to it and marks it: the ring is the
+   mark arriving and fading, and the edge stays gold for as long as the mark
+   does. Under `prefers-reduced-motion: reduce` there is no arrival — the same
+   edge, appearing and going, says the same thing. */
+.collections-item.is-touched {
+  border-color: var(--yellow);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .collections-item.is-touched {
+    animation: collections-touch 1400ms ease-out both;
+  }
+}
+
+@keyframes collections-touch {
+  from {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--yellow) 45%, transparent);
+  }
+
+  to {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
+
 .collections-item-identity {
   display: flex;
   flex-wrap: wrap;
