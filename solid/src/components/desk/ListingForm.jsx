@@ -194,6 +194,7 @@ export default function ListingForm(props) {
     // card's catalog languages do not list it (an old card can be sold in Indonesian).
     const stored = editingId() ? [offerLanguage(props.editing, card())] : [];
     return deskLanguageChips({
+      game: gameId,
       nationality: card().nationality,
       setName: props.identity?.set || card().set,
       releaseLanguages: card().releaseLanguages,
@@ -201,6 +202,7 @@ export default function ListingForm(props) {
     });
   });
   const redirects = createMemo(() => versionRedirects(props.versions || [], card().id, listLangs(), {
+    game: gameId,
     nationality: card().nationality,
   }));
   const langKey = createMemo(() => listLangs().join(','));
