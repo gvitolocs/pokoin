@@ -143,6 +143,9 @@ pub struct PowerToolsImport {
     pub numbered_in_stack: bool,
     /// The mode the rows were read with (never `auto`).
     pub location_parse: String,
+    /// The mode the request asked for: `auto` when it named none or named an
+    /// unknown one, so a writer can tell a seller's choice from a guess.
+    pub location_parse_requested: String,
     pub location_detection: Value,
 }
 
@@ -152,15 +155,36 @@ impl PowerToolsImport {
     }
 }
 
+/// The body a request that WRITES locations must answer with instead of
+/// writing: set when the seller left `locationParse` to detection and the rows
+/// end in numbers that could be box names. `None` when the request may go
+/// through, which is every explicit mode and every unambiguous batch.
+pub fn location_style_refusal(import: &PowerToolsImport) -> Option<Value> {
+    if import.location_parse_requested != "auto"
+        || import.location_detection["confirmationNeeded"] != true
+    {
+        return None;
+    }
+    Some(json!({
+        "error": "location_style_unconfirmed",
+        "message": "Choose how to read locations that end in a number.",
+        "locationParse": import.location_detection["locationParse"],
+        "ambiguousCount": import.location_detection["ambiguousCount"],
+        "ambiguousExamples": import.location_detection["ambiguousExamples"],
+    }))
+}
+
 /// `detectPowerToolsLocationStyle`: which location mode most rows look like.
 pub fn detect_location_style(locations: &[String]) -> Value {
     let mut examples: Vec<String> = Vec::new();
+    let mut cleaned: Vec<String> = Vec::new();
     let (mut structured, mut trailing, mut as_is) = (0i64, 0i64, 0i64);
     for raw in locations {
         let text = clean_text(Some(raw), 120);
         if text.is_empty() {
             continue;
         }
+        cleaned.push(text.clone());
         if examples.len() < 6 && !examples.contains(&text) {
             examples.push(text.clone());
         }
@@ -189,10 +213,14 @@ pub fn detect_location_style(locations: &[String]) -> Value {
     } else {
         "as_is"
     };
+    let ambiguity = pt::location_ambiguity(&cleaned);
     json!({
         "locationParse": location_parse,
         "locationExamples": examples,
         "counts": { "structured": structured, "trailing": trailing, "asIs": as_is, "total": total },
+        "ambiguousCount": ambiguity.count,
+        "ambiguousExamples": ambiguity.examples_json(),
+        "confirmationNeeded": ambiguity.confirmation_needed,
     })
 }
 
@@ -272,6 +300,7 @@ pub fn parse_power_tools_body(body: &Value) -> ApiResult<Option<PowerToolsImport
         stack_size,
         numbered_in_stack,
         location_parse,
+        location_parse_requested: requested.to_string(),
         location_detection: detection,
     }))
 }
@@ -356,6 +385,9 @@ pub fn power_tools_preview(import: &PowerToolsImport, products: &[NormalizedProd
         "suggestedStackSize": import.suggested_stack_size,
         "locationDetection": import.location_detection,
         "locationExamples": import.location_detection["locationExamples"],
+        "ambiguousCount": import.location_detection["ambiguousCount"],
+        "ambiguousExamples": import.location_detection["ambiguousExamples"],
+        "confirmationNeeded": import.location_detection["confirmationNeeded"],
         "games": pt::games_from_cardtrader_products(products),
     })
 }
@@ -1382,6 +1414,117 @@ mod tests {
         assert_eq!(style(&["Box 1", "Box 2", "Shelf"]), "trailing_stack");
         assert_eq!(style(&["Shelf", "Drawer"]), "as_is");
         assert_eq!(style(&[]), "as_is");
+    }
+
+    /// The one table of location values every detector copy is read against.
+    fn location_style_cases() -> Value {
+        serde_json::from_str(include_str!("../fixtures/location_style_cases.json"))
+            .expect("case table")
+    }
+
+    fn listed(values: &Value) -> Vec<String> {
+        values
+            .as_array()
+            .expect("list")
+            .iter()
+            .map(|value| value.as_str().expect("text").to_string())
+            .collect()
+    }
+
+    #[test]
+    fn detection_names_the_trailing_numbers_it_cannot_read() {
+        let table = location_style_cases();
+        for case in table["cases"].as_array().expect("cases") {
+            let raw = case["raw"].as_str().expect("raw");
+            let ambiguous = case["ambiguous"].as_bool().expect("ambiguous");
+            let style = detect_location_style(&[raw.to_string()]);
+            assert_eq!(
+                style["ambiguousCount"].as_i64(),
+                Some(i64::from(ambiguous)),
+                "{raw}"
+            );
+            assert_eq!(
+                style["confirmationNeeded"].as_bool(),
+                Some(ambiguous),
+                "{raw}"
+            );
+            let examples = style["ambiguousExamples"].as_array().expect("examples");
+            if ambiguous {
+                let both = json!({ "raw": case["raw"], "asBox": case["asBox"], "asStack": case["asStack"] });
+                assert_eq!(examples[0], both, "{raw}");
+            } else {
+                assert_eq!(examples.len(), 0, "{raw}");
+            }
+        }
+        let expected = &table["ambiguousListDetection"];
+        let style = detect_location_style(&listed(&table["ambiguousList"]));
+        for key in [
+            "locationParse",
+            "ambiguousCount",
+            "confirmationNeeded",
+            "ambiguousExamples",
+        ] {
+            assert_eq!(style[key], expected[key], "{key}");
+        }
+        for key in ["dashOnly", "structuredOnly"] {
+            let style = detect_location_style(&listed(&table[key]));
+            assert_eq!(style["ambiguousCount"], 0, "{key}");
+            assert_eq!(style["confirmationNeeded"], false, "{key}");
+        }
+    }
+
+    const AMBIGUOUS_CSV: &str = "name,set,cn,condition,language,quantity,price,location\n\
+        Pikachu,Base Set,58/102,NM,English,1,2.50,Focobomba 006\n\
+        Charmander,Base Set,46/102,LP,English,2,1.00,Focobomba 007\n\
+        Squirtle,Base Set,63/102,NM,English,1,1.00,FUOCOBOMBA 006 - 16\n";
+    const SETTLED_CSV: &str = "name,set,cn,condition,language,quantity,price,location\n\
+        Pikachu,Base Set,58/102,NM,English,1,2.50,BOX 001 - 131\n\
+        Charmander,Base Set,46/102,LP,English,2,1.00,BOX 001 - 132\n";
+
+    #[test]
+    fn an_import_would_have_to_guess_the_box_name() {
+        let refused = location_style_cases()["refusalOfAmbiguousList"].clone();
+        for body in [
+            json!({ "powerToolsCsv": { "pokemon": AMBIGUOUS_CSV } }),
+            json!({ "powerToolsCsv": { "pokemon": AMBIGUOUS_CSV }, "locationParse": "auto" }),
+        ] {
+            let import = parse_power_tools_body(&body)
+                .expect("parsed")
+                .expect("rows");
+            assert_eq!(import.location_parse_requested, "auto", "{body}");
+            assert_eq!(
+                location_style_refusal(&import),
+                Some(refused.clone()),
+                "{body}"
+            );
+        }
+        for (mode, box_name, stack) in [
+            ("as_is", "Focobomba 006", 1),
+            ("trailing_stack", "Focobomba", 6),
+        ] {
+            let import = parse_power_tools_body(
+                &json!({ "powerToolsCsv": { "pokemon": AMBIGUOUS_CSV }, "locationParse": mode }),
+            )
+            .expect("parsed")
+            .expect("rows");
+            assert_eq!(
+                location_style_refusal(&import),
+                None,
+                "{mode} is the seller's own choice"
+            );
+            let row = &import.by_game["pokemon"][0];
+            assert_eq!(row.box_name, box_name, "{mode}");
+            assert_eq!(row.stack, stack, "{mode}");
+        }
+        // Nothing ambiguous: auto keeps importing exactly as it did.
+        let import =
+            parse_power_tools_body(&json!({ "powerToolsCsv": { "pokemon": SETTLED_CSV } }))
+                .expect("parsed")
+                .expect("rows");
+        assert_eq!(import.location_parse, "trailing_stack");
+        assert_eq!(location_style_refusal(&import), None);
+        assert_eq!(import.by_game["pokemon"][0].box_name, "BOX 001");
+        assert_eq!(import.by_game["pokemon"][0].stack, 131);
     }
 
     #[test]

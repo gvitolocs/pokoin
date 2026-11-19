@@ -116,3 +116,56 @@ async fn admin_refresh_requires_a_configured_environment_secret() {
         assert_eq!(body["error"], "CardTrader daily refresh access denied.");
     }
 }
+
+/// The Power Tools import that writes listing locations is refused before
+/// anything is written while a trailing number could still be the box name.
+#[tokio::test]
+async fn cardtrader_sync_refuses_an_unconfirmed_box_reading() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../src/fixtures/location_style_cases.json"))
+            .expect("shared location-style table");
+    let csv = "name,set,cn,condition,language,quantity,price,location\n\
+        Pikachu,Base Set,58/102,NM,English,1,2.50,Focobomba 006\n\
+        Charmander,Base Set,46/102,LP,English,2,1.00,Focobomba 007\n\
+        Squirtle,Base Set,63/102,NM,English,1,1.00,FUOCOBOMBA 006 - 16\n";
+    let state = DomainState::for_test();
+    state
+        .firestore
+        .merge_doc(
+            pokoin_external::cardtrader::integration::COLLECTION,
+            &pokoin_external::cardtrader::integration::integration_doc_id("seller"),
+            serde_json::json!({
+                "enabled": true,
+                "provider": "cardtrader",
+                "encryptedToken": "test",
+            }),
+        )
+        .await
+        .expect("connect the test seller");
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/cardtrader-sync")
+        .header("authorization", "Bearer test-seller")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({ "powerToolsCsv": { "pokemon": csv } }).to_string(),
+        ))
+        .unwrap();
+    let response = router(state.clone())
+        .oneshot(request)
+        .await
+        .expect("router response");
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    let body: serde_json::Value = serde_json::from_slice(&body).expect("json body");
+    assert_eq!(
+        body, fixture["refusalOfAmbiguousList"],
+        "the refusal carries the readings the seller has to choose between"
+    );
+    assert!(
+        !state.sync_jobs.is_running("seller").await,
+        "the refused import started no sync"
+    );
+}

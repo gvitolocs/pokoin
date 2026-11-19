@@ -283,6 +283,12 @@ pub async fn sync_start(
         return Ok(json_response(200, preview));
     }
 
+    // A trailing number that could be the box name is never written on a guess.
+    if let Some(import) = import.as_ref() {
+        if let Some(refusal) = link::location_style_refusal(import) {
+            return Ok(json_response(409, refusal));
+        }
+    }
     let overflows = import.as_ref().map(|import| import.overflows.clone()).unwrap_or_default();
     let power_tools = import.is_some();
     let (started, already_running) = state
