@@ -923,18 +923,26 @@ pub fn effective_location(line: &Value) -> (String, &'static str) {
 }
 
 /// A Power Tools location name in the Pokoin slot model: `·`/`•` names parse
-/// like Pokoin locations, others with the PT import grammar
-/// (`trailing_stack`: "BOX 001 - 131" → box "BOX 001" stack 131).
+/// like Pokoin locations and the explicit dash form gives its stack
+/// ("BOX 001 - 131" → box "BOX 001" stack 131). A bare trailing number
+/// ("Focobomba 006") may be part of the box name, so the picking list keeps
+/// the whole text as the box and guesses nothing.
 pub fn pt_slot(name: &str) -> Slot {
     let name = name.trim();
     if name.contains(['·', '•']) {
         return parse_slot(name);
     }
-    let (box_name, stack, _, matched) = crate::powertools::parse_power_tools_location(name, "trailing_stack");
-    if matched {
-        Slot { box_name, stack: Some(stack), position: None }
-    } else {
-        Slot { box_name: name.to_string(), stack: None, position: None }
+    match crate::powertools::dash_stack_location(name) {
+        Some((box_name, stack)) => Slot {
+            box_name,
+            stack: Some(stack),
+            position: None,
+        },
+        None => Slot {
+            box_name: name.to_string(),
+            stack: None,
+            position: None,
+        },
     }
 }
 
@@ -3238,7 +3246,21 @@ mod tests {
         let slot = |box_name: &str, stack: Option<i64>| Slot { box_name: box_name.into(), stack, position: None };
         assert_eq!(pt_slot("FUOCOBOMBA 001 - 131"), slot("FUOCOBOMBA 001", Some(131)));
         assert_eq!(pt_slot("FUOCOBOMBA 001 - 1"), slot("FUOCOBOMBA 001", Some(1)));
-        assert_eq!(pt_slot("BINDER 7"), slot("BINDER", Some(7)));
+        assert_eq!(
+            pt_slot("BINDER 7"),
+            slot("BINDER 7", None),
+            "a bare trailing number may be the box name"
+        );
+        assert_eq!(pt_slot("Focobomba 006"), slot("Focobomba 006", None));
+        assert_eq!(pt_slot("BOX 001 - 131"), slot("BOX 001", Some(131)));
+        assert_eq!(
+            pt_slot("box·2·5"),
+            Slot {
+                box_name: "box".into(),
+                stack: Some(2),
+                position: Some(5)
+            }
+        );
         assert_eq!(pt_slot("DANDANDECK"), slot("DANDANDECK", None));
         assert_eq!(pt_slot("box·2·4"), Slot { box_name: "box".into(), stack: Some(2), position: Some(4) });
         assert_eq!(pt_display_location("DANDANDECK: 1 (2 available)"), "DANDANDECK");

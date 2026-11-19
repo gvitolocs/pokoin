@@ -1746,6 +1746,11 @@ pub async fn marketplace_listings_csv_post(
         _ => "",
     };
 
+    // No `power_tools_sync` here, so this is the legacy allocator: a location
+    // that ends in a number keeps that number as part of the box name and only
+    // the slot is assigned. Nothing on this path reads a trailing number as a
+    // stack, so there is no guess to confirm;
+    // `tests/stock_csv_location_flow.rs` pins what an apply stores.
     let options = ImportOptions {
         format,
         price_mode,
