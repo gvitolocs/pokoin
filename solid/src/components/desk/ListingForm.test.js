@@ -4,6 +4,15 @@ import test from 'node:test';
 
 const form = readFileSync(new URL('./ListingForm.jsx', import.meta.url), 'utf8');
 
+/** Source between two unique markers (end exclusive). */
+function between(source, startMarker, endMarker, from = 0) {
+  const start = source.indexOf(startMarker, from);
+  assert.ok(start >= 0, `${startMarker} exists`);
+  const end = source.indexOf(endMarker, start);
+  assert.ok(end > start, `${endMarker} exists after ${startMarker}`);
+  return source.slice(start, end);
+}
+
 test('the form never lists in a hidden PKN state after a reset', () => {
   assert.match(form, /const listIn = untrack\(currencyManual \? currency : sellerCurrency\);/);
   assert.match(form, /LIST_CURRENCIES\.filter\(\(code\) => code !== 'PKN'\)/);
@@ -45,4 +54,29 @@ test('the save waits while the question is open', () => {
   assert.match(form, /disabled=\{!ready\(\) \|\| \(!signedIn\(\) && ready\(\)\) \|\| Boolean\(boxAsk\(\)\)\}/);
   assert.match(form, /<Show when=\{boxAsk\(\)\} keyed>[\s\S]{0,40}BoxNameAsk reading=\{reading\} onAnswer=\{answerBoxName\}/);
   assert.match(form, /import BoxNameAsk from '\.\.\/BoxNameAsk\.jsx';/, 'the desk and the sell form ask with one dialog');
+});
+
+// Finding D, pinned: the sell form has no place to type a box. The only free-text
+// writer left would let the pop-up fire for a name the seller typed, and the review
+// asked whether that path exists. It does not — the box arrives from a select or
+// from the listing that is being edited, and both of those paths are asserted here.
+
+test('a box name cannot be typed in the sell form, so the ask only ever meets a listed or carried name', () => {
+  // Both controls are native selects over boxOptions(); one of them is in the drawer.
+  assert.equal(form.match(/<select\n\s*value=\{box\(\)\}\n\s*onChange=\{\(event\) => chooseBox\(event\.currentTarget\.value\)\}\n\s*>/g).length, 2, 'two box selects, no third control');
+  assert.equal(form.match(/<For each=\{boxOptions\(\)\}>/g).length, 2, 'every select lists the same options');
+  // Options are the seller's own boxes, plus the one the listing being edited already
+  // carries when that box is not in their stock. Nothing else can ever be an option.
+  const options = between(form, 'const boxOptions = () => {', 'const keptLocation');
+  assert.match(options, /stockBoxes\(\)\.map\(\(entry\) => String\(entry\?\.box \|\| ''\)\)\.filter\(Boolean\)/);
+  assert.match(options, /if \(current && !names\.some\(\(name\) => name\.toLowerCase\(\) === current\.toLowerCase\(\)\)\) return \[current, \.\.\.names\];/);
+  // Which is the complete set of writers of the box signal, and none of them is text:
+  // the one effect that follows the listing being edited, the select, the split answer.
+  assert.equal(form.match(/setBox\(/g).length, 4, 'the follow effect (both branches), chooseBox, the split answer');
+  const follow = between(form, 'createEffect(\n    () => [editingId(), stockBoxes(), ownLocation()', 'const boxOptions');
+  assert.match(follow, /setBox\(listingBox\(location \|\| ''\)\);/, 'a carried box is read off the listing');
+  assert.match(follow, /const first = String\(boxes\[0\]\?\.box \|\| ''\);/, 'a seeded box is the first of the seller’s own stock');
+  // The label that would have been the free-text field is a label for the select.
+  assert.match(form, /<label class="sell-field location-pick">\n\s*<span class="sell-drawer-label">Location · private<\/span>\n\s*<select/);
+  assert.doesNotMatch(form, /onInput=\{\(event\) => (setBox|chooseBox)/, 'no typing writes a box');
 });
