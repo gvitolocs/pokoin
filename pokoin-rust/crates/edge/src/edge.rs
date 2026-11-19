@@ -114,6 +114,31 @@ fn is_stale_error_path(pathname: &str) -> bool {
         }
     })
 }
+/// The four statuses the origin is failing rather than refusing: a server error
+/// a last good copy is worth answering. `is_server_error` would take 501 and 505
+/// as well, and those say the request itself was not something the origin does —
+/// a copy of a page is the wrong answer to that, so they pass through.
+fn answers_error(status: StatusCode) -> bool {
+    matches!(status.as_u16(), 500 | 502 | 503 | 504)
+}
+
+/// The game this request resolves to, from the same resolver the catalogue page
+/// routes use (`support::resolve_game` in `catalog_api::pages`, which is this
+/// function over the `game` and `marketplaceGame` query parameters): query, then
+/// `x-pokoin-game`/`x-marketplace-game`, then the host candidates.
+fn request_game(req: &Request) -> String {
+    let query = pokoin_api_common::http::Query::from_uri(req.uri());
+    let game = query.first("game").filter(|value| !value.is_empty());
+    let marketplace = query
+        .first("marketplaceGame")
+        .filter(|value| !value.is_empty());
+    pokoin_api_common::game::parse_game_from_request(
+        &pokoin_api_common::http::header_pairs(req.headers()),
+        game,
+        marketplace,
+    )
+}
+
 const HOP_HEADERS: [&str; 5] = ["connection", "keep-alive", "transfer-encoding", "content-length", "date"];
 const SITEMAP_FILES: [&str; 4] = ["sitemap.xml", "sitemap-hubs.xml", "sitemap-pokemon.xml", "sitemap-sets.xml"];
 const ORIGIN_LABEL: &str = "rust";
@@ -312,6 +337,14 @@ struct CacheEntry {
     stored_at: Instant,
     fresh_until: Instant,
     stale_until: Instant,
+    /// The game the request that stored this was resolved to, by the resolver the
+    /// routes use ([`request_game`]). The key cannot carry it — the key is
+    /// `cacheKey(req, pathname, search)` as the Node edge computes it, and it
+    /// reads only `x-pokoin-game` and `x-pokoin-host`, while a route also honours
+    /// `Host`, `x-forwarded-host`, `x-original-host`, `Origin`, `Referer` and
+    /// `x-marketplace-game`. So two requests can share a key and still be asking
+    /// for different games' data; this says which one this copy is.
+    game: String,
 }
 
 /// Byte-capped LRU (`ResponseCache`).
@@ -566,13 +599,19 @@ impl Edge {
     /// errors rather than being slow. A copy past that is a copy about a page
     /// nobody has seen in ten minutes, and the error is the truer answer.
     /// Reading a copy leaves its `fresh_until` and `stale_until` as they were.
-    /// Only a path in [`STALE_ERROR_PATHS`] is answered from a copy at all.
-    fn last_good(&self, pathname: &str, key: &str) -> Option<Arc<CacheEntry>> {
+    /// Only a path in [`STALE_ERROR_PATHS`] is answered from a copy at all, and
+    /// only by a copy of the same game: the key does not carry what [`request_game`]
+    /// makes of `Host` and its friends, so a satellite's failing read must not be
+    /// answered with the Pokémon page that shares its key.
+    fn last_good(&self, pathname: &str, game: &str, key: &str) -> Option<Arc<CacheEntry>> {
         if !is_stale_error_path(pathname) {
             return None;
         }
         let mut cache = self.inner.cache.lock().unwrap_or_else(|e| e.into_inner());
         let entry = cache.get(key)?;
+        if entry.game != game {
+            return None;
+        }
         let overdue = Instant::now().saturating_duration_since(entry.stale_until);
         (overdue <= self.inner.cfg.stale_if_error).then_some(entry)
     }
@@ -589,8 +628,14 @@ impl Edge {
     /// body): the last good copy if the cache holds one, `502`/`504` if it does
     /// not. Either way the flight is settled, so every follower is told the same
     /// thing this request was.
-    fn fail_flight(&self, pathname: &str, flight: FlightGuard, status: StatusCode) -> Response {
-        match self.last_good(pathname, &flight.key) {
+    fn fail_flight(
+        &self,
+        pathname: &str,
+        game: &str,
+        flight: FlightGuard,
+        status: StatusCode,
+    ) -> Response {
+        match self.last_good(pathname, game, &flight.key) {
             Some(entry) => {
                 flight.finish(Flight::StaleError(entry.clone()));
                 self.send_last_good(&entry)
@@ -612,6 +657,7 @@ impl Edge {
     }
 
     async fn serve_cacheable(&self, req: Request, key: String, pathname: &str, target: &str) -> Response {
+        let game = request_game(&req);
         let now = Instant::now();
         let hit = self.inner.cache.lock().unwrap_or_else(|e| e.into_inner()).get(&key);
         if let Some(hit) = hit.as_ref() {
@@ -625,9 +671,9 @@ impl Edge {
                 if let Role::Lead(flight) = self.start_flight(&key) {
                     let (parts, _) = req.into_parts();
                     let request = rebuild(&parts, target);
-                    let (me, pathname) = (self.clone(), pathname.to_owned());
+                    let (me, pathname, game) = (self.clone(), pathname.to_owned(), game.clone());
                     tokio::spawn(async move {
-                        let _ = me.lead(request, flight, &pathname).await;
+                        let _ = me.lead(request, flight, &pathname, &game).await;
                     });
                 }
                 return send_entry(hit, "STALE");
@@ -638,7 +684,7 @@ impl Edge {
         let outcome = loop {
             match self.start_flight(&key) {
                 // Leader: fetch, store, answer (or stream an uncacheable answer straight through).
-                Role::Lead(flight) => return self.lead(req, flight, pathname).await,
+                Role::Lead(flight) => return self.lead(req, flight, pathname, &game).await,
                 Role::Follow(rx) => match follow(rx, deadline).await {
                     Flight::Abandoned => continue,
                     outcome => break outcome,
@@ -650,7 +696,7 @@ impl Edge {
             // The leader answered the failing origin out of the cache; this
             // follower is the same request, so it gets the same copy.
             Flight::StaleError(entry) => self.send_last_good(&entry),
-            Flight::Failed(status) => match self.last_good(pathname, &key) {
+            Flight::Failed(status) => match self.last_good(pathname, &game, &key) {
                 Some(entry) => self.send_last_good(&entry),
                 None => gateway_error(status),
             },
@@ -671,20 +717,28 @@ impl Edge {
 
     /// One buffered upstream fetch for a cacheable key (`fetchEntry` + `refresh`),
     /// bounded by `flight_timeout`. A background stale refresh drops the answer.
-    async fn lead(&self, req: Request, flight: FlightGuard, pathname: &str) -> Response {
+    async fn lead(
+        &self,
+        req: Request,
+        flight: FlightGuard,
+        pathname: &str,
+        game: &str,
+    ) -> Response {
         let deadline = tokio::time::Instant::now() + self.inner.cfg.flight_timeout;
         let target = format!("{}{}", pathname, req.uri().query().map(|q| format!("?{q}")).unwrap_or_default());
         let req = with_uri(req, &target);
         let Ok(response) = tokio::time::timeout_at(deadline, self.inner.api.clone().oneshot(req)).await else {
             tracing::warn!(path = pathname, timeout_s = self.inner.cfg.flight_timeout.as_secs(), "edge flight timed out");
-            return self.fail_flight(pathname, flight, StatusCode::GATEWAY_TIMEOUT);
+            return self.fail_flight(pathname, game, flight, StatusCode::GATEWAY_TIMEOUT);
         };
         let response = response.unwrap_or_else(|never| match never {});
         let status = response.status();
         let max_ttl = self.inner.cfg.cache_max_ttl;
         let policy = policy_for_path(pathname, status, response.headers(), max_ttl);
-        if policy.is_none() && !status.is_server_error() {
+        if policy.is_none() && !answers_error(status) {
             // An error says nothing about the path, so only answers mark it uncacheable.
+            // Of the errors, only [`answers_error`]'s four go on to the last good copy:
+            // a 501 or 505 is streamed as the answer it is.
             if status.as_u16() < 400 && never_storable(response.headers()) {
                 self.mark_uncacheable(pathname);
             }
@@ -697,10 +751,10 @@ impl Edge {
         let (parts, body) = response.into_parts();
         let body = match tokio::time::timeout_at(deadline, to_bytes(body, usize::MAX)).await {
             Ok(Ok(body)) => body,
-            Ok(Err(_)) => return self.fail_flight(pathname, flight, StatusCode::BAD_GATEWAY),
+            Ok(Err(_)) => return self.fail_flight(pathname, game, flight, StatusCode::BAD_GATEWAY),
             Err(_) => {
                 tracing::warn!(path = pathname, timeout_s = self.inner.cfg.flight_timeout.as_secs(), "edge flight body timed out");
-                return self.fail_flight(pathname, flight, StatusCode::GATEWAY_TIMEOUT);
+                return self.fail_flight(pathname, game, flight, StatusCode::GATEWAY_TIMEOUT);
             }
         };
         let mut headers = HeaderMap::new();
@@ -712,14 +766,26 @@ impl Edge {
         headers.insert(HeaderName::from_static("x-robots-tag"), HeaderValue::from_static("noindex"));
         let now = Instant::now();
         let Some(policy) = policy else {
-            // 5xx: every waiting follower gets this answer; the next request
-            // fetches again. The cache's last good copy answers instead when it
-            // holds one, and this error is never stored.
-            if let Some(entry) = self.last_good(pathname, &flight.key) {
-                flight.finish(Flight::StaleError(entry.clone()));
-                return self.send_last_good(&entry);
+            // One of the four: every waiting follower gets this answer; the next
+            // request fetches again. The cache's last good copy answers instead
+            // when it holds one, and this error is never stored. An error that
+            // hands the client a `Set-Cookie` is about this request, not about
+            // the page, so nothing replaces it — the cookie has to arrive.
+            if !headers.contains_key(header::SET_COOKIE) {
+                if let Some(entry) = self.last_good(pathname, game, &flight.key) {
+                    flight.finish(Flight::StaleError(entry.clone()));
+                    return self.send_last_good(&entry);
+                }
             }
-            let entry = Arc::new(CacheEntry { status: parts.status, headers, body, stored_at: now, fresh_until: now, stale_until: now });
+            let entry = Arc::new(CacheEntry {
+                status: parts.status,
+                headers,
+                body,
+                stored_at: now,
+                fresh_until: now,
+                stale_until: now,
+                game: game.to_owned(),
+            });
             flight.finish(Flight::Error(entry.clone()));
             return send_entry(&entry, "BYPASS");
         };
@@ -730,6 +796,7 @@ impl Edge {
             stored_at: now,
             fresh_until: now + Duration::from_secs(policy.ttl),
             stale_until: now + Duration::from_secs(policy.ttl + policy.swr),
+            game: game.to_owned(),
         });
         if entry.body.len() <= CACHE_MAX_ENTRY {
             self.inner.cache.lock().unwrap_or_else(|e| e.into_inner()).set(&flight.key, entry.clone());
@@ -762,6 +829,14 @@ fn send_entry(entry: &CacheEntry, label: &'static str) -> Response {
     *response.status_mut() = entry.status;
     let headers = response.headers_mut();
     *headers = entry.headers.clone();
+    if label == "STALE-ERROR" {
+        // The copy's `x-request-id` is the id of the request that stored it, and
+        // this answer belongs to a different one — the request that failed. The
+        // origin's id is only ever set by its own middleware (`request_log`),
+        // which this response never reached, so the honest answer is no id: an
+        // id that points at another request is a false trail in the log.
+        headers.remove(HeaderName::from_static("x-request-id"));
+    }
     if label == "STALE" || label == "STALE-ERROR" {
         let rewritten = headers
             .get(header::CACHE_CONTROL)
@@ -952,7 +1027,15 @@ mod tests {
         let mut cache = ResponseCache::new(10);
         let entry = |n: usize| {
             let now = Instant::now();
-            Arc::new(CacheEntry { status: StatusCode::OK, headers: HeaderMap::new(), body: Bytes::from(vec![0u8; n]), stored_at: now, fresh_until: now, stale_until: now })
+            Arc::new(CacheEntry {
+                status: StatusCode::OK,
+                headers: HeaderMap::new(),
+                body: Bytes::from(vec![0u8; n]),
+                stored_at: now,
+                fresh_until: now,
+                stale_until: now,
+                game: "pokemon".to_owned(),
+            })
         };
         cache.set("a", entry(4));
         cache.set("b", entry(4));
@@ -1726,5 +1809,295 @@ mod tests {
         ] {
             assert!(!is_stale_error_path(path), "{path} keeps its own error");
         }
+    }
+
+    /// A page with a one-second life and no stale window, so a test is only out
+    /// of the entry's own time by [`PAST_SHORT_GOOD`], and with the origin's
+    /// `x-request-id` on it: `request_log` stamps every API answer with one, and
+    /// that is the id a replayed copy must not hand to the next request.
+    const SHORT_GOOD: &str = "public, max-age=1, s-maxage=1";
+    const PAST_SHORT_GOOD: Duration = Duration::from_millis(1_100);
+    const ORIGIN_ID: &str = "rust-1-1";
+    const ERROR_BODY: &str = "{\"error\":\"catalog query failed\"}";
+
+    /// One origin answer built by hand, because a test has to name headers the
+    /// tuple shape cannot reach: `extra` is added beside a JSON content type.
+    fn answered(
+        status: StatusCode,
+        extra: &[(&'static str, &'static str)],
+        body: &str,
+    ) -> Response {
+        let mut builder = Response::builder()
+            .status(status)
+            .header(header::CONTENT_TYPE, "application/json");
+        for (name, value) in extra {
+            builder = builder.header(*name, *value);
+        }
+        builder.body(Body::from(body.to_owned())).unwrap()
+    }
+
+    /// The good page of [`answered`].
+    fn good_page() -> Response {
+        answered(
+            StatusCode::OK,
+            &[("cache-control", SHORT_GOOD), ("x-request-id", ORIGIN_ID)],
+            GOOD_BODY,
+        )
+    }
+
+    /// The failing half of [`answered`]: refused, and not for any cache to keep.
+    fn failed_page(status: StatusCode, extra: &[(&'static str, &'static str)]) -> Response {
+        let mut headers: Vec<(&'static str, &'static str)> = vec![("cache-control", "no-store")];
+        headers.extend_from_slice(extra);
+        answered(status, &headers, ERROR_BODY)
+    }
+
+    /// One path, resolving the game the way a catalogue page route does, and
+    /// failing once its first good page is behind it: the Pokémon path answers
+    /// one cacheable 200 and then 500s, and any other game 500s at once — which
+    /// is what a satellite whose database is not configured does.
+    fn sick_by_game_api() -> Router {
+        let calls = Arc::new(AtomicU64::new(0));
+        Router::new().route(
+            "/api/marketplace-expansion-page",
+            get(move |headers: HeaderMap, uri: Uri| {
+                let calls = calls.clone();
+                async move {
+                    let query = pokoin_api_common::http::Query::from_uri(&uri);
+                    let game = pokoin_api_common::game::parse_game_from_request(
+                        &pokoin_api_common::http::header_pairs(&headers),
+                        query.first("game"),
+                        query.first("marketplaceGame"),
+                    );
+                    if game != "pokemon" || calls.fetch_add(1, Ordering::SeqCst) > 0 {
+                        return failed_page(StatusCode::INTERNAL_SERVER_ERROR, &[]);
+                    }
+                    good_page()
+                }
+            }),
+        )
+    }
+
+    /// `/api/marketplace-card-page`: each of its two URLs answers one cacheable
+    /// 200 first, then a 503 — and `?cookie=1` a 503 that also hands the client a
+    /// `Set-Cookie`. Two counters, because a test warms both and each key needs
+    /// its own good copy to be answered from.
+    fn cookie_on_error_api() -> Router {
+        let (plain, cookie) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+        Router::new().route(
+            "/api/marketplace-card-page",
+            get(move |uri: Uri| {
+                let (plain, cookie) = (plain.clone(), cookie.clone());
+                async move {
+                    let wants_cookie = uri.query().unwrap_or("").contains("cookie=1");
+                    let calls = if wants_cookie { &cookie } else { &plain };
+                    if calls.fetch_add(1, Ordering::SeqCst) > 0 {
+                        let extra: &[(&'static str, &'static str)] = if wants_cookie {
+                            &[("set-cookie", "pokoin_test=1; Path=/")]
+                        } else {
+                            &[]
+                        };
+                        return failed_page(StatusCode::SERVICE_UNAVAILABLE, extra);
+                    }
+                    good_page()
+                }
+            }),
+        )
+    }
+
+    /// The origin of point 2: `/api/marketplace-card-page` answers one cacheable
+    /// 200 and then only `status`, after 50 ms so a follower can coalesce.
+    fn fails_with_api(path: &'static str, status: StatusCode) -> Router {
+        let calls = Arc::new(AtomicU64::new(0));
+        Router::new().route(
+            path,
+            get(move || {
+                let calls = calls.clone();
+                async move {
+                    if calls.fetch_add(1, Ordering::SeqCst) > 0 {
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        return failed_page(status, &[]);
+                    }
+                    good_page()
+                }
+            }),
+        )
+    }
+
+    /// The key is what both requests share, and the key does not carry `Host`: a
+    /// satellite's failing read must not be answered with the Pokémon copy, only
+    /// the game the copy was stored for may be.
+    #[tokio::test]
+    async fn a_copy_is_never_answered_across_games() {
+        let dir = tempfile::tempdir().unwrap();
+        let edge = Edge::new(
+            config(dir.path().to_path_buf(), Duration::from_secs(30)),
+            sick_by_game_api(),
+            Router::new(),
+        );
+        let get = |edge: &Edge, host: &'static str| {
+            let edge = edge.clone();
+            async move {
+                proxy(
+                    State(edge),
+                    req("GET", "/api/marketplace-expansion-page", &[("host", host)]),
+                )
+                .await
+            }
+        };
+        let warm = get(&edge, "pokoin.com").await;
+        assert_eq!(warm.headers()["x-pokoin-edge-cache"], "MISS");
+        drop(warm);
+        tokio::time::sleep(PAST_SHORT_GOOD).await;
+        // The same URL and the same key, another game: its own error.
+        let other = get(&edge, "magic.pokoin.com").await;
+        assert_eq!(
+            other.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "the satellite meets the failure of its own database"
+        );
+        assert_eq!(other.headers()["x-pokoin-edge-cache"], "BYPASS");
+        assert_eq!(
+            edge.inner.stats.stale_error.load(Ordering::Relaxed),
+            0,
+            "no copy crossed from one game to another"
+        );
+        // The game that owns the copy is still answered by it.
+        let same = get(&edge, "pokoin.com").await;
+        assert_eq!(same.status(), StatusCode::OK);
+        assert_eq!(
+            same.headers()["x-pokoin-edge-cache"],
+            "STALE-ERROR",
+            "the copy is worth serving to the game it is a copy of"
+        );
+    }
+
+    /// Point 2: 500, 502, 503 and 504 are a failing origin; 501 and 505 are the
+    /// origin saying what it does not do, and a page from yesterday is not the
+    /// answer to that.
+    #[tokio::test]
+    async fn an_error_the_origin_means_is_the_answer() {
+        for status in [
+            StatusCode::NOT_IMPLEMENTED,
+            StatusCode::HTTP_VERSION_NOT_SUPPORTED,
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let edge = Edge::new(
+                config(dir.path().to_path_buf(), Duration::from_secs(30)),
+                fails_with_api("/api/marketplace-card-page", status),
+                Router::new(),
+            );
+            let get = |edge: &Edge| {
+                let edge = edge.clone();
+                async move { proxy(State(edge), req("GET", "/api/marketplace-card-page", &[])).await }
+            };
+            assert_eq!(
+                get(&edge).await.headers()["x-pokoin-edge-cache"],
+                "MISS",
+                "{status}"
+            );
+            tokio::time::sleep(PAST_SHORT_GOOD).await;
+            let answer = get(&edge).await;
+            assert_eq!(
+                answer.status(),
+                status,
+                "the origin's {status} reaches the client"
+            );
+            assert_eq!(answer.headers()["cache-control"], "no-store", "{status}");
+            assert_eq!(
+                answer.headers()["x-pokoin-edge-cache"],
+                "BYPASS",
+                "{status}"
+            );
+            assert_eq!(
+                edge.inner.stats.stale_error.load(Ordering::Relaxed),
+                0,
+                "no copy answers a {status}"
+            );
+            drop(answer);
+        }
+    }
+
+    /// Point 3: a `Set-Cookie` on the failing answer belongs to this request. The
+    /// copy would answer the page, and quietly drop the cookie the client was
+    /// being given, so an error that carries one is returned as it is.
+    #[tokio::test]
+    async fn an_error_handing_over_a_cookie_is_the_answer() {
+        let dir = tempfile::tempdir().unwrap();
+        let edge = Edge::new(
+            config(dir.path().to_path_buf(), Duration::from_secs(30)),
+            cookie_on_error_api(),
+            Router::new(),
+        );
+        let get = |edge: &Edge, page: &'static str| {
+            let edge = edge.clone();
+            async move { proxy(State(edge), req("GET", page, &[])).await }
+        };
+        for page in [
+            "/api/marketplace-card-page?cookie=1",
+            "/api/marketplace-card-page",
+        ] {
+            assert_eq!(
+                get(&edge, page).await.headers()["x-pokoin-edge-cache"],
+                "MISS",
+                "{page}"
+            );
+        }
+        tokio::time::sleep(PAST_SHORT_GOOD).await;
+        let cookie = get(&edge, "/api/marketplace-card-page?cookie=1").await;
+        assert_eq!(
+            cookie.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the 503 is what the client asked to hear"
+        );
+        assert_eq!(
+            cookie.headers()["set-cookie"],
+            "pokoin_test=1; Path=/",
+            "and so is the cookie it carries"
+        );
+        assert_eq!(cookie.headers()["x-pokoin-edge-cache"], "BYPASS");
+        // The same failure without a cookie is answered from the copy.
+        let plain = get(&edge, "/api/marketplace-card-page").await;
+        assert_eq!(plain.status(), StatusCode::OK);
+        assert_eq!(plain.headers()["x-pokoin-edge-cache"], "STALE-ERROR");
+        assert_eq!(
+            edge.inner.stats.stale_error.load(Ordering::Relaxed),
+            1,
+            "only the cookie-free error was replaced"
+        );
+    }
+
+    /// Point 4: the copy's `x-request-id` is another request's id. A stale-error
+    /// answer drops it rather than send a false trail; the ordinary replay of a
+    /// copy that is still the origin's own answer keeps what the origin said.
+    #[tokio::test]
+    async fn a_stale_error_answer_is_not_another_requests_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let edge = Edge::new(
+            config(dir.path().to_path_buf(), Duration::from_secs(30)),
+            cookie_on_error_api(),
+            Router::new(),
+        );
+        let get = |edge: &Edge| {
+            let edge = edge.clone();
+            async move { proxy(State(edge), req("GET", "/api/marketplace-card-page", &[])).await }
+        };
+        let warm = get(&edge).await;
+        assert_eq!(
+            warm.headers()["x-request-id"],
+            ORIGIN_ID,
+            "the origin's id rides along with the page"
+        );
+        drop(warm);
+        tokio::time::sleep(PAST_SHORT_GOOD).await;
+        let stale = get(&edge).await;
+        assert_eq!(stale.headers()["x-pokoin-edge-cache"], "STALE-ERROR");
+        assert!(
+            stale.headers().get("x-request-id").is_none(),
+            "the copy's id belongs to the request that stored it, not this one"
+        );
+        // The body is still the page the copy holds.
+        let body = to_bytes(stale.into_body(), 1024).await.unwrap();
+        assert_eq!(&body[..], GOOD_BODY.as_bytes());
     }
 }
