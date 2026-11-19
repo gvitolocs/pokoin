@@ -12,6 +12,7 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::{json, Map, Value as Json};
+use tracing::Instrument;
 
 use crate::domain::portfolio_catalog::{
     catalog_select_sql, is_undefined_table, listing_join_sql, react_image_urls, urls_join_sql,
@@ -155,6 +156,13 @@ pub(crate) type BoxFuture<'a, T> =
 /// What one game's database answered, or the reason it did not.
 pub(crate) type GameOutcome = std::result::Result<GamePrices, String>;
 
+/// What the task that asked one game answers with: the game, whether it answered
+/// inside [`OTHER_GAME_TIMEOUT`], and what its database said.
+type GameAnswer = (
+    String,
+    std::result::Result<GameOutcome, tokio::time::error::Elapsed>,
+);
+
 /// One game's own database, which is where its catalog and its sold medians live
 /// (see [docs/GAMES.md](docs/GAMES.md)). A card id is only unique inside it.
 ///
@@ -233,7 +241,10 @@ async fn read_game_prices(
 /// collects, which is what one read after another would have cost. The window that
 /// bounds it is proven by `three_slow_games_are_asked_at_the_same_time` below with a
 /// source that spends virtual time, so the assertion is about this scheduling and
-/// not about a machine's speed.
+/// not about a machine's speed. Each read runs in the **request's own span**, so what
+/// a game's database logs lands in the trace the edge prints for that request rather
+/// than in a detached one; and the games are awaited by name, so a task that dies is
+/// the one line above and not also the timeout line.
 ///
 /// [`price_other_games`] is this with the real, database-backed source.
 pub(crate) async fn price_other_games(
@@ -263,28 +274,41 @@ pub(crate) async fn price_other_games_from<S: GamePriceSource>(
         // game's card. Without them the cards are held and unpriced.
         apply_catalog_rows(&game, rows, &[]);
     }
-    let mut unanswered: BTreeSet<String> = priced.iter().map(|(game, _)| game.clone()).collect();
-    let mut joins = tokio::task::JoinSet::new();
+    // What one spawned game read, kept beside the game's own name: a task that dies
+    // cannot hand its name back, and the name is what its rows are cleared by.
+    let mut joins: Vec<(String, tokio::task::JoinHandle<GameAnswer>)> = Vec::new();
     for (game, ids) in priced {
         let source = source.clone();
-        joins.spawn(async move {
+        let name = game.clone();
+        let answer = async move {
             let outcome =
                 tokio::time::timeout(OTHER_GAME_TIMEOUT, source.read(game.clone(), ids)).await;
             (game, outcome)
-        });
+        }
+        // The request's own span, not a detached one: the line a game's read writes
+        // belongs to the trace the edge prints for the request that asked for it.
+        .instrument(tracing::Span::current());
+        joins.push((name, tokio::spawn(answer)));
     }
-    while let Some(joined) = joins.join_next().await {
-        let (game, outcome) = match joined {
+    for (game, answer) in joins {
+        // The task names its own game too; the name kept here is the one that is
+        // still known when the task has nothing to say.
+        let (_, outcome) = match answer.await {
             Ok(done) => done,
-            // A task that died took its game's name with it; the pass below clears
-            // every game that never answered, so no row keeps an unconfirmed
+            // Logged once, with the name this side kept: there is no second pass over
+            // the games that never answered, so a death is not also reported as a
+            // timeout. Its rows are still cleared — no card keeps an unconfirmed
             // blueprint because a spawn failed.
             Err(error) => {
-                tracing::error!(%error, "a portfolio game pricing task did not answer");
+                tracing::error!(
+                    %error,
+                    game = %game,
+                    "a portfolio game pricing task did not answer; its cards stay unpriced"
+                );
+                apply_catalog_rows(&game, rows, &[]);
                 continue;
             }
         };
-        unanswered.remove(&game);
         match outcome {
             Ok(Ok(prices)) => {
                 apply_catalog_rows(&game, rows, &prices.catalog);
@@ -306,13 +330,6 @@ pub(crate) async fn price_other_games_from<S: GamePriceSource>(
                 apply_catalog_rows(&game, rows, &[]);
             }
         }
-    }
-    for game in unanswered {
-        tracing::error!(
-            game = %game,
-            "portfolio game pricing never answered; its cards stay unpriced"
-        );
-        apply_catalog_rows(&game, rows, &[]);
     }
 }
 
