@@ -348,6 +348,11 @@ export default function SegmentTable(props) {
   const defaultLevel = () => defaultSegmentLevel(model());
   const levelId = () => (levels().some((level) => level.id === picked()) ? picked() : defaultLevel());
   const levelName = () => levels().find((level) => level.id === levelId())?.label || 'All games';
+  // The second line of an opened chart is never the level: it is the whole of
+  // what the seller holds. On a game level that is that game's total, and the
+  // level's name says so; on the Collections level the name would read as the
+  // lists themselves, so there the line is named for what it actually is.
+  const compareName = () => (isCollections() ? 'Whole collection' : levelName());
   // The Collections level is the seller's own lists. The book beside it carries
   // the buttons, the limits that disable them, and the reason a load failed;
   // its answer reached the model already, as `model.collections`, or this level
@@ -587,7 +592,7 @@ export default function SegmentTable(props) {
                                 {row().label}
                                 <strong class={['mover-tile-change', tone(chart().segmentChange)]}>{formatSegmentChange(chart().segmentChange)}</strong>
                                 <span class="segment-key is-collection" />
-                                {levelName()}
+                                {compareName()}
                                 <strong class={['mover-tile-change', tone(chart().collectionChange)]}>{formatSegmentChange(chart().collectionChange)}</strong>
                               </p>
                             </Show>

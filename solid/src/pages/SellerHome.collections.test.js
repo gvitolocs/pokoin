@@ -163,6 +163,14 @@ test('a saved list with nothing sold still opens: Edit and Delete live there', (
   assert.match(segmentsCss, /button\.segment-row\.is-plain \{\n\s*cursor: pointer;/);
 });
 
+test('an opened collection is compared with the whole collection, not the level', () => {
+  // The second line of the chart is the seller's book, so it is named for that:
+  // "Collections" would read as the lists themselves.
+  assert.match(tableSrc, /const compareName = \(\) => \(isCollections\(\) \? 'Whole collection' : levelName\(\)\);/);
+  assert.match(tableSrc, /<span class="segment-key is-collection" \/>\n\s*\{compareName\(\)\}/);
+  assert.doesNotMatch(tableSrc, /<span class="segment-key is-collection" \/>\n\s*\{levelName\(\)\}/);
+});
+
 test('the editor keeps its own draft and closes without sending it', () => {
   assert.match(editorSrc, /role="dialog"/);
   assert.match(editorSrc, /aria-modal="true"/);
