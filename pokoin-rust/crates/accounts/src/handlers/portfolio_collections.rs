@@ -65,10 +65,11 @@ fn unknown_action_error() -> Box<ApiError> {
 /// rest of this API refuses that input with the runtime's own words before a route
 /// ever runs, and a path that is not body-validated refuses it here.
 ///
-/// An absent body is not malformed input: it is the empty object, which each write
-/// refuses for what it then is — a save with no name, a delete that names no list.
+/// An absent body — blank bytes, or the whitespace the runtime trims to nothing — is
+/// not malformed input: it is the empty object, which each write refuses for what it
+/// then is, a save with no name and a delete that names no list.
 fn write_body(body: &Bytes) -> Result<Json> {
-    if body.is_empty() {
+    if body.iter().all(u8::is_ascii_whitespace) {
         return Ok(parse_body(body));
     }
     let parsed: Json = serde_json::from_slice(body).map_err(|_| Box::new(invalid_body_error()))?;
@@ -436,7 +437,9 @@ mod tests {
 
         // An absent body is not malformed input: it is the empty object, which each
         // write then refuses for what it is — a save with no name, a delete with no id.
+        // Blank bytes are the same thing, because that is what the runtime trims them to.
         assert_eq!(write_body(&Bytes::new()).unwrap(), json!({}));
+        assert_eq!(write_body(&Bytes::from("  \n")).unwrap(), json!({}));
         assert_eq!(
             write_body(&Bytes::from(r#"{"id":"a1"}"#)).unwrap(),
             json!({ "id": "a1" })
