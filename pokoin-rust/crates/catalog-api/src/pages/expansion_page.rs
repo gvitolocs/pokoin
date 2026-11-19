@@ -48,7 +48,12 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
     let is_pokemon = pokoin_api_common::game::is_pokemon_game(&game);
     let pool = match support::game_pool(&state, &game).await {
         Ok(pool) => pool,
-        Err(response) => return response,
+        Err(response) => {
+            // No database was configured for the game, so there is no error
+            // object to report — the step is the whole answer.
+            tracing::error!(route = "expansion-page", step = "game-pool", game = %game, "marketplace-expansion-page failed");
+            return response;
+        }
     };
 
     let search_param = |key: &str| q.search_param(key).map(|v| Value::String(v.to_string()));
@@ -102,7 +107,8 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
         {
             Ok(expansions) => expansions,
             Err(error) => {
-                return support::node_error_response(&error, "Marketplace expansion page failed.")
+                tracing::error!(route = "expansion-page", step = "expansion-list", %error, "marketplace-expansion-page failed");
+                return support::node_error_response(&error, "Marketplace expansion page failed.");
             }
         };
         return support::json_with_cache_control_c1(
@@ -126,9 +132,13 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
 
     let mut expansion = if !slug.is_empty() {
         // try/catch around readExpansionBySlug -> null on failure.
-        react_sql::read_expansion_by_slug(&pool, is_pokemon, &slug)
-            .await
-            .unwrap_or(None)
+        match react_sql::read_expansion_by_slug(&pool, is_pokemon, &slug).await {
+            Ok(expansion) => expansion,
+            Err(error) => {
+                tracing::warn!(route = "expansion-page", step = "expansion-by-slug", %error, "marketplace-expansion-page fell back to the version-set lookup");
+                None
+            }
+        }
     } else {
         None
     };
@@ -136,7 +146,8 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
         let listed = match expansions::rows_for_expansions(&pool, Some(&slug), 1).await {
             Ok(listed) => listed,
             Err(error) => {
-                return support::node_error_response(&error, "Marketplace expansion page failed.")
+                tracing::error!(route = "expansion-page", step = "expansion-lookup", %error, "marketplace-expansion-page failed");
+                return support::node_error_response(&error, "Marketplace expansion page failed.");
             }
         };
         expansion = listed.into_iter().next();
@@ -169,7 +180,8 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
         match read_set_cards(&pool, is_pokemon, &expansion_name_value, limit + 1, offset).await {
             Ok(rows) => rows,
             Err(error) => {
-                return support::node_error_response(&error, "Marketplace expansion page failed.")
+                tracing::error!(route = "expansion-page", step = "set-cards", %error, "marketplace-expansion-page failed");
+                return support::node_error_response(&error, "Marketplace expansion page failed.");
             }
         }
     } else {
@@ -182,7 +194,8 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
         match card_versions::rows_for_versions(&pool, &args).await {
             Ok(rows) => rows,
             Err(error) => {
-                return support::node_error_response(&error, "Marketplace expansion page failed.")
+                tracing::error!(route = "expansion-page", step = "product-cards", %error, "marketplace-expansion-page failed");
+                return support::node_error_response(&error, "Marketplace expansion page failed.");
             }
         }
     };
@@ -219,12 +232,13 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
     }
     if !expansion_name_value.is_empty() {
         // try/catch keeps expansion.cardCount on failure.
-        if let Ok(stored) =
-            react_sql::read_stored_catalog_card_count(&pool, is_pokemon, &expansion_name_value)
-                .await
+        match react_sql::read_stored_catalog_card_count(&pool, is_pokemon, &expansion_name_value)
+            .await
         {
-            if stored >= 0 {
-                total = stored as f64;
+            Ok(stored) if stored >= 0 => total = stored as f64,
+            Ok(_unknown) => {}
+            Err(error) => {
+                tracing::warn!(route = "expansion-page", step = "catalog-card-count", %error, "marketplace-expansion-page kept the expansion's own cardCount");
             }
         }
     }
