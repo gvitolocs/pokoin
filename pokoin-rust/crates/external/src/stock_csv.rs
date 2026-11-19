@@ -220,9 +220,9 @@ pub fn parse_location(raw: &str) -> Value {
     }
     // dash form: "box - 2 - 5" is ambiguous; treat as bare box (reference behavior)
     let dash = split_numeric_tail(&text, &[' ', '_', '-']);
-    if let Some((box, stack)) = dash {
-        if box.chars().any(|c| c.is_ascii_alphabetic()) && text.matches('-').count() == 1 {
-            return json!({"box": stock_clean_text(&box, 64), "stack": clamp_int(Some(stack as f64), 1, 9999, 1), "position": 1, "structured": true, "hasPosition": false});
+    if let Some((box_name, stack)) = dash {
+        if box_name.chars().any(|c| c.is_ascii_alphabetic()) && text.matches('-').count() == 1 {
+            return json!({"box": stock_clean_text(&box_name, 64), "stack": clamp_int(Some(stack as f64), 1, 9999, 1), "position": 1, "structured": true, "hasPosition": false});
         }
     }
     // trailing "#N"
@@ -266,12 +266,12 @@ pub fn parse_power_tools_location(raw: &str, location_parse: &str) -> Value {
         return parse_location(&text);
     }
     if mode == "trailing_stack" {
-        if let Some((box, stack)) = split_numeric_tail_owned(&text, " - ") {
-            return json!({"box": stock_clean_text(&box, 64), "stack": stack, "position": 1, "structured": true, "hasPosition": false});
+        if let Some((box_name, stack)) = split_numeric_tail_owned(&text, " - ") {
+            return json!({"box": stock_clean_text(&box_name, 64), "stack": stack, "position": 1, "structured": true, "hasPosition": false});
         }
-        if let Some((box, stack)) = split_numeric_tail(&text, &[' ', '_']) {
-            if box.chars().any(|c| c.is_ascii_alphabetic()) {
-                return json!({"box": stock_clean_text(&box, 64), "stack": stack, "position": 1, "structured": true, "hasPosition": false});
+        if let Some((box_name, stack)) = split_numeric_tail(&text, &[' ', '_']) {
+            if box_name.chars().any(|c| c.is_ascii_alphabetic()) {
+                return json!({"box": stock_clean_text(&box_name, 64), "stack": stack, "position": 1, "structured": true, "hasPosition": false});
             }
         }
     }
@@ -294,12 +294,14 @@ fn split_numeric_tail_owned(text: &str, sep: &str) -> Option<(String, i64)> {
 /// `detectPowerToolsLocationStyle`.
 pub fn detect_power_tools_location_style(locations: &[String]) -> Value {
     let mut examples: Vec<String> = Vec::new();
+    let mut cleaned: Vec<String> = Vec::new();
     let (mut structured, mut trailing, mut as_is) = (0i64, 0i64, 0i64);
     for raw in locations {
         let text = stock_clean_text(raw, 120);
         if text.is_empty() {
             continue;
         }
+        cleaned.push(text.clone());
         if examples.len() < 6 && !examples.contains(&text) {
             examples.push(text.clone());
         }
@@ -323,10 +325,14 @@ pub fn detect_power_tools_location_style(locations: &[String]) -> Value {
             location_parse = "trailing_stack";
         }
     }
+    let ambiguity = crate::powertools::location_ambiguity(&cleaned);
     json!({
         "locationParse": location_parse,
         "locationExamples": examples,
         "counts": {"structured": structured, "trailing": trailing, "asIs": as_is, "total": total},
+        "ambiguousCount": ambiguity.count,
+        "ambiguousExamples": ambiguity.examples_json(),
+        "confirmationNeeded": ambiguity.confirmation_needed,
     })
 }
 
@@ -1005,6 +1011,41 @@ mod tests {
         assert_eq!(detect_format(&headers), Some("powertools"));
         let out = to_csv(&["a", "b"], &[json!({"a": "x,y", "b": "z"})]);
         assert_eq!(out, "a,b\n\"x,y\",z\n");
+    }
+
+    /// The same table proves all three location readers; a change to this copy
+    /// has to keep answering it the same way.
+    #[test]
+    fn detection_answers_the_shared_ambiguity_table() {
+        let table: Value =
+            serde_json::from_str(include_str!("fixtures/location_style_cases.json")).unwrap();
+        for case in table["cases"].as_array().unwrap() {
+            let value = case["raw"].as_str().unwrap();
+            let detected = detect_power_tools_location_style(&[value.to_string()]);
+            assert_eq!(
+                detected["confirmationNeeded"].as_bool().unwrap(),
+                case["ambiguous"].as_bool().unwrap(),
+                "detection disagrees on {value:?}"
+            );
+        }
+        let detected = detect_power_tools_location_style(
+            &table["ambiguousList"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|value| value.as_str().unwrap().to_string())
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(detected["locationParse"], "trailing_stack");
+        assert_eq!(
+            detected["ambiguousCount"],
+            table["ambiguousListDetection"]["ambiguousCount"]
+        );
+        assert_eq!(
+            detected["ambiguousExamples"],
+            table["ambiguousListDetection"]["ambiguousExamples"]
+        );
+        assert!(detected["confirmationNeeded"].as_bool().unwrap());
     }
 
     #[test]
