@@ -13,6 +13,7 @@
 //! [`price_other_games`] the main series uses, with its caps and its timeouts.
 
 use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
 
 use axum::body::Bytes;
 use axum::extract::{Query, State};
@@ -398,6 +399,69 @@ fn price_body(
     body
 }
 
+/// Everything the answer's maths needs, shared rather than moved: the blocking task
+/// and the request that handed the work over both need to read it, and a seller's sold
+/// rows are the largest thing in this body — neither of them copies them.
+#[derive(Clone)]
+struct Priced {
+    rows: Arc<Rows>,
+    sold: Arc<Vec<Json>>,
+    collections: Arc<Vec<Collection>>,
+    saved: Arc<Option<String>>,
+    today: Arc<String>,
+    unavailable: bool,
+}
+
+impl Priced {
+    fn body(&self) -> Json {
+        price_body(
+            &self.rows,
+            &self.sold,
+            &self.collections,
+            &self.today,
+            self.unavailable,
+            self.saved.as_deref(),
+        )
+    }
+
+    /// The same answer with no market behind it: the seller's lists, nothing priced.
+    /// This is what a read that did not happen answers with, and what an answer whose
+    /// own arithmetic died falls back to, because those two are the same failure as
+    /// far as the seller is concerned.
+    fn without_prices(&self) -> Self {
+        Self {
+            sold: Arc::new(Vec::new()),
+            unavailable: true,
+            ..self.clone()
+        }
+    }
+}
+
+/// `maths` on the blocking pool, and `fallback` on this thread when the task never
+/// answered.
+///
+/// A panic there is arithmetic dying over data this request already holds, and the
+/// seller's lists *are* that data: what is lost is the series, which is exactly what a
+/// market that did not answer loses. So the answer is the same one — 200, the lists, no
+/// series, the reason beside them — and never a 500 that would tell a seller their save
+/// had failed after it had already committed. The `JoinError` is still logged as an
+/// error: this is a bug in this crate, not an outage, and it has to be findable.
+async fn on_blocking(
+    maths: impl FnOnce() -> Json + Send + 'static,
+    fallback: impl FnOnce() -> Json,
+) -> Json {
+    match tokio::task::spawn_blocking(maths).await {
+        Ok(body) => body,
+        Err(error) => {
+            tracing::error!(
+                %error,
+                "the portfolio collections series could not be computed; the lists answer without it"
+            );
+            fallback()
+        }
+    }
+}
+
 /// The answer of every method of this route: the seller's lists, each card priced
 /// as of the last day of its series, and the series of every list. The lists are the
 /// ones the caller read — or, after a write, the ones its own transaction read with
@@ -407,36 +471,23 @@ fn price_body(
 /// The maths — the price book out of the sold rows, then every list against every day
 /// of the window — is parked on the blocking pool: it is pure arithmetic over data
 /// already in hand, and a seller with the full allowance of lists and cards would
-/// otherwise hold an I/O thread through it.
-async fn answer(
-    state: &DomainState,
-    collections: &[Collection],
-    saved: Option<&str>,
-) -> Result<Response> {
+/// otherwise hold an I/O thread through it. That hop cannot fail the request either,
+/// which is why this returns a response rather than a [`Result`]: everything it needs
+/// to answer is already in hand, and the only thing left to lose is the series.
+async fn answer(state: &DomainState, collections: &[Collection], saved: Option<&str>) -> Response {
     let mut rows = Rows::new(collections);
     let read = read_collection_book(&DatabaseMarket { state }, &mut rows).await;
-    let today = utc_day_key_ms(state.clock().now().timestamp_millis());
-    let collections = collections.to_vec();
-    let saved = saved.map(str::to_string);
-    let body = tokio::task::spawn_blocking(move || {
-        let PriceRead { sold, unavailable } = read;
-        price_body(
-            &rows,
-            &sold,
-            &collections,
-            &today,
-            unavailable,
-            saved.as_deref(),
-        )
-    })
-    .await
-    .map_err(|error| {
-        tracing::error!(%error, "the portfolio collections series could not be computed");
-        Box::new(ApiError::internal(
-            "The collection series could not be computed.",
-        ))
-    })?;
-    Ok(json_cached(StatusCode::OK, body, "private, no-store"))
+    let priced = Priced {
+        rows: Arc::new(rows),
+        sold: Arc::new(read.sold),
+        collections: Arc::new(collections.to_vec()),
+        saved: Arc::new(saved.map(str::to_string)),
+        today: Arc::new(utc_day_key_ms(state.clock().now().timestamp_millis())),
+        unavailable: read.unavailable,
+    };
+    let task = priced.clone();
+    let body = on_blocking(move || task.body(), move || priced.without_prices().body()).await;
+    json_cached(StatusCode::OK, body, "private, no-store")
 }
 
 async fn collections_inner(
@@ -474,7 +525,7 @@ async fn collections_inner(
         }
         _ => return Err(unknown_action_error()),
     };
-    answer(state, &collections, saved.as_deref()).await
+    Ok(answer(state, &collections, saved.as_deref()).await)
 }
 
 /// `GET /api/marketplace-portfolio-collections` reads; `POST ?action=save` and
@@ -919,6 +970,69 @@ mod tests {
             body["days"].as_array().is_some_and(|days| !days.is_empty()),
             "a market that answered draws a series: {body}"
         );
+    }
+
+    /// One list of two cards and a market that answered, as the answer's maths holds
+    /// them — so a fallback can be read off the same data.
+    fn priced_vault() -> Priced {
+        let collections = a_pokemon_and_a_riftbound();
+        Priced {
+            rows: Arc::new(Rows::new(&collections)),
+            sold: Arc::new(vec![sold_row("500", 30.0)]),
+            collections: Arc::new(collections),
+            saved: Arc::new(Some("a1".to_string())),
+            today: Arc::new("2026-10-05".to_string()),
+            unavailable: false,
+        }
+    }
+
+    #[test]
+    fn an_answer_that_lost_its_arithmetic_keeps_the_lists_and_loses_the_prices() {
+        // What a `JoinError` falls back to. The first assertion is the control: this
+        // very data priced a card and drew a series, so what the fallback took away is
+        // the market and not a fixture that could never have priced anything.
+        let priced = priced_vault();
+        let body = priced.body();
+        assert_ne!(
+            body["days"],
+            json!([]),
+            "this fixture prices nothing: {body}"
+        );
+        assert_eq!(body["seriesError"], Json::Null, "{body}");
+
+        let lost = priced.without_prices().body();
+        assert_eq!(lost["seriesError"], json!(SERIES_ERROR), "{lost}");
+        assert_eq!(lost["days"], json!([]), "{lost}");
+        assert_eq!(
+            lost["saved"],
+            json!("a1"),
+            "a save that committed still reports its own id: {lost}"
+        );
+        assert_eq!(lost["collections"][0]["name"], json!("Vault"), "{lost}");
+        let items = lost["collections"][0]["items"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(items.len(), 2, "{lost}");
+        for item in &items {
+            assert_eq!(
+                item["pricePkn"],
+                Json::Null,
+                "a price offered beside a reported seriesError: {item}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_blocking_task_that_dies_answers_the_fallback_and_not_an_error() {
+        // The hop, with its maths failing: the request is still answered, out of the
+        // same data, by the fallback the caller kept a handle to.
+        let body = on_blocking(
+            || panic!("the series arithmetic died"),
+            || json!({ "answered": "without prices" }),
+        )
+        .await;
+        assert_eq!(body, json!({ "answered": "without prices" }));
     }
 
     #[tokio::test]
