@@ -52,8 +52,11 @@ struct MockStore {
     creates: Arc<Mutex<Vec<Vec<String>>>>,
     /// Every write the mock applied, in the order it arrived: how it came
     /// (`commit` or `patch`) and the keys it touched.
-    writes: Arc<Mutex<Vec<(&'static str, Vec<String>)>>>,
+    writes: Arc<Mutex<Vec<AppliedWrite>>>,
 }
+
+/// One write the mock applied: `commit` or `patch`, and the keys it touched.
+type AppliedWrite = (&'static str, Vec<String>);
 
 #[derive(Clone, Copy, Debug)]
 enum CommitFault {
@@ -97,7 +100,7 @@ impl MockStore {
         self.refused_patches.lock().unwrap().push(nth);
     }
     /// Every write the mock applied, in the order it arrived.
-    fn write_order(&self) -> Vec<(&'static str, Vec<String>)> {
+    fn write_order(&self) -> Vec<AppliedWrite> {
         self.writes.lock().unwrap().clone()
     }
     fn keys_with_prefix(&self, prefix: &str) -> Vec<String> {
@@ -668,10 +671,19 @@ async fn harness_with_store(
 /// A chain RPC that answers the calls a payout makes and records every method,
 /// so a test can count the payouts one request started.
 async fn start_mock_rpc(payout_hash: &str) -> (String, Arc<Mutex<Vec<String>>>) {
+    start_mock_rpc_rejecting(payout_hash, None).await
+}
+
+/// The same chain, except `reject` is answered with an error when it is set.
+async fn start_mock_rpc_rejecting(
+    payout_hash: &str,
+    reject: Option<&'static str>,
+) -> (String, Arc<Mutex<Vec<String>>>) {
     #[derive(Clone)]
     struct MockRpc {
         calls: Arc<Mutex<Vec<String>>>,
         payout_hash: String,
+        reject: Option<&'static str>,
     }
 
     async fn mock_rpc(State(rpc): State<MockRpc>, Json(request): Json<Value>) -> Json<Value> {
@@ -681,6 +693,9 @@ async fn start_mock_rpc(payout_hash: &str) -> (String, Arc<Mutex<Vec<String>>>) 
             .unwrap_or_default()
             .to_string();
         rpc.calls.lock().unwrap().push(method.clone());
+        if rpc.reject == Some(method.as_str()) {
+            return Json(json!({ "error": { "code": -32000, "message": method } }));
+        }
         let answered = match method.as_str() {
             "eth_chainId" => Some(json!("0x38")),
             "eth_getTransactionCount" => Some(json!("0x1")),
@@ -702,6 +717,7 @@ async fn start_mock_rpc(payout_hash: &str) -> (String, Arc<Mutex<Vec<String>>>) 
     let rpc = MockRpc {
         calls: Arc::new(Mutex::new(Vec::new())),
         payout_hash: payout_hash.to_string(),
+        reject,
     };
     let calls = rpc.calls.clone();
     let app = Router::new().route("/", post(mock_rpc)).with_state(rpc);
@@ -4537,6 +4553,10 @@ async fn a_withdraw_is_not_asked_of_the_bank_before_its_paying_state_is_recorded
     let (status, answer) = call(&app, "POST", WITHDRAW_ROUTE, Some(body.clone())).await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{answer}");
     assert_eq!(answer["code"], json!("withdraw_not_recorded"));
+    assert_eq!(
+        answer["error"],
+        json!("This withdrawal was not sent. The Pokoin team has been told. Contact support.")
+    );
     assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 0);
 
     // The lock the commit took stays taken and the record is the one that commit
@@ -4725,6 +4745,106 @@ async fn a_withdraw_whose_paying_note_is_not_written_still_sends_nothing() {
         .expect("request record");
     assert_eq!(record["status"], json!("pending"));
     assert!(record.get("needsReview").is_none(), "{record}");
+}
+
+#[tokio::test]
+async fn a_withdraw_whose_send_does_not_answer_stays_being_checked() {
+    let (rpc_url, calls) =
+        start_mock_rpc_rejecting(PAYOUT_TX_HASH, Some("eth_sendRawTransaction")).await;
+    let (app, firestore, mock) = bank_harness(&rpc_url).await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+
+    // The send is the call that does not answer. The transaction was already
+    // signed, so the record stays `paying` and the lock stays.
+    let body = withdraw_body(PAYOUT_ADDRESS, 250, Some(ONE_REQUEST));
+    let (status, first) = call(&app, "POST", WITHDRAW_ROUTE, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(first["status"], json!("paying"));
+    assert_eq!(
+        first["message"],
+        json!("This payout is being checked by the Pokoin team. Do not send it again.")
+    );
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 1);
+
+    let record = mock
+        .get(&format!("{}/{}", store::WITHDRAW_REQUESTS, ONE_REQUEST))
+        .expect("request record");
+    assert_eq!(record["status"], json!("paying"), "{record}");
+    assert_eq!(
+        record["needsReview"]["reason"],
+        json!("withdraw_payout_in_doubt"),
+        "{record}"
+    );
+    assert!(record["needsReview"]["at"].is_string(), "{record}");
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .locked_pkn,
+        250
+    );
+
+    // The same id is answered from that record and does not send again.
+    let (status, replay) = call(&app, "POST", WITHDRAW_ROUTE, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["status"], json!("paying"));
+    assert_eq!(replay["message"], first["message"]);
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 1);
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .locked_pkn,
+        250
+    );
+}
+
+#[tokio::test]
+async fn a_withdraw_that_stops_before_signing_waits_for_the_team() {
+    let (rpc_url, calls) =
+        start_mock_rpc_rejecting(PAYOUT_TX_HASH, Some("eth_getTransactionCount")).await;
+    let (app, firestore, mock) = bank_harness(&rpc_url).await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+
+    // The nonce read fails before any signature, so the record leaves `paying`
+    // and waits for the team. The bank is not asked to send.
+    let body = withdraw_body(PAYOUT_ADDRESS, 250, Some(ONE_REQUEST));
+    let (status, first) = call(&app, "POST", WITHDRAW_ROUTE, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(first["status"], json!("pending"));
+    assert!(first["warning"].is_string(), "{first}");
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 0);
+    assert!(method_calls(&calls, "eth_getTransactionCount") >= 1);
+
+    let record = mock
+        .get(&format!("{}/{}", store::WITHDRAW_REQUESTS, ONE_REQUEST))
+        .expect("request record");
+    assert_eq!(record["status"], json!("pending"), "{record}");
+    assert_eq!(record["payoutMode"], json!("manual_pending"), "{record}");
+    assert!(record.get("needsReview").is_none(), "{record}");
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .locked_pkn,
+        250
+    );
+
+    let (status, replay) = call(&app, "POST", WITHDRAW_ROUTE, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay, first);
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 0);
 }
 
 #[tokio::test]

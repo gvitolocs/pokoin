@@ -533,13 +533,25 @@ async fn note_withdraw_needs_review(
     uid: &str,
     request_id: &str,
     reason: &str,
+    payout_tx_hash: Option<&str>,
 ) {
-    tracing::error!(
-        event = "withdraw_needs_review",
-        uid,
-        request_id,
-        "withdraw needs review"
-    );
+    // The hash is logged only once a payout has one, so the result can be
+    // read back from the journal. Nothing else about the payout is logged.
+    match payout_tx_hash {
+        Some(payout_tx_hash) => tracing::error!(
+            event = "withdraw_needs_review",
+            uid,
+            request_id,
+            payout_tx_hash,
+            "withdraw needs review"
+        ),
+        None => tracing::error!(
+            event = "withdraw_needs_review",
+            uid,
+            request_id,
+            "withdraw needs review"
+        ),
+    }
     let note = json!({
         "needsReview": {
             "reason": reason,
@@ -650,8 +662,8 @@ pub async fn request_pkn_withdraw(
         // The record names this request `paying` before the bank is asked, so
         // from here on a replay of the id answers a payout that stands checked
         // rather than one that was never asked. Nothing reaches the chain until
-        // that write lands: the lock keeps its PKN and the client is told to
-        // come back, instead of a payout the record cannot name.
+        // that write lands: the lock keeps its PKN. The same id cannot send
+        // later, so the client is told the withdrawal was not sent.
         if let Some(object) = record.as_object_mut() {
             object.insert("status".into(), json!("paying"));
             object.insert("payoutStartedAt".into(), json!(store::now_iso()));
@@ -664,10 +676,11 @@ pub async fn request_pkn_withdraw(
                 &claims.uid,
                 &request_id,
                 "withdraw_paying_not_recorded",
+                None,
             )
             .await;
             return Err(ApiError::unavailable(
-                "Pokoin could not note this payout down. Nothing was sent; try again in a while.",
+                "This withdrawal was not sent. The Pokoin team has been told. Contact support.",
             )
             .with_code("withdraw_not_recorded"));
         }
@@ -686,7 +699,11 @@ pub async fn request_pkn_withdraw(
                 // The record is written before the unlock: what the bank
                 // answered stands recorded ahead of the lock being released.
                 if !record_withdraw_request(firestore, &request_path, &record).await {
-                    tracing::error!(request_id = %request_id, "withdraw payout not recorded");
+                    tracing::error!(
+                        request_id = %request_id,
+                        payout_tx_hash = %tx_hash,
+                        "withdraw payout not recorded"
+                    );
                 }
                 let unlock = LedgerOp::unlock(&claims.uid, amount, "withdraw_paid", false)
                     .with_ref(&request_id)
@@ -701,6 +718,7 @@ pub async fn request_pkn_withdraw(
                         &claims.uid,
                         &request_id,
                         "withdraw_unlock_failed",
+                        Some(&tx_hash),
                     )
                     .await;
                 }
@@ -727,9 +745,28 @@ pub async fn request_pkn_withdraw(
             }
         },
         Err(error) => {
+            // Two kinds of error leave the bank call.
+            // After the transaction was signed — the send, or anything that
+            // fails once a signature exists — the node may already have it.
+            // The record stays `paying`, the lock stays, and the answer is
+            // the one a replay of `paying` gives.
+            // Before any signature — a nonce or chain read, a key that does
+            // not match its address, or a refusal that returned before a
+            // send — nothing was asked of the bank. The record leaves
+            // `paying` and waits for the team.
+            if error.code.as_deref() == Some(crate::ports::ChainClient::PAYOUT_BROADCAST_IN_DOUBT) {
+                note_withdraw_needs_review(
+                    firestore,
+                    &request_path,
+                    &claims.uid,
+                    &request_id,
+                    "withdraw_payout_in_doubt",
+                    None,
+                )
+                .await;
+                return Ok(private_json(withdraw_replay_response(&request_id, &record)));
+            }
             if let Some(object) = record.as_object_mut() {
-                // No payout was asked of the bank, so the record says so: it
-                // waits for the team, and it does not stand `paying`.
                 object.insert("status".into(), json!("pending"));
                 object.insert("payoutMode".into(), json!("manual_pending"));
                 object.insert("payoutError".into(), json!(error.to_string()));
