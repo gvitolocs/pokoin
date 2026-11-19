@@ -246,11 +246,15 @@
   font-style: normal;
 }
 
+/* The game picker and the search field are one row: both cells start at the
+   top of that row, because the search column grows downwards when it paints
+   its results. `end` pinned the picker to the bottom of the row the results
+   made, so every typed character pushed the Game select further down. */
 .collections-add {
   display: grid;
   grid-template-columns: minmax(9rem, 14rem) minmax(0, 1fr);
   gap: 0.6rem;
-  align-items: end;
+  align-items: start;
 }
 
 .collections-cap {

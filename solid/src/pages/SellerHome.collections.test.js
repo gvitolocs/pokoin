@@ -297,6 +297,13 @@ test('one card in the draft is one row, and keeps what is typed in it', () => {
   assert.doesNotMatch(editorSrc, /onInput=\{\(event\) => patch\(\{ quantity: Number/);
 });
 
+test('the game picker stays on the search field row while results paint under it', () => {
+  const add = /\.collections-add \{([^}]*)\}/.exec(css)?.[1] || '';
+  assert.match(add, /align-items: start;/, 'the row is pinned to its top, not to whatever the results made it');
+  assert.doesNotMatch(add, /align-items: end;/);
+  assert.match(css, /\.collections-add \{\n\s*display: grid;\n\s*grid-template-columns: minmax\(9rem, 14rem\) minmax\(0, 1fr\);/);
+});
+
 test('the collections CSS is tokens, and a phone gets the whole screen', () => {
   // No hex: both colour schemes come from the dashboard tokens alone.
   assert.deepEqual([...css.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map((m) => m[0]), []);
