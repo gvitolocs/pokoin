@@ -337,11 +337,18 @@ async fn read_card_book(
 }
 
 /// The stored series read, or `None` when there is nothing saved yet.
-async fn read_stored(firestore: &Firestore, uid: &str) -> Result<Option<Json>> {
+///
+/// The error is boxed because an unboxed `ApiError` makes this signature result
+/// large enough for clippy's `result_large_err`; every call site unboxes it.
+async fn read_stored(
+    firestore: &Firestore,
+    uid: &str,
+) -> std::result::Result<Option<Json>, Box<ApiError>> {
     Ok(firestore
         .doc(format!("{HISTORY}/{uid}"))
         .get()
-        .await?
+        .await
+        .map_err(Box::new)?
         .map(|document| document.to_plain_json()))
 }
 
@@ -408,7 +415,9 @@ async fn portfolio_history_inner(state: &DomainState, headers: &HeaderMap) -> Re
     let firestore = state.firestore()?;
     let now_ms = state.clock().now().timestamp_millis();
 
-    let stored = read_stored(&firestore, &uid).await?;
+    let stored = read_stored(&firestore, &uid)
+        .await
+        .map_err(|error| *error)?;
     match history_plan(stored.as_ref(), now_ms) {
         Plan::ServeFresh => Ok(history_body(
             stored_days(stored.as_ref()),

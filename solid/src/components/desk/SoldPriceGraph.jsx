@@ -190,7 +190,7 @@ export default function SoldPriceGraph(props) {
       color: row.color || '',
       dashed: Boolean(row.dashed),
       gapDays: Number(row.gapDays) || 0,
-      carry: row.carry === 'onOrBefore' ? 'onOrBefore' : 'near',
+      carry: ['onOrBefore', 'none'].includes(row.carry) ? row.carry : 'near',
       isSource: true,
       days: soldGraphRangeDays(row.days, bounds())
         .map((day) => ({ day: String(day.day), value: Number(day.pkn ?? day.value) || 0 }))

@@ -16,16 +16,16 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use http_body_util::BodyExt;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use tokio::net::TcpListener;
 use tower::ServiceExt;
 
 use pokoin_commerce::auth::{AuthError, Claims, TokenVerifier};
 use pokoin_commerce::config::CommerceConfig;
-use pokoin_commerce::firestore::{FirestoreClient, value_to_fields};
+use pokoin_commerce::firestore::{value_to_fields, FirestoreClient};
 use pokoin_commerce::state::DomainState;
 use pokoin_commerce::store::LedgerOp;
-use pokoin_commerce::{FixedClock, store};
+use pokoin_commerce::{store, FixedClock};
 
 // ---------------------------------------------------------------------------
 // Mock Firestore
@@ -38,9 +38,25 @@ struct MockStore {
     commit_lock: Arc<Mutex<()>>,
     /// Faults consumed by the next commits, in order.
     faults: Arc<Mutex<Vec<CommitFault>>>,
+    /// Commits received, so a fault can be set on a named one.
+    commit_count: Arc<Mutex<usize>>,
+    /// A fault the commit of this 1-based number returns.
+    scheduled_faults: Arc<Mutex<HashMap<usize, CommitFault>>>,
+    /// Patches refused with 503, by their 1-based number.
+    refused_patches: Arc<Mutex<Vec<usize>>>,
+    patch_count: Arc<Mutex<usize>>,
     /// Document keys written by each applied commit.
     commits: Arc<Mutex<Vec<Vec<String>>>>,
+    /// The create-only keys of each applied commit, by the same index as
+    /// `commits`: a document the commit refuses to find already written.
+    creates: Arc<Mutex<Vec<Vec<String>>>>,
+    /// Every write the mock applied, in the order it arrived: how it came
+    /// (`commit` or `patch`) and the keys it touched.
+    writes: Arc<Mutex<Vec<AppliedWrite>>>,
 }
+
+/// One write the mock applied: `commit` or `patch`, and the keys it touched.
+type AppliedWrite = (&'static str, Vec<String>);
 
 #[derive(Clone, Copy, Debug)]
 enum CommitFault {
@@ -72,6 +88,20 @@ impl MockStore {
     }
     fn fail_next_commit(&self, fault: CommitFault) {
         self.faults.lock().unwrap().push(fault);
+    }
+    /// Refuse the commit of this 1-based number, so a fault can point at one
+    /// commit and let the commits before it land.
+    fn fail_commit_at(&self, nth: usize, fault: CommitFault) {
+        self.scheduled_faults.lock().unwrap().insert(nth, fault);
+    }
+    /// Refuse the patch of this 1-based number with 503, so a test can take one
+    /// document's write away while every other write lands.
+    fn refuse_patch(&self, nth: usize) {
+        self.refused_patches.lock().unwrap().push(nth);
+    }
+    /// Every write the mock applied, in the order it arrived.
+    fn write_order(&self) -> Vec<AppliedWrite> {
+        self.writes.lock().unwrap().clone()
     }
     fn keys_with_prefix(&self, prefix: &str) -> Vec<String> {
         self.documents
@@ -169,9 +199,17 @@ async fn mock_commit(State(state): State<MockStore>, Json(body): Json<Value>) ->
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    let number = {
+        let mut count = state.commit_count.lock().unwrap();
+        *count += 1;
+        *count
+    };
     let fault = {
-        let mut faults = state.faults.lock().unwrap();
-        (!faults.is_empty()).then(|| faults.remove(0))
+        let scheduled = state.scheduled_faults.lock().unwrap().remove(&number);
+        scheduled.or_else(|| {
+            let mut faults = state.faults.lock().unwrap();
+            (!faults.is_empty()).then(|| faults.remove(0))
+        })
     };
     if matches!(fault, Some(CommitFault::Abort)) {
         return (
@@ -207,7 +245,23 @@ async fn mock_commit(State(state): State<MockStore>, Json(body): Json<Value>) ->
                 .map(strip_prefix)
         })
         .collect();
-    state.commits.lock().unwrap().push(written);
+    let created: Vec<String> = writes
+        .iter()
+        .filter(|write| write.pointer("/currentDocument/exists") == Some(&json!(false)))
+        .filter_map(|write| {
+            write
+                .pointer("/update/name")
+                .and_then(Value::as_str)
+                .map(strip_prefix)
+        })
+        .collect();
+    state.commits.lock().unwrap().push(written.clone());
+    state.creates.lock().unwrap().push(created);
+    state
+        .writes
+        .lock()
+        .unwrap()
+        .push(("commit", written.clone()));
     for write in writes {
         if let Some(delete) = write.get("delete").and_then(Value::as_str) {
             state.delete(&strip_prefix(delete));
@@ -289,6 +343,18 @@ async fn mock_patch(
     Json(body): Json<Value>,
 ) -> Response {
     let key = path.clone();
+    let number = {
+        let mut count = state.patch_count.lock().unwrap();
+        *count += 1;
+        *count
+    };
+    if state.refused_patches.lock().unwrap().contains(&number) {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": { "status": "UNAVAILABLE" } })),
+        )
+            .into_response();
+    }
     // Repeated `updateMask.fieldPaths` keys must all survive (a HashMap keeps one).
     let pairs: Vec<(String, String)> = raw
         .as_deref()
@@ -330,6 +396,11 @@ async fn mock_patch(
     } else {
         state.upsert(&key, decoded, false);
     }
+    state
+        .writes
+        .lock()
+        .unwrap()
+        .push(("patch", vec![key.clone()]));
     let value = state.get(&key).unwrap_or_else(|| json!({}));
     Json(document_resource(&key, &value, "https://mock")).into_response()
 }
@@ -428,7 +499,8 @@ fn run_query_under(state: &MockStore, parent: &str, body: &Value) -> Response {
                 format!("{parent}/{collection}/")
             };
             // Direct children only (no allDescendants): `{prefix}{id}`.
-            path.strip_prefix(&prefix).is_some_and(|id| !id.contains('/'))
+            path.strip_prefix(&prefix)
+                .is_some_and(|id| !id.contains('/'))
         })
         .filter(|(_, value)| {
             filters.iter().all(|filter| {
@@ -514,8 +586,12 @@ impl TokenVerifier for AnyToken {
         if token.is_empty() {
             return Err(AuthError::Missing);
         }
+        // A token of the shape `uid:<uid>` speaks for that account, so one test
+        // can put two accounts on the same request id. Any other token is the
+        // harness user.
+        let uid = token.strip_prefix("uid:").unwrap_or("buyer-1").to_string();
         Ok(Claims {
-            uid: "buyer-1".into(),
+            uid,
             email: "buyer@example.com".into(),
             role: String::new(),
             admin: false,
@@ -580,43 +656,136 @@ async fn state_harness_with_store(
 }
 
 async fn harness() -> (Router, FirestoreClient) {
-    std::env::set_var("POKOIN_LISTING_SYNC_WORKER", "0");
-    std::env::set_var("POKOIN_SELLER_WEBHOOK_WORKER", "0");
-    std::env::set_var("POKOIN_SELLER_BOOK_WORKER", "0");
-    let (base, _store) = start_mock_firestore().await;
-    let http = reqwest::Client::new();
-    let firestore = FirestoreClient::with_static_token(http, "pokoin-test", base, "test-token");
-    let mut config = CommerceConfig::default();
-    config.pokoin_treasury_username = "pokoin".into();
-    // Short acquire timeout: the harness has no Postgres, so SQL paths must
-    // fail fast instead of waiting on the driver default.
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .acquire_timeout(std::time::Duration::from_millis(200))
-        .connect_lazy("postgres://127.0.0.1:1/none")
-        .expect("lazy pool");
-    let state = DomainState::with_pools(
-        config,
-        pool.clone(),
-        pool,
-        None,
-        Arc::new(AnyToken),
-        Some(firestore.clone()),
-    )
-    .with_clock(Arc::new(FixedClock(1_700_000_000_000)));
-    (pokoin_commerce::router(state), firestore)
+    let (router, firestore, _) = harness_with_store(|_| {}).await;
+    (router, firestore)
+}
+
+/// The real router over the mock Firestore with a chosen config.
+async fn harness_with_store(
+    configure: impl FnOnce(&mut CommerceConfig),
+) -> (Router, FirestoreClient, MockStore) {
+    let (state, firestore, store) = state_harness_with_store(configure).await;
+    (pokoin_commerce::router(state), firestore, store)
+}
+
+/// A chain RPC that answers the calls a payout makes and records every method,
+/// so a test can count the payouts one request started.
+async fn start_mock_rpc(payout_hash: &str) -> (String, Arc<Mutex<Vec<String>>>) {
+    start_mock_rpc_rejecting(payout_hash, None).await
+}
+
+/// The same chain, except `reject` is answered with an error when it is set.
+async fn start_mock_rpc_rejecting(
+    payout_hash: &str,
+    reject: Option<&'static str>,
+) -> (String, Arc<Mutex<Vec<String>>>) {
+    #[derive(Clone)]
+    struct MockRpc {
+        calls: Arc<Mutex<Vec<String>>>,
+        payout_hash: String,
+        reject: Option<&'static str>,
+    }
+
+    async fn mock_rpc(State(rpc): State<MockRpc>, Json(request): Json<Value>) -> Json<Value> {
+        let method = request
+            .get("method")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        rpc.calls.lock().unwrap().push(method.clone());
+        if rpc.reject == Some(method.as_str()) {
+            return Json(json!({ "error": { "code": -32000, "message": method } }));
+        }
+        let answered = match method.as_str() {
+            "eth_chainId" => Some(json!("0x38")),
+            "eth_getTransactionCount" => Some(json!("0x1")),
+            "eth_gasPrice" => Some(json!("0x4a817c800")),
+            "eth_estimateGas" => Some(json!("0x5208")),
+            "eth_sendRawTransaction" => Some(json!(rpc.payout_hash.clone())),
+            _ => None,
+        };
+        let Some(result) = answered else {
+            return Json(json!({ "error": { "code": -32601, "message": method } }));
+        };
+        Json(json!({
+            "jsonrpc": "2.0",
+            "id": request.get("id").cloned().unwrap_or(json!(1)),
+            "result": result,
+        }))
+    }
+
+    let rpc = MockRpc {
+        calls: Arc::new(Mutex::new(Vec::new())),
+        payout_hash: payout_hash.to_string(),
+        reject,
+    };
+    let calls = rpc.calls.clone();
+    let app = Router::new().route("/", post(mock_rpc)).with_state(rpc);
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let address = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (format!("http://{address}"), calls)
+}
+
+fn method_calls(calls: &Arc<Mutex<Vec<String>>>, method: &str) -> usize {
+    calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|called| *called == method)
+        .count()
+}
+
+/// The bank that pays withdrawals, pointing at `rpc_url`; the address is the
+/// one derived from the key so the payout signs instead of staying manual.
+async fn bank_harness(rpc_url: &str) -> (Router, FirestoreClient, MockStore) {
+    let key = format!("0x{}", "01".repeat(32));
+    let bank = pokoin_commerce::evm::address_from_private_key(&key).expect("derive bank address");
+    harness_with_store(move |config| {
+        config.pokoin_rpc_url = rpc_url.to_string();
+        config.pokoin_bank_private_key = Some(key);
+        config.pokoin_bank_address = bank;
+    })
+    .await
+}
+
+/// A bank key configured against another wallet: the payout is never signed, so
+/// every withdrawal of this harness waits for the team to pay it by hand and no
+/// chain call is made.
+async fn manual_harness() -> (Router, FirestoreClient, MockStore) {
+    let key = format!("0x{}", "01".repeat(32));
+    harness_with_store(move |config| {
+        config.pokoin_bank_private_key = Some(key);
+        config.pokoin_bank_address = format!("0x{}", "ab".repeat(20));
+    })
+    .await
 }
 
 async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
+    call_as(app, "test-token", method, uri, body).await
+}
+
+/// One request signed with `token`: the harness verifier reads `uid:<uid>` as
+/// that account, so a test can put two accounts on one request id.
+async fn call_as(
+    app: &Router,
+    token: &str,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)
-        .header("authorization", "Bearer test-token")
+        .header("authorization", format!("Bearer {token}"))
         .header("content-type", "application/json");
     if method == "GET" {
         builder = Request::builder()
             .method(method)
             .uri(uri)
-            .header("authorization", "Bearer test-token");
+            .header("authorization", format!("Bearer {token}"));
     }
     let request = builder
         .body(
@@ -1203,7 +1372,7 @@ async fn transfers_are_refused_for_an_unpaid_order() {
 
 #[tokio::test]
 async fn a_sale_decrements_the_sellers_ownership_row_and_deletes_it_at_zero() {
-    use pokoin_commerce::handlers::orders::{OwnershipLine, decrement_seller_ownership_for_sale};
+    use pokoin_commerce::handlers::orders::{decrement_seller_ownership_for_sale, OwnershipLine};
     let (state, firestore) = state_harness().await;
     firestore
         .create_document(
@@ -1254,7 +1423,11 @@ async fn a_sale_decrements_the_sellers_ownership_row_and_deletes_it_at_zero() {
         .expect("decrement");
     assert_eq!(result["deleted"], json!(true));
     assert!(firestore
-        .get_document(&firestore.document_path("user_card_collections", "row-1").unwrap())
+        .get_document(
+            &firestore
+                .document_path("user_card_collections", "row-1")
+                .unwrap()
+        )
         .await
         .unwrap()
         .is_none());
@@ -1271,7 +1444,7 @@ async fn a_sale_decrements_the_sellers_ownership_row_and_deletes_it_at_zero() {
 async fn a_sale_key_decrements_the_ownership_row_once() {
     // specs/tla/eur-fulfilment bugs/ownership-twice.cfg: a fulfilment that
     // died after the decrement but before ownershipDone, retried.
-    use pokoin_commerce::handlers::orders::{OwnershipLine, decrement_seller_ownership_for_sale};
+    use pokoin_commerce::handlers::orders::{decrement_seller_ownership_for_sale, OwnershipLine};
     let (state, firestore) = state_harness().await;
     firestore
         .create_document(
@@ -1288,12 +1461,21 @@ async fn a_sale_key_decrements_the_ownership_row_once() {
         sale_key: "order-1:l1".into(),
         ..Default::default()
     };
-    let first = decrement_seller_ownership_for_sale(&state, &line).await.expect("first");
+    let first = decrement_seller_ownership_for_sale(&state, &line)
+        .await
+        .expect("first");
     assert_eq!(first["after"], json!(2));
-    let replay = decrement_seller_ownership_for_sale(&state, &line).await.expect("replay");
+    let replay = decrement_seller_ownership_for_sale(&state, &line)
+        .await
+        .expect("replay");
     assert_eq!(replay["reason"], json!("already_decremented"));
-    let other = OwnershipLine { sale_key: "order-2:l1".into(), ..line.clone() };
-    let second = decrement_seller_ownership_for_sale(&state, &other).await.expect("second sale");
+    let other = OwnershipLine {
+        sale_key: "order-2:l1".into(),
+        ..line.clone()
+    };
+    let second = decrement_seller_ownership_for_sale(&state, &other)
+        .await
+        .expect("second sale");
     assert_eq!(second["after"], json!(1));
     let row = firestore
         .get_document(
@@ -1310,7 +1492,7 @@ async fn a_sale_key_decrements_the_ownership_row_once() {
 
 #[tokio::test]
 async fn nft_ownership_rows_are_never_decremented() {
-    use pokoin_commerce::handlers::orders::{OwnershipLine, decrement_seller_ownership_for_sale};
+    use pokoin_commerce::handlers::orders::{decrement_seller_ownership_for_sale, OwnershipLine};
     let (state, firestore) = state_harness().await;
     firestore
         .create_document(
@@ -1340,7 +1522,11 @@ async fn nft_ownership_rows_are_never_decremented() {
     assert_eq!(result["skipped"], json!(true));
     assert_eq!(
         firestore
-            .get_document(&firestore.document_path("user_card_collections", "nft-row").unwrap())
+            .get_document(
+                &firestore
+                    .document_path("user_card_collections", "nft-row")
+                    .unwrap()
+            )
             .await
             .unwrap()
             .expect("still there")["quantity"],
@@ -1350,7 +1536,7 @@ async fn nft_ownership_rows_are_never_decremented() {
 
 #[tokio::test]
 async fn a_scan_source_row_is_decremented_by_its_full_document_id() {
-    use pokoin_commerce::handlers::orders::{OwnershipLine, decrement_seller_ownership_for_sale};
+    use pokoin_commerce::handlers::orders::{decrement_seller_ownership_for_sale, OwnershipLine};
     let (state, firestore) = state_harness().await;
     firestore
         .create_document(
@@ -1410,7 +1596,7 @@ async fn connect_state_lives_on_the_firestore_user_document() {
 #[tokio::test]
 async fn the_checkout_quote_prices_the_balance_discount_from_the_server_balance() {
     use pokoin_commerce::domain::shipping::{
-        RateCatalog, find_rate, package_tier_for_count_default,
+        find_rate, package_tier_for_count_default, RateCatalog,
     };
     let (app, firestore) = harness().await;
     for (uid, country, accepts) in [("red", "IT", true), ("givi", "DK", true)] {
@@ -1484,8 +1670,14 @@ async fn the_checkout_quote_prices_the_balance_discount_from_the_server_balance(
     assert_eq!(quote["pknDiscount"]["pkn"], json!(700));
     assert_eq!(quote["pknDiscount"]["eurCents"], json!(350));
     assert_eq!(quote["chargeCents"], json!(500 + 15 + shipping - 350));
-    assert_eq!(quote["shipments"][0]["amountCents"], json!(price("IT", 1, false)));
-    assert_eq!(quote["shipments"][1]["amountCents"], json!(price("DK", 2, true)));
+    assert_eq!(
+        quote["shipments"][0]["amountCents"],
+        json!(price("IT", 1, false))
+    );
+    assert_eq!(
+        quote["shipments"][1]["amountCents"],
+        json!(price("DK", 2, true))
+    );
 
     // A client amount is ignored: the legacy field only opts in.
     let (_, legacy) = call(
@@ -1531,7 +1723,7 @@ async fn the_checkout_quote_prices_the_balance_discount_from_the_server_balance(
 #[tokio::test]
 async fn the_checkout_quote_prices_each_seller_parcel_with_its_own_service() {
     use pokoin_commerce::domain::shipping::{
-        RateCatalog, find_rate, package_tier_for_count_default,
+        find_rate, package_tier_for_count_default, RateCatalog,
     };
     let (app, firestore) = harness().await;
     for (uid, country) in [("red", "IT"), ("givi", "DK")] {
@@ -1583,7 +1775,10 @@ async fn the_checkout_quote_prices_each_seller_parcel_with_its_own_service() {
     );
     assert_eq!(quote["shippingTotalCents"], json!(red_cents + givi_cents));
     // 1000 PKN of cards = 500 cents.
-    assert_eq!(quote["grandTotalCents"], json!(500 + 15 + red_cents + givi_cents));
+    assert_eq!(
+        quote["grandTotalCents"],
+        json!(500 + 15 + red_cents + givi_cents)
+    );
     assert_eq!(quote["tracked"], json!(false));
     assert_eq!(quote["shippingServices"]["givi"], shipments[1]["serviceId"]);
 
@@ -2000,7 +2195,11 @@ async fn fulfilment_drives_the_cardtrader_port_and_completes_applied_steps() {
     );
     // The ownership row was decremented to zero and deleted.
     assert!(firestore
-        .get_document(&firestore.document_path("user_card_collections", "row-ct").unwrap())
+        .get_document(
+            &firestore
+                .document_path("user_card_collections", "row-ct")
+                .unwrap()
+        )
         .await
         .unwrap()
         .is_none());
@@ -2555,7 +2754,10 @@ async fn address_ids_that_walk_out_of_the_users_addresses_are_400_and_touch_noth
     // The balance document is untouched, and a well-formed id still reaches
     // Firestore (the mock answers a delete of a missing document with 200).
     assert_eq!(
-        store::balance(&firestore, "buyer-1").await.unwrap().available_pkn,
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .available_pkn,
         1_000
     );
     let (status, _) = call(
@@ -2581,7 +2783,11 @@ async fn saved_addresses_list_and_default_read_only_the_users_subcollection() {
         ("shipping_addresses", "root-decoy"),
     ] {
         firestore
-            .create_document(collection, id, &json!({ "countryCode": "DE", "isDefault": true }))
+            .create_document(
+                collection,
+                id,
+                &json!({ "countryCode": "DE", "isDefault": true }),
+            )
             .await
             .expect("decoy");
     }
@@ -2596,9 +2802,21 @@ async fn saved_addresses_list_and_default_read_only_the_users_subcollection() {
             "isDefault": true,
         })
     };
-    let (status, first) = call(&app, "POST", "/api/account-addresses", Some(address("Roma"))).await;
+    let (status, first) = call(
+        &app,
+        "POST",
+        "/api/account-addresses",
+        Some(address("Roma")),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "{first}");
-    let (status, second) = call(&app, "POST", "/api/account-addresses", Some(address("Milano"))).await;
+    let (status, second) = call(
+        &app,
+        "POST",
+        "/api/account-addresses",
+        Some(address("Milano")),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "{second}");
     let first_id = first["address"]["id"].as_str().unwrap().to_string();
     let second_id = second["address"]["id"].as_str().unwrap().to_string();
@@ -2623,14 +2841,21 @@ async fn saved_addresses_list_and_default_read_only_the_users_subcollection() {
 
     // The new default cleared only this user's previous default.
     assert_eq!(
-        store.get(&format!("users/buyer-1/shipping_addresses/{first_id}")).unwrap()["isDefault"],
+        store
+            .get(&format!("users/buyer-1/shipping_addresses/{first_id}"))
+            .unwrap()["isDefault"],
         json!(false)
     );
     assert_eq!(
-        store.get("users/someone-else/shipping_addresses/other-default").unwrap()["isDefault"],
+        store
+            .get("users/someone-else/shipping_addresses/other-default")
+            .unwrap()["isDefault"],
         json!(true)
     );
-    assert_eq!(store.get("shipping_addresses/root-decoy").unwrap()["isDefault"], json!(true));
+    assert_eq!(
+        store.get("shipping_addresses/root-decoy").unwrap()["isDefault"],
+        json!(true)
+    );
 }
 
 #[tokio::test]
@@ -2648,8 +2873,20 @@ async fn racing_replays_of_one_key_move_money_once() {
         .filter(|outcome| outcome.as_ref().expect("apply").applied)
         .count();
     assert_eq!(applied, 1);
-    assert_eq!(store::balance(&firestore, "u1").await.unwrap().available_pkn, 900);
-    assert_eq!(store::balance(&firestore, "u2").await.unwrap().available_pkn, 100);
+    assert_eq!(
+        store::balance(&firestore, "u1")
+            .await
+            .unwrap()
+            .available_pkn,
+        900
+    );
+    assert_eq!(
+        store::balance(&firestore, "u2")
+            .await
+            .unwrap()
+            .available_pkn,
+        100
+    );
     // mint (1 entry) + one transfer (2 entries)
     assert_eq!(mock.keys_with_prefix("ledger_entries/").len(), 3);
     // Every replay reports the committed balances.
@@ -2663,7 +2900,10 @@ async fn the_idempotency_marker_commits_with_the_balances() {
     let (_, firestore, mock) = state_harness_with_store(|_| {}).await;
     let op = LedgerOp::mint("u1", 50, "account_top_up").with_idempotency("marker:1");
     assert!(store::apply(&firestore, &op).await.unwrap().applied);
-    let marker = format!("commerce_idempotency/{}", store::idempotency_doc_id("marker:1"));
+    let marker = format!(
+        "commerce_idempotency/{}",
+        store::idempotency_doc_id("marker:1")
+    );
     let commits = mock.commits.lock().unwrap().clone();
     assert_eq!(commits.len(), 1);
     assert!(commits[0].contains(&marker), "{commits:?}");
@@ -2673,7 +2913,13 @@ async fn the_idempotency_marker_commits_with_the_balances() {
     let replay = store::apply(&firestore, &op).await.unwrap();
     assert!(!replay.applied);
     assert_eq!(replay.to_available, 50);
-    assert_eq!(store::balance(&firestore, "u1").await.unwrap().available_pkn, 50);
+    assert_eq!(
+        store::balance(&firestore, "u1")
+            .await
+            .unwrap()
+            .available_pkn,
+        50
+    );
     assert_eq!(mock.commits.lock().unwrap().len(), 1);
 }
 
@@ -2683,16 +2929,30 @@ async fn a_lost_commit_response_is_never_applied_twice() {
     // With a key: the landed marker is ours, so the call reports applied.
     mock.fail_next_commit(CommitFault::LoseResponse);
     let op = LedgerOp::mint("u1", 70, "account_top_up").with_idempotency("lost:1");
-    let outcome = store::apply(&firestore, &op).await.expect("recovered from the marker");
+    let outcome = store::apply(&firestore, &op)
+        .await
+        .expect("recovered from the marker");
     assert!(outcome.applied);
     assert_eq!(outcome.to_available, 70);
-    assert_eq!(store::balance(&firestore, "u1").await.unwrap().available_pkn, 70);
+    assert_eq!(
+        store::balance(&firestore, "u1")
+            .await
+            .unwrap()
+            .available_pkn,
+        70
+    );
 
     // Without a key: the error surfaces, and the body is not re-run.
     mock.fail_next_commit(CommitFault::LoseResponse);
     let op = LedgerOp::mint("u2", 30, "account_top_up");
     assert!(store::apply(&firestore, &op).await.is_err());
-    assert_eq!(store::balance(&firestore, "u2").await.unwrap().available_pkn, 30);
+    assert_eq!(
+        store::balance(&firestore, "u2")
+            .await
+            .unwrap()
+            .available_pkn,
+        30
+    );
 }
 
 #[tokio::test]
@@ -2701,7 +2961,13 @@ async fn an_aborted_commit_is_retried_once() {
     mock.fail_next_commit(CommitFault::Abort);
     let op = LedgerOp::mint("u1", 40, "account_top_up").with_idempotency("abort:1");
     assert!(store::apply(&firestore, &op).await.unwrap().applied);
-    assert_eq!(store::balance(&firestore, "u1").await.unwrap().available_pkn, 40);
+    assert_eq!(
+        store::balance(&firestore, "u1")
+            .await
+            .unwrap()
+            .available_pkn,
+        40
+    );
     assert_eq!(mock.commits.lock().unwrap().len(), 1);
 }
 
@@ -2718,19 +2984,58 @@ async fn a_multi_leg_payment_is_all_or_nothing() {
         ]
     };
     // 60 + 60 > 100: the first leg alone would fit, but nothing moves.
-    let error = store::apply_all(&firestore, &legs(60), Some("pay:1")).await.unwrap_err();
-    assert!(matches!(error, pokoin_commerce::error::StoreError::Insufficient));
-    assert_eq!(store::balance(&firestore, "s1").await.unwrap().available_pkn, 0);
-    assert_eq!(store::balance(&firestore, "buyer").await.unwrap().available_pkn, 100);
+    let error = store::apply_all(&firestore, &legs(60), Some("pay:1"))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        pokoin_commerce::error::StoreError::Insufficient
+    ));
+    assert_eq!(
+        store::balance(&firestore, "s1")
+            .await
+            .unwrap()
+            .available_pkn,
+        0
+    );
+    assert_eq!(
+        store::balance(&firestore, "buyer")
+            .await
+            .unwrap()
+            .available_pkn,
+        100
+    );
 
-    let outcome = store::apply_all(&firestore, &legs(50), Some("pay:2")).await.unwrap();
+    let outcome = store::apply_all(&firestore, &legs(50), Some("pay:2"))
+        .await
+        .unwrap();
     assert!(outcome.applied);
     assert_eq!(outcome.from_available, 0);
-    assert_eq!(store::balance(&firestore, "s1").await.unwrap().available_pkn, 50);
-    assert_eq!(store::balance(&firestore, "s2").await.unwrap().available_pkn, 50);
-    let replay = store::apply_all(&firestore, &legs(50), Some("pay:2")).await.unwrap();
+    assert_eq!(
+        store::balance(&firestore, "s1")
+            .await
+            .unwrap()
+            .available_pkn,
+        50
+    );
+    assert_eq!(
+        store::balance(&firestore, "s2")
+            .await
+            .unwrap()
+            .available_pkn,
+        50
+    );
+    let replay = store::apply_all(&firestore, &legs(50), Some("pay:2"))
+        .await
+        .unwrap();
     assert!(!replay.applied);
-    assert_eq!(store::balance(&firestore, "s2").await.unwrap().available_pkn, 50);
+    assert_eq!(
+        store::balance(&firestore, "s2")
+            .await
+            .unwrap()
+            .available_pkn,
+        50
+    );
 }
 
 #[tokio::test]
@@ -2769,7 +3074,13 @@ async fn an_underfunded_pkn_order_is_refused_before_any_stock_is_taken() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_eq!(store::balance(&firestore, "buyer-1").await.unwrap().available_pkn, 500);
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .available_pkn,
+        500
+    );
 }
 
 #[tokio::test]
@@ -2789,8 +3100,20 @@ async fn a_top_up_hash_is_claimed_before_it_mints_and_credits_one_account() {
     assert!(!top_up("u1", hash.clone()).await.unwrap());
     let error = top_up("u2", hash.clone()).await.unwrap_err();
     assert_eq!(error.status, StatusCode::CONFLICT);
-    assert_eq!(store::balance(&firestore, "u1").await.unwrap().available_pkn, 50);
-    assert_eq!(store::balance(&firestore, "u2").await.unwrap().available_pkn, 0);
+    assert_eq!(
+        store::balance(&firestore, "u1")
+            .await
+            .unwrap()
+            .available_pkn,
+        50
+    );
+    assert_eq!(
+        store::balance(&firestore, "u2")
+            .await
+            .unwrap()
+            .available_pkn,
+        0
+    );
     let deposit = firestore
         .get_document(
             &firestore
@@ -2806,24 +3129,40 @@ async fn a_top_up_hash_is_claimed_before_it_mints_and_credits_one_account() {
     let interrupted = format!("0x{}", "cd".repeat(32));
     firestore
         .set_document(
-            &firestore.document_path("native_pkn_deposits", &interrupted).unwrap(),
+            &firestore
+                .document_path("native_pkn_deposits", &interrupted)
+                .unwrap(),
             &json!({ "uid": "u3", "purpose": "account_top_up", "status": "claiming" }),
         )
         .await
         .unwrap();
     assert!(top_up("u3", interrupted.clone()).await.unwrap());
-    assert_eq!(store::balance(&firestore, "u3").await.unwrap().available_pkn, 50);
+    assert_eq!(
+        store::balance(&firestore, "u3")
+            .await
+            .unwrap()
+            .available_pkn,
+        50
+    );
     // …but a legacy (or crypto-sale) deposit for the same account never mints.
     let legacy = format!("0x{}", "ef".repeat(32));
     firestore
         .set_document(
-            &firestore.document_path("native_pkn_deposits", &legacy).unwrap(),
+            &firestore
+                .document_path("native_pkn_deposits", &legacy)
+                .unwrap(),
             &json!({ "uid": "u4", "purpose": "crypto_pkn_sale" }),
         )
         .await
         .unwrap();
     assert!(!top_up("u4", legacy).await.unwrap());
-    assert_eq!(store::balance(&firestore, "u4").await.unwrap().available_pkn, 0);
+    assert_eq!(
+        store::balance(&firestore, "u4")
+            .await
+            .unwrap()
+            .available_pkn,
+        0
+    );
 }
 
 #[tokio::test]
@@ -2852,16 +3191,30 @@ async fn a_failed_stripe_event_releases_its_claim_so_the_retry_runs() {
 
     // Stripe's retry runs the handler and marks the claim done.
     assert!(process_verified_event(&state, &event("1000")).await.is_ok());
-    assert_eq!(store::balance(&firestore, "buyer-1").await.unwrap().available_pkn, 1_000);
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .available_pkn,
+        1_000
+    );
     let claim = firestore.get_document(&claim_path).await.unwrap().unwrap();
     assert_eq!(claim["done"], json!(true));
 
     // A later duplicate is acknowledged and mints nothing.
-    let response = process_verified_event(&state, &event("1000")).await.unwrap();
+    let response = process_verified_event(&state, &event("1000"))
+        .await
+        .unwrap();
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     let body: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(body["duplicate"], json!(true));
-    assert_eq!(store::balance(&firestore, "buyer-1").await.unwrap().available_pkn, 1_000);
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .available_pkn,
+        1_000
+    );
 }
 
 #[tokio::test]
@@ -2892,7 +3245,13 @@ async fn an_abandoned_stripe_claim_is_handled_again() {
         } },
     });
     assert!(process_verified_event(&state, &event).await.is_ok());
-    assert_eq!(store::balance(&firestore, "buyer-2").await.unwrap().available_pkn, 500);
+    assert_eq!(
+        store::balance(&firestore, "buyer-2")
+            .await
+            .unwrap()
+            .available_pkn,
+        500
+    );
 }
 
 #[tokio::test]
@@ -3400,11 +3759,11 @@ async fn a_versioned_order_that_has_not_ended_accepts_the_same_paid_report() {
 
 #[tokio::test]
 async fn pending_financial_operations_block_refunds_and_payouts_before_stripe() {
-    let (state, firestore)=state_harness().await;
-    let app=pokoin_commerce::router(state.clone());
-    for kind in ["refund","payout"] {
-        let id=format!("order-busy-{kind}");
-        let order=json!({
+    let (state, firestore) = state_harness().await;
+    let app = pokoin_commerce::router(state.clone());
+    for kind in ["refund", "payout"] {
+        let id = format!("order-busy-{kind}");
+        let order = json!({
             "buyerUid":"customer", "channel":"eur","currency":"EUR",
             "settlementModel":"buyer_markup_processor_costs_v1", "paymentStatus":"paid",
             "totalEURCents":1030,"buyerMarkupCents":30,"shippingEURCents":0,"insuranceEURCents":0,
@@ -3416,21 +3775,35 @@ async fn pending_financial_operations_block_refunds_and_payouts_before_stripe() 
             "items":[{"sellerUid":"buyer-1","quantity":1,"unitPriceEURCents":1000}],
             "settlementOperation":{"kind":kind,"token":"in-flight","createdAt":"2000-01-01T00:00:00Z"}
         });
-        firestore.create_document("orders",&id,&order).await.unwrap();
+        firestore
+            .create_document("orders", &id, &order)
+            .await
+            .unwrap();
         // There is deliberately no Stripe client in this harness. Both calls
         // must stop at the durable reservation, before any provider mutation.
-        let (payout,(status,payload))=tokio::join!(
-            pokoin_commerce::handlers::orders::release_seller_transfers(&state,&id),
-            call(&app,"POST","/api/marketplace-orders",Some(json!({
-                "action":"refund","orderId":id,"clientToken":"retry","amount":100
-            })))
+        let (payout, (status, payload)) = tokio::join!(
+            pokoin_commerce::handlers::orders::release_seller_transfers(&state, &id),
+            call(
+                &app,
+                "POST",
+                "/api/marketplace-orders",
+                Some(json!({
+                    "action":"refund","orderId":id,"clientToken":"retry","amount":100
+                }))
+            )
         );
-        assert_eq!(payout.unwrap_err().code.as_deref(),Some("settlement_operation_busy"));
-        assert_eq!(status,StatusCode::CONFLICT,"{payload}");
-        assert_eq!(payload["code"],"settlement_operation_busy");
-        let stored=firestore.get_document(&firestore.document_path("orders",&id).unwrap())
-            .await.unwrap().unwrap();
-        assert_eq!(stored["settlementOperation"],order["settlementOperation"]);
+        assert_eq!(
+            payout.unwrap_err().code.as_deref(),
+            Some("settlement_operation_busy")
+        );
+        assert_eq!(status, StatusCode::CONFLICT, "{payload}");
+        assert_eq!(payload["code"], "settlement_operation_busy");
+        let stored = firestore
+            .get_document(&firestore.document_path("orders", &id).unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored["settlementOperation"], order["settlementOperation"]);
         assert!(stored["refunds"].is_null());
         assert!(stored["transferIds"].is_null());
     }
@@ -3495,4 +3868,1077 @@ async fn a_non_eur_escrow_refund_is_handled_by_hand() {
     let mut expected = order.clone();
     expected["id"] = json!("order-escrow-pkn");
     assert_eq!(stored, expected);
+}
+
+// ---------------------------------------------------------------------------
+// Wallet request ids
+// ---------------------------------------------------------------------------
+
+const TRANSFER_ROUTE: &str = "/api/transfer-account-balance";
+const WITHDRAW_ROUTE: &str = "/api/request-pkn-withdraw";
+/// Two client-generated intent names.
+const ONE_REQUEST: &str = "6b1f2a34-0000-4c9d-8f1e-0a1b2c3d4e5f";
+const ANOTHER_REQUEST: &str = "7c2f3b45-1111-4dae-9f2a-1b2c3d4e5f60";
+const PAYOUT_ADDRESS: &str = "0x3535353535353535353535353535353535353535";
+const OTHER_PAYOUT_ADDRESS: &str = "0x4444444444444444444444444444444444444444";
+const PAYOUT_TX_HASH: &str = "0x9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b";
+
+fn transfer_body(recipient: &str, amount_pkn: i64, request_id: Option<&str>) -> Value {
+    let mut body = json!({ "recipientUsername": recipient, "amountPkn": amount_pkn });
+    if let Some(request_id) = request_id {
+        body["requestId"] = json!(request_id);
+    }
+    body
+}
+
+fn withdraw_body(address: &str, amount_pkn: i64, request_id: Option<&str>) -> Value {
+    let mut body = json!({ "toAddress": address, "amountPkn": amount_pkn });
+    if let Some(request_id) = request_id {
+        body["requestId"] = json!(request_id);
+    }
+    body
+}
+
+async fn available_pkn(firestore: &FirestoreClient, uid: &str) -> i64 {
+    store::balance(firestore, uid).await.unwrap().available_pkn
+}
+
+/// Alice (`buyer-1`, the harness token's uid) holds 1000 PKN and can address
+/// the two registered accounts the wallet handlers resolve.
+async fn wallet_harness() -> (Router, FirestoreClient, MockStore) {
+    let (app, firestore, mock) = harness_with_store(|_| {}).await;
+    for (username, uid) in [("bob", "bob-1"), ("carol", "carol-1")] {
+        firestore
+            .create_document("usernames", username, &json!({ "uid": uid }))
+            .await
+            .expect("usernames");
+        firestore
+            .create_document(
+                "users",
+                uid,
+                // A local address keeps the email step skipped, so the answer a
+                // request id gets is fixed and can be compared with it.
+                &json!({
+                    "username": username,
+                    "email": format!("{username}@wallet.pokoin.local"),
+                }),
+            )
+            .await
+            .expect("users");
+    }
+    firestore
+        .create_document(
+            "users",
+            "buyer-1",
+            &json!({ "username": "alice", "email": "buyer@wallet.pokoin.local" }),
+        )
+        .await
+        .expect("users/buyer-1");
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+    (app, firestore, mock)
+}
+
+#[tokio::test]
+async fn a_transfer_request_id_is_applied_once() {
+    let (app, firestore, mock) = wallet_harness().await;
+    let body = transfer_body("bob", 250, Some(ONE_REQUEST));
+    let (status, first) = call(&app, "POST", TRANSFER_ROUTE, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(first["ok"], json!(true));
+    assert_eq!(first["creditedAccountBalance"], json!(true));
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(available_pkn(&firestore, "bob-1").await, 250);
+    assert_eq!(mock.keys_with_prefix("ledger_entries/").len(), 3);
+
+    // What the id was applied for is written with it, in the commit that moved
+    // the PKN.
+    let marker = format!(
+        "{}/{}",
+        store::IDEMPOTENCY,
+        store::idempotency_doc_id(&format!("account_transfer:buyer-1:{ONE_REQUEST}"))
+    );
+    let stored = mock.get(&marker).unwrap();
+    assert_eq!(stored["fingerprint"], json!("bob-1:250"));
+    assert_eq!(stored["result"], first);
+
+    // The same request id, sent again with the request it stands for, is
+    // answered with that answer and moves nothing.
+    let (status, replay) = call(&app, "POST", TRANSFER_ROUTE, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay, first);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(available_pkn(&firestore, "bob-1").await, 250);
+    assert_eq!(mock.keys_with_prefix("ledger_entries/").len(), 3);
+}
+
+#[tokio::test]
+async fn a_transfer_request_id_stands_for_one_request() {
+    let (app, firestore, mock) = wallet_harness().await;
+    let (status, applied) = call(
+        &app,
+        "POST",
+        TRANSFER_ROUTE,
+        Some(transfer_body("bob", 250, Some(ONE_REQUEST))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{applied}");
+
+    // The same id with another amount, and then with another recipient: one id
+    // answers one request, so neither is applied.
+    for body in [
+        transfer_body("bob", 251, Some(ONE_REQUEST)),
+        transfer_body("carol", 250, Some(ONE_REQUEST)),
+    ] {
+        let (status, payload) = call(&app, "POST", TRANSFER_ROUTE, Some(body.clone())).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body} -> {payload}");
+        assert_eq!(payload["code"], json!("request_id_reused"));
+    }
+
+    // Nothing after the applied request moved.
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(available_pkn(&firestore, "bob-1").await, 250);
+    assert_eq!(available_pkn(&firestore, "carol-1").await, 0);
+    assert_eq!(mock.keys_with_prefix("ledger_entries/").len(), 3);
+}
+
+#[tokio::test]
+async fn two_transfer_request_ids_move_the_pkn_of_each_request() {
+    let (app, firestore, mock) = wallet_harness().await;
+    // One intent, one id: two named requests are two moves of 250.
+    for (request_id, left_with) in [(ONE_REQUEST, 750), (ANOTHER_REQUEST, 500)] {
+        let (status, payload) = call(
+            &app,
+            "POST",
+            TRANSFER_ROUTE,
+            Some(transfer_body("bob", 250, Some(request_id))),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{payload}");
+        assert_eq!(available_pkn(&firestore, "buyer-1").await, left_with);
+    }
+    assert_eq!(available_pkn(&firestore, "bob-1").await, 500);
+    assert_eq!(mock.keys_with_prefix("ledger_entries/").len(), 5);
+}
+
+#[tokio::test]
+async fn a_wallet_request_without_a_request_id_is_answered_as_before() {
+    let (app, firestore, mock) = wallet_harness().await;
+    // No request id yet: the request is served as it always was, and each call
+    // is its own request.
+    for left_with in [750, 500] {
+        let (status, payload) = call(
+            &app,
+            "POST",
+            TRANSFER_ROUTE,
+            Some(transfer_body("bob", 250, None)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{payload}");
+        assert_eq!(available_pkn(&firestore, "buyer-1").await, left_with);
+    }
+    assert_eq!(available_pkn(&firestore, "bob-1").await, 500);
+    // No bank key in this harness, so the withdraw stays for manual review and
+    // keeps a fresh request id of its own.
+    let (status, withdraw) = call(
+        &app,
+        "POST",
+        WITHDRAW_ROUTE,
+        Some(withdraw_body(PAYOUT_ADDRESS, 20, None)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{withdraw}");
+    assert_eq!(withdraw["status"], json!("pending"));
+    assert_ne!(withdraw["requestId"], json!(null));
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 480);
+    // An unnamed request names nothing, so no key is stored for it.
+    assert!(mock.keys_with_prefix("commerce_idempotency/").is_empty());
+}
+
+#[tokio::test]
+async fn a_wallet_request_id_is_a_uuid() {
+    let (app, firestore, mock) = wallet_harness().await;
+    let malformed = [
+        "",
+        "not-a-uuid",
+        "6b1f2a34-0000-4c9d-8f1e-0a1b2c3d4e5",
+        "6b1f2a3400004c9d8f1e0a1b2c3d4e5f",
+    ];
+    for request_id in malformed {
+        for (route, body) in [
+            (TRANSFER_ROUTE, transfer_body("bob", 250, Some(request_id))),
+            (
+                WITHDRAW_ROUTE,
+                withdraw_body(PAYOUT_ADDRESS, 250, Some(request_id)),
+            ),
+        ] {
+            let (status, payload) = call(&app, "POST", route, Some(body.clone())).await;
+            assert_eq!(
+                status,
+                StatusCode::BAD_REQUEST,
+                "{body} on {route} -> {payload}"
+            );
+            assert_eq!(payload["code"], json!("request_id_invalid"));
+        }
+    }
+    // A request id that is not a string at all is refused the same way.
+    let (status, payload) = call(
+        &app,
+        "POST",
+        TRANSFER_ROUTE,
+        Some(json!({ "recipientUsername": "bob", "amountPkn": 250, "requestId": 42 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{payload}");
+    assert_eq!(payload["code"], json!("request_id_invalid"));
+    // None of them reached the ledger.
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 1_000);
+    assert!(mock.keys_with_prefix("commerce_idempotency/").is_empty());
+}
+
+#[tokio::test]
+async fn a_transfer_whose_answer_never_reached_the_client_is_answered_from_its_request_id() {
+    let (app, firestore, mock) = wallet_harness().await;
+    let body = transfer_body("bob", 250, Some(ONE_REQUEST));
+    // The commit lands and its answer never arrives; the request id names the
+    // move that landed, so the call recovers it.
+    mock.fail_next_commit(CommitFault::LoseResponse);
+    let (status, landed) = call(&app, "POST", TRANSFER_ROUTE, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{landed}");
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(available_pkn(&firestore, "bob-1").await, 250);
+    assert_eq!(mock.keys_with_prefix("ledger_entries/").len(), 3);
+
+    // The client sends the same request id with the same request again: it is
+    // given the answer that landed, and that request has already moved its PKN.
+    let (status, answer) = call(&app, "POST", TRANSFER_ROUTE, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer, landed);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(available_pkn(&firestore, "bob-1").await, 250);
+    assert_eq!(mock.keys_with_prefix("ledger_entries/").len(), 3);
+}
+
+#[tokio::test]
+async fn a_withdraw_request_id_pays_once() {
+    let (rpc_url, calls) = start_mock_rpc(PAYOUT_TX_HASH).await;
+    let (app, firestore, mock) = bank_harness(&rpc_url).await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+
+    let body = withdraw_body(PAYOUT_ADDRESS, 250, Some(ONE_REQUEST));
+    let (status, first) = call(&app, "POST", WITHDRAW_ROUTE, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(first["requestId"], json!(ONE_REQUEST));
+    assert_eq!(first["status"], json!("completed"));
+    assert_eq!(first["payoutTxHash"], json!(PAYOUT_TX_HASH));
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 1);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .locked_pkn,
+        0
+    );
+
+    // The same request id again: this intent's PKN is already locked and the
+    // bank was already asked for it, so the call starts no payout and reports
+    // where the first one stands.
+    let (status, replay) = call(&app, "POST", WITHDRAW_ROUTE, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["requestId"], json!(ONE_REQUEST));
+    assert_eq!(replay["status"], json!("completed"));
+    assert_eq!(replay["payoutTxHash"], json!(PAYOUT_TX_HASH));
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 1);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(mock.keys_with_prefix("withdraw_requests/").len(), 1);
+
+    // A second request id is a second request: it locks and pays on its own.
+    let (status, second) = call(
+        &app,
+        "POST",
+        WITHDRAW_ROUTE,
+        Some(withdraw_body(PAYOUT_ADDRESS, 250, Some(ANOTHER_REQUEST))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second}");
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 2);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 500);
+    assert_eq!(mock.keys_with_prefix("withdraw_requests/").len(), 2);
+}
+
+#[tokio::test]
+async fn a_withdraw_request_id_stands_for_one_request() {
+    let (rpc_url, calls) = start_mock_rpc(PAYOUT_TX_HASH).await;
+    let (app, firestore, mock) = bank_harness(&rpc_url).await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+    let (status, applied) = call(
+        &app,
+        "POST",
+        WITHDRAW_ROUTE,
+        Some(withdraw_body(PAYOUT_ADDRESS, 250, Some(ONE_REQUEST))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{applied}");
+
+    // The same id with another amount, and then with another payout address.
+    for body in [
+        withdraw_body(PAYOUT_ADDRESS, 251, Some(ONE_REQUEST)),
+        withdraw_body(OTHER_PAYOUT_ADDRESS, 250, Some(ONE_REQUEST)),
+    ] {
+        let (status, payload) = call(&app, "POST", WITHDRAW_ROUTE, Some(body.clone())).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body} -> {payload}");
+        assert_eq!(payload["code"], json!("request_id_reused"));
+    }
+
+    // One locked intent, one payout, one request document.
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 1);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(mock.keys_with_prefix("withdraw_requests/").len(), 1);
+}
+
+#[tokio::test]
+async fn a_withdraw_whose_answer_never_reached_the_client_is_answered_from_its_record() {
+    let (rpc_url, calls) = start_mock_rpc(PAYOUT_TX_HASH).await;
+    let (app, firestore, mock) = bank_harness(&rpc_url).await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+
+    // The commit that locks the PKN, marks the id and writes the record lands,
+    // and its answer never arrives; the request id names that request, so the
+    // payout is asked for once.
+    mock.fail_next_commit(CommitFault::LoseResponse);
+    let body = withdraw_body(PAYOUT_ADDRESS, 250, Some(ONE_REQUEST));
+    let (status, landed) = call(&app, "POST", WITHDRAW_ROUTE, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{landed}");
+    assert_eq!(landed["status"], json!("completed"));
+    assert_eq!(landed["payoutTxHash"], json!(PAYOUT_TX_HASH));
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 1);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+
+    // The same request id, sent again with the details it stands for: the
+    // record written with the lock answers it, and this call starts no payout.
+    let (status, answer) = call(&app, "POST", WITHDRAW_ROUTE, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer, landed);
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 1);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .locked_pkn,
+        0
+    );
+    assert_eq!(mock.keys_with_prefix("withdraw_requests/").len(), 1);
+}
+
+#[tokio::test]
+async fn a_withdraw_replay_without_a_request_record_goes_to_the_team() {
+    let (rpc_url, calls) = start_mock_rpc(PAYOUT_TX_HASH).await;
+    let (app, firestore, mock) = bank_harness(&rpc_url).await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+
+    // A marker for this intent id with no record beside it: the id says a
+    // withdrawal was asked for, the record that would say what it stands as is
+    // missing. This call cannot say what that withdrawal stands as, and will
+    // not guess it.
+    let key = format!("withdraw:buyer-1:{ONE_REQUEST}");
+    firestore
+        .create_document(
+            store::IDEMPOTENCY,
+            &store::idempotency_doc_id(&key),
+            &json!({
+                "key": key,
+                "applied": true,
+                "fingerprint": format!("{PAYOUT_ADDRESS}:250"),
+                "fromAvailable": 750,
+                "createdAt": "2026-01-01T00:00:00.000Z",
+            }),
+        )
+        .await
+        .expect("marker");
+
+    let (status, payload) = call(
+        &app,
+        "POST",
+        WITHDRAW_ROUTE,
+        Some(withdraw_body(PAYOUT_ADDRESS, 250, Some(ONE_REQUEST))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{payload}");
+    assert_eq!(payload["code"], json!("withdraw_needs_support"));
+    assert_eq!(
+        payload["error"],
+        json!("This withdrawal needs a check by the Pokoin team. Contact support.")
+    );
+    // Nothing was asked of the bank and nothing moved.
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 0);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 1_000);
+    assert!(mock.keys_with_prefix("withdraw_requests/").is_empty());
+}
+
+#[tokio::test]
+async fn one_withdraw_request_id_belongs_to_one_account() {
+    let (rpc_url, calls) = start_mock_rpc(PAYOUT_TX_HASH).await;
+    let (app, firestore, mock) = bank_harness(&rpc_url).await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+    // The second account holds PKN of its own: an implementation that let this
+    // id through would move money, not merely report a low balance.
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("carol-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+    let body = withdraw_body(PAYOUT_ADDRESS, 250, Some(ONE_REQUEST));
+    let (status, applied) = call(&app, "POST", WITHDRAW_ROUTE, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{applied}");
+
+    // Another account sending the same id with the same details: that record
+    // belongs to the first request, so nothing is committed for this one.
+    let (status, payload) = call_as(&app, "uid:carol-1", "POST", WITHDRAW_ROUTE, Some(body)).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{payload}");
+    assert_eq!(payload["code"], json!("request_id_reused"));
+
+    // Nothing moved for either account, and the one record is the first
+    // request's own.
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 1);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(available_pkn(&firestore, "carol-1").await, 1_000);
+    assert_eq!(
+        store::balance(&firestore, "carol-1")
+            .await
+            .unwrap()
+            .locked_pkn,
+        0
+    );
+    assert_eq!(mock.keys_with_prefix("withdraw_requests/").len(), 1);
+    let record = mock
+        .get(&format!("{}/{}", store::WITHDRAW_REQUESTS, ONE_REQUEST))
+        .expect("request record");
+    assert_eq!(record["uid"], json!("buyer-1"));
+    assert_eq!(record["status"], json!("completed"));
+}
+
+#[tokio::test]
+async fn a_manual_withdraw_replay_carries_the_same_warning() {
+    let (app, firestore, mock) = manual_harness().await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+
+    // The payout stays for the team: the record keeps the warning the answer
+    // carried, and the PKN stays locked.
+    let body = withdraw_body(PAYOUT_ADDRESS, 400, Some(ONE_REQUEST));
+    let (status, first) = call(&app, "POST", WITHDRAW_ROUTE, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(first["status"], json!("pending"));
+    assert!(first["warning"].is_string(), "{first}");
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 600);
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .locked_pkn,
+        400
+    );
+
+    // The same request id again: the same answer, the same warning, one record,
+    // one lock.
+    let (status, replay) = call(&app, "POST", WITHDRAW_ROUTE, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay, first);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 600);
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .locked_pkn,
+        400
+    );
+    assert_eq!(mock.keys_with_prefix("withdraw_requests/").len(), 1);
+}
+
+#[tokio::test]
+async fn a_withdraw_record_and_its_lock_are_one_commit() {
+    let (rpc_url, calls) = start_mock_rpc(PAYOUT_TX_HASH).await;
+    let (app, firestore, mock) = bank_harness(&rpc_url).await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+
+    // The commit is contention-aborted on both attempts: the lock, the marker
+    // and the record are one commit, so none of them exists afterwards, and the
+    // bank is not asked.
+    mock.fail_next_commit(CommitFault::Abort);
+    mock.fail_next_commit(CommitFault::Abort);
+    let (status, payload) = call(
+        &app,
+        "POST",
+        WITHDRAW_ROUTE,
+        Some(withdraw_body(PAYOUT_ADDRESS, 250, Some(ONE_REQUEST))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{payload}");
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 0);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 1_000);
+    assert!(mock.keys_with_prefix("withdraw_requests/").is_empty());
+    assert!(mock.keys_with_prefix("commerce_idempotency/").is_empty());
+    assert_eq!(mock.keys_with_prefix("ledger_entries/").len(), 1);
+
+    // The id was never committed, so the same request id sent again is the
+    // first call of that intent: it locks, records and pays.
+    let (status, answer) = call(
+        &app,
+        "POST",
+        WITHDRAW_ROUTE,
+        Some(withdraw_body(PAYOUT_ADDRESS, 250, Some(ONE_REQUEST))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer["status"], json!("completed"));
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 1);
+    assert_eq!(mock.keys_with_prefix("withdraw_requests/").len(), 1);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+
+    // What each applied commit wrote, in the order they landed.
+    let commits = mock.commits.lock().unwrap().clone();
+    let record = format!("{}/{}", store::WITHDRAW_REQUESTS, ONE_REQUEST);
+    let wrote_record = commits
+        .iter()
+        .position(|keys| keys.contains(&record))
+        .unwrap_or_else(|| panic!("no commit wrote the request record: {commits:?}"));
+    // That commit is the lock itself: the balance write of the locked PKN, the
+    // ledger entry of the lock, this request's marker and its record are in the
+    // one commit, so a withdrawal never has one without the other.
+    let lock = &commits[wrote_record];
+    assert!(lock.contains(&"balances/buyer-1".to_string()), "{lock:?}");
+    assert!(
+        lock.iter().any(|key| key.starts_with("ledger_entries/")),
+        "{lock:?}"
+    );
+    assert!(
+        lock.iter()
+            .any(|key| key.starts_with("commerce_idempotency/")),
+        "{lock:?}"
+    );
+    // The record joins it as a create-only write: a commit that finds it already
+    // written is refused and moves nothing, which is what makes one id one
+    // request.
+    let creates = mock.creates.lock().unwrap().clone();
+    assert!(creates[wrote_record].contains(&record), "{creates:?}");
+    // No later commit writes the record: the payout answer reaches the document
+    // this commit created, and this id has no second request.
+    for later in &commits[wrote_record + 1..] {
+        assert!(!later.contains(&record), "{commits:?}");
+    }
+    // The commit after it is the unlock, and it carries no record of its own.
+    assert_eq!(
+        commits[wrote_record + 1]
+            .iter()
+            .filter(|key| key.starts_with("withdraw_requests/"))
+            .count(),
+        0,
+        "{commits:?}"
+    );
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .locked_pkn,
+        0
+    );
+}
+
+#[tokio::test]
+async fn a_withdraw_that_stays_paying_is_answered_as_being_checked() {
+    let (rpc_url, calls) = start_mock_rpc(PAYOUT_TX_HASH).await;
+    let (app, firestore, mock) = bank_harness(&rpc_url).await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+
+    // The record names the request `paying` before the bank is asked (patch 1).
+    // The write of what the bank answered never lands (2, 3 and 4 are its
+    // attempts), which is what a call that stopped between the two leaves.
+    mock.refuse_patch(2);
+    mock.refuse_patch(3);
+    mock.refuse_patch(4);
+    let body = withdraw_body(PAYOUT_ADDRESS, 250, Some(ONE_REQUEST));
+    let (status, first) = call(&app, "POST", WITHDRAW_ROUTE, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(first["status"], json!("completed"));
+    assert_eq!(first["payoutTxHash"], json!(PAYOUT_TX_HASH));
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 1);
+
+    // The record stands at `paying`: it names a payout whose answer is not
+    // recorded, and says nothing about one that was never asked.
+    let record = mock
+        .get(&format!("{}/{}", store::WITHDRAW_REQUESTS, ONE_REQUEST))
+        .expect("request record");
+    assert_eq!(record["status"], json!("paying"));
+    assert!(record["payoutStartedAt"].is_string(), "{record}");
+
+    // A later call of the same id answers that payout as standing checked and
+    // asks the bank nothing of its own.
+    let (status, replay) = call(&app, "POST", WITHDRAW_ROUTE, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["status"], json!("paying"));
+    assert!(replay["message"].is_string(), "{replay}");
+    assert_eq!(
+        replay["message"],
+        json!("This payout is being checked by the Pokoin team. Do not send it again.")
+    );
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 1);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(mock.keys_with_prefix("withdraw_requests/").len(), 1);
+}
+
+#[tokio::test]
+async fn a_withdraw_is_not_asked_of_the_bank_before_its_paying_state_is_recorded() {
+    let (rpc_url, calls) = start_mock_rpc(PAYOUT_TX_HASH).await;
+    let (app, firestore, mock) = bank_harness(&rpc_url).await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+
+    // No write of the record lands (1, 2 and 3 are the attempts of the one write
+    // made before the bank is asked), so the bank is never asked: a payout the
+    // record cannot name does not start.
+    mock.refuse_patch(1);
+    mock.refuse_patch(2);
+    mock.refuse_patch(3);
+    let body = withdraw_body(PAYOUT_ADDRESS, 250, Some(ONE_REQUEST));
+    let (status, answer) = call(&app, "POST", WITHDRAW_ROUTE, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{answer}");
+    assert_eq!(answer["code"], json!("withdraw_not_recorded"));
+    assert_eq!(
+        answer["error"],
+        json!("This withdrawal was not sent. The Pokoin team has been told. Contact support.")
+    );
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 0);
+
+    // The lock the commit took stays taken and the record is the one that commit
+    // wrote: nothing claims a payout that was asked.
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .locked_pkn,
+        250
+    );
+    let record = mock
+        .get(&format!("{}/{}", store::WITHDRAW_REQUESTS, ONE_REQUEST))
+        .expect("request record");
+    assert_eq!(record["status"], json!("pending"));
+    assert!(record["payoutStartedAt"].is_null(), "{record}");
+    // The lock stays and the bank was not asked: the record says the team
+    // has to look at this request.
+    assert_eq!(
+        record["needsReview"]["reason"],
+        json!("withdraw_paying_not_recorded"),
+        "{record}"
+    );
+    assert!(record["needsReview"]["at"].is_string(), "{record}");
+
+    // The same id sent later is answered from that record, and the bank is not
+    // asked by a request whose paying state was never written.
+    let (status, replay) = call(&app, "POST", WITHDRAW_ROUTE, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["status"], json!("pending"));
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 0);
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .locked_pkn,
+        250
+    );
+}
+
+#[tokio::test]
+async fn a_withdraw_result_is_recorded_before_the_unlock() {
+    let (rpc_url, calls) = start_mock_rpc(PAYOUT_TX_HASH).await;
+    let (app, firestore, mock) = bank_harness(&rpc_url).await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+    let (status, answer) = call(
+        &app,
+        "POST",
+        WITHDRAW_ROUTE,
+        Some(withdraw_body(PAYOUT_ADDRESS, 250, Some(ONE_REQUEST))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+
+    // The writes of this request, in the order the mock took them: the commit
+    // that locks the PKN, the record naming the request `paying`, the record
+    // carrying the bank's answer, then the commit that releases the lock.
+    let record = format!("{}/{}", store::WITHDRAW_REQUESTS, ONE_REQUEST);
+    let order = mock.write_order();
+    let withdraw = &order[1..];
+    assert_eq!(
+        withdraw.iter().map(|(via, _)| *via).collect::<Vec<&str>>(),
+        vec!["commit", "patch", "patch", "commit"],
+        "{withdraw:?}"
+    );
+    assert!(withdraw[0].1.contains(&record), "{withdraw:?}");
+    assert!(withdraw[1].1.contains(&record), "{withdraw:?}");
+    assert!(withdraw[2].1.contains(&record), "{withdraw:?}");
+    assert!(
+        withdraw[3].1.contains(&"balances/buyer-1".to_string()),
+        "{withdraw:?}"
+    );
+    assert!(!withdraw[3].1.contains(&record), "{withdraw:?}");
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 1);
+    assert_eq!(
+        mock.get(&record).expect("record")["status"],
+        json!("completed")
+    );
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .locked_pkn,
+        0
+    );
+}
+
+#[tokio::test]
+async fn a_withdraw_whose_unlock_fails_still_answers_its_payout() {
+    let (rpc_url, calls) = start_mock_rpc(PAYOUT_TX_HASH).await;
+    let (app, firestore, mock) = bank_harness(&rpc_url).await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+
+    // The mint is commit 1 and the lock 2: both of the unlock's attempts (3 and
+    // 4) are refused, so the payout is answered with its lock still held.
+    mock.fail_commit_at(3, CommitFault::Abort);
+    mock.fail_commit_at(4, CommitFault::Abort);
+    let body = withdraw_body(PAYOUT_ADDRESS, 250, Some(ONE_REQUEST));
+    let (status, answer) = call(&app, "POST", WITHDRAW_ROUTE, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer["status"], json!("completed"));
+    assert_eq!(answer["payoutTxHash"], json!(PAYOUT_TX_HASH));
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 1);
+
+    // The record holds what the bank answered, ahead of the lock that stays.
+    let record = mock
+        .get(&format!("{}/{}", store::WITHDRAW_REQUESTS, ONE_REQUEST))
+        .expect("request record");
+    assert_eq!(record["status"], json!("completed"));
+    assert_eq!(record["payoutTxHash"], json!(PAYOUT_TX_HASH));
+    // The payout is answered and the lock stays: the record says the team
+    // has to release it.
+    assert_eq!(
+        record["needsReview"]["reason"],
+        json!("withdraw_unlock_failed"),
+        "{record}"
+    );
+    assert!(record["needsReview"]["at"].is_string(), "{record}");
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .locked_pkn,
+        250
+    );
+
+    // A call of the same id is answered from the record and asks the bank
+    // nothing of its own.
+    let (status, replay) = call(&app, "POST", WITHDRAW_ROUTE, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["status"], json!("completed"));
+    assert_eq!(replay["payoutTxHash"], json!(PAYOUT_TX_HASH));
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 1);
+}
+
+#[tokio::test]
+async fn a_withdraw_whose_paying_note_is_not_written_still_sends_nothing() {
+    let (rpc_url, calls) = start_mock_rpc(PAYOUT_TX_HASH).await;
+    let (app, firestore, mock) = bank_harness(&rpc_url).await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+
+    // The paying write's three attempts (1, 2, 3) and the review note (4) all
+    // miss. The answer is unchanged: nothing is sent, and the log is what
+    // remains of the note.
+    mock.refuse_patch(1);
+    mock.refuse_patch(2);
+    mock.refuse_patch(3);
+    mock.refuse_patch(4);
+    let (status, answer) = call(
+        &app,
+        "POST",
+        WITHDRAW_ROUTE,
+        Some(withdraw_body(PAYOUT_ADDRESS, 250, Some(ONE_REQUEST))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{answer}");
+    assert_eq!(answer["code"], json!("withdraw_not_recorded"));
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 0);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .locked_pkn,
+        250
+    );
+    let record = mock
+        .get(&format!("{}/{}", store::WITHDRAW_REQUESTS, ONE_REQUEST))
+        .expect("request record");
+    assert_eq!(record["status"], json!("pending"));
+    assert!(record.get("needsReview").is_none(), "{record}");
+}
+
+#[tokio::test]
+async fn a_withdraw_whose_send_does_not_answer_stays_being_checked() {
+    let (rpc_url, calls) =
+        start_mock_rpc_rejecting(PAYOUT_TX_HASH, Some("eth_sendRawTransaction")).await;
+    let (app, firestore, mock) = bank_harness(&rpc_url).await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+
+    // The send is the call that does not answer. The transaction was already
+    // signed, so the record stays `paying` and the lock stays.
+    let body = withdraw_body(PAYOUT_ADDRESS, 250, Some(ONE_REQUEST));
+    let (status, first) = call(&app, "POST", WITHDRAW_ROUTE, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(first["status"], json!("paying"));
+    assert_eq!(
+        first["message"],
+        json!("This payout is being checked by the Pokoin team. Do not send it again.")
+    );
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 1);
+
+    let record = mock
+        .get(&format!("{}/{}", store::WITHDRAW_REQUESTS, ONE_REQUEST))
+        .expect("request record");
+    assert_eq!(record["status"], json!("paying"), "{record}");
+    assert_eq!(
+        record["needsReview"]["reason"],
+        json!("withdraw_payout_in_doubt"),
+        "{record}"
+    );
+    assert!(record["needsReview"]["at"].is_string(), "{record}");
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .locked_pkn,
+        250
+    );
+
+    // The same id is answered from that record and does not send again.
+    let (status, replay) = call(&app, "POST", WITHDRAW_ROUTE, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["status"], json!("paying"));
+    assert_eq!(replay["message"], first["message"]);
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 1);
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .locked_pkn,
+        250
+    );
+}
+
+#[tokio::test]
+async fn a_withdraw_that_stops_before_signing_waits_for_the_team() {
+    let (rpc_url, calls) =
+        start_mock_rpc_rejecting(PAYOUT_TX_HASH, Some("eth_getTransactionCount")).await;
+    let (app, firestore, mock) = bank_harness(&rpc_url).await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+
+    // The nonce read fails before any signature, so the record leaves `paying`
+    // and waits for the team. The bank is not asked to send.
+    let body = withdraw_body(PAYOUT_ADDRESS, 250, Some(ONE_REQUEST));
+    let (status, first) = call(&app, "POST", WITHDRAW_ROUTE, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(first["status"], json!("pending"));
+    assert!(first["warning"].is_string(), "{first}");
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 0);
+    assert!(method_calls(&calls, "eth_getTransactionCount") >= 1);
+
+    let record = mock
+        .get(&format!("{}/{}", store::WITHDRAW_REQUESTS, ONE_REQUEST))
+        .expect("request record");
+    assert_eq!(record["status"], json!("pending"), "{record}");
+    assert_eq!(record["payoutMode"], json!("manual_pending"), "{record}");
+    assert!(record.get("needsReview").is_none(), "{record}");
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .locked_pkn,
+        250
+    );
+
+    let (status, replay) = call(&app, "POST", WITHDRAW_ROUTE, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay, first);
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 0);
+}
+
+#[tokio::test]
+async fn a_withdraw_whose_unlock_note_is_not_written_still_answers_its_payout() {
+    let (rpc_url, calls) = start_mock_rpc(PAYOUT_TX_HASH).await;
+    let (app, firestore, mock) = bank_harness(&rpc_url).await;
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+
+    // The mint is commit 1 and the lock 2. Both unlock attempts (3 and 4) are
+    // refused, and the review note (patch 3, after the paying write and the
+    // result) misses too. The payout is still the answer.
+    mock.fail_commit_at(3, CommitFault::Abort);
+    mock.fail_commit_at(4, CommitFault::Abort);
+    mock.refuse_patch(3);
+    let (status, answer) = call(
+        &app,
+        "POST",
+        WITHDRAW_ROUTE,
+        Some(withdraw_body(PAYOUT_ADDRESS, 250, Some(ONE_REQUEST))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer["status"], json!("completed"));
+    assert_eq!(answer["payoutTxHash"], json!(PAYOUT_TX_HASH));
+    assert_eq!(method_calls(&calls, "eth_sendRawTransaction"), 1);
+    let record = mock
+        .get(&format!("{}/{}", store::WITHDRAW_REQUESTS, ONE_REQUEST))
+        .expect("request record");
+    assert_eq!(record["status"], json!("completed"));
+    assert_eq!(record["payoutTxHash"], json!(PAYOUT_TX_HASH));
+    assert!(record.get("needsReview").is_none(), "{record}");
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .locked_pkn,
+        250
+    );
+}
+
+#[tokio::test]
+async fn one_transfer_request_id_belongs_to_one_account() {
+    let (app, firestore, mock) = wallet_harness().await;
+    // The transfer key names its own sender, so one id sent by two accounts is
+    // two intents, each of them applied once.
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("carol-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
+    let body = transfer_body("bob", 250, Some(ONE_REQUEST));
+    let (status, first) = call(&app, "POST", TRANSFER_ROUTE, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+
+    // The second account sends the very same id with the very same details: it
+    // is that account's own request and moves its own PKN.
+    let (status, other) = call_as(
+        &app,
+        "uid:carol-1",
+        "POST",
+        TRANSFER_ROUTE,
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{other}");
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(available_pkn(&firestore, "carol-1").await, 750);
+    assert_eq!(available_pkn(&firestore, "bob-1").await, 500);
+    // One entry per mint and per leg of each move: a replay of either id would
+    // show up here as a seventh.
+    assert_eq!(mock.keys_with_prefix("ledger_entries/").len(), 6);
+
+    // Each account's replay answers its own request and moves nothing.
+    let (status, replay) = call_as(
+        &app,
+        "uid:carol-1",
+        "POST",
+        TRANSFER_ROUTE,
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay, other);
+    let (status, own) = call(&app, "POST", TRANSFER_ROUTE, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{own}");
+    assert_eq!(own, first);
+    assert_eq!(available_pkn(&firestore, "buyer-1").await, 750);
+    assert_eq!(available_pkn(&firestore, "carol-1").await, 750);
+    assert_eq!(available_pkn(&firestore, "bob-1").await, 500);
+    assert_eq!(mock.keys_with_prefix("ledger_entries/").len(), 6);
 }

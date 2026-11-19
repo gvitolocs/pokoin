@@ -220,9 +220,9 @@ const IDLE_WATCH: Duration = Duration::from_millis(1_500);
 
 /// The top-level keys of the answer, with and without `fields=graph`.
 const FULL_KEYS: &str =
-    "game,cardId,ctId,from,to,printing,cardtrader,tcgplayer,cardmarket,pokoin,fx";
+    "game,cardId,ctId,from,to,printing,cardtrader,tcgplayer,cardmarket,cardmarketOffers,pokoin,fx";
 const GRAPH_KEYS: &str =
-    "game,cardId,ctId,from,to,bucket,printing,cardtrader,tcgplayer,cardmarket,pokoin,fx";
+    "game,cardId,ctId,from,to,bucket,printing,cardtrader,tcgplayer,cardmarket,cardmarketOffers,pokoin,fx";
 
 /// The number a counter read is looking for.
 #[derive(Clone, Copy, Debug)]

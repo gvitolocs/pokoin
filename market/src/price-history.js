@@ -1,4 +1,5 @@
 import { getJson } from './api.js';
+import { CONDITIONS } from './card-desk.js';
 import { saveCardPriceHistory } from './price-history-cache.js';
 
 /**
@@ -28,8 +29,9 @@ export const PRICE_HISTORY_DEFAULT_RANGE = '3m';
  * source's own days may be before the graph breaks the line and bridges the
  * break: TCGplayer quotes daily, Cardmarket's trend is weekly, the CardTrader
  * lowest ask moves whenever a listing does. `carry` says how a hover reads a
- * day the source did not quote: `near` the closest day inside the gap, or
- * `onOrBefore` the last one it published (a weekly trend stands until replaced).
+ * day the source did not quote: `near` the closest day inside the gap,
+ * `onOrBefore` the last one it published (a weekly trend stands until replaced),
+ * or `none` — a day it did not quote has no price and the hover says so.
  */
 /**
  * Pokoin's own listings: the cheapest live one at the end of every day, and the
@@ -47,10 +49,67 @@ export const POKOIN_SOURCE = {
 
 export const PRICE_SOURCES = [
   { key: 'tcgplayer', label: 'TCGplayer', short: 'TP', color: '#8ab4ff', dashed: false, gapDays: 10, carry: 'near' },
-  { key: 'cardmarket', label: 'Cardmarket', short: 'CM', color: '#ff7a59', dashed: false, gapDays: 99, carry: 'onOrBefore' },
+  // The trend is one number per product, every grade and language in it: said
+  // beside a grade line below it, a plain "Cardmarket" would read as a grade.
+  { key: 'cardmarket', label: 'Cardmarket trend', short: 'CMt', color: '#ff7a59', dashed: false, gapDays: 99, carry: 'onOrBefore' },
   { key: 'cardtrader_ask', label: 'CT lowest ask', short: 'CT ask', color: '#d6c2ff', dashed: true, gapDays: 3, carry: 'near' },
   POKOIN_SOURCE,
 ];
+
+/**
+ * Cardmarket's own offer day: the cheapest live ask of one grade floor, in one
+ * language, collected daily for the cards the desk shows. It is the one line
+ * whose label is not fixed — `Cardmarket · NM · EN` says what was asked, because
+ * the trend beside it is the same shop without those facets. A mint green of its
+ * own, solid: the same shop, a different number. Not a `PRICE_SOURCES` entry,
+ * because that array is the legend of the sources whose line never changes
+ * facets; this one is drawn next to the trend by `priceSourceSeries`.
+ *
+ * `gapDays` 2 and no carry: a day the collector did not reach has no price, and
+ * quoting the last one for it would put a price on a day nothing was offered.
+ */
+export const CARDMARKET_OFFERS_SOURCE = {
+  key: 'cardmarket_offers',
+  label: 'Cardmarket offers',
+  short: 'CM·offer',
+  color: '#4fdcb0',
+  dashed: false,
+  gapDays: 2,
+  carry: 'none',
+};
+
+/**
+ * The grade floors the daily table keeps, best first — the order of its
+ * `series`. The desk's own grades are Cardmarket's letter for letter
+ * (reports/cm-conditions/site-side.md §2.2), so this is `CONDITIONS` without its
+ * "any condition" row: not a table of its own to keep in step with the chips.
+ */
+export const CM_OFFER_FLOORS = CONDITIONS.filter((row) => row.value).map((row) => row.value);
+
+/**
+ * The languages Cardmarket is collected in. The desk lists `ID`, `TH` and `VI`
+ * too, and those are never stored: asking one would be a parameter error that
+ * costs every other line of the graph.
+ */
+export const CM_OFFER_LANGUAGES = ['EN', 'FR', 'DE', 'ES', 'IT', 'PT', 'NL', 'PL', 'RU', 'KO', 'ZH', 'ZHT', 'JP'];
+
+/** What the server answers when asked for no facet at all. */
+export const CM_OFFER_DEFAULT_CONDITION = 'NM';
+export const CM_OFFER_DEFAULT_LANGUAGE = 'EN';
+
+/**
+ * The facet a request carries: the floor of a picked grade and the picked
+ * language, and the defaults for anything the daily table does not keep — no
+ * floor ("any condition") and an uncollected language both read as the default.
+ */
+export function cmOfferFacet(condition, language) {
+  const want = String(condition || '').trim().toUpperCase();
+  const code = String(language || '').trim().toUpperCase();
+  return {
+    condition: CM_OFFER_FLOORS.find((floor) => floor.toUpperCase() === want) || CM_OFFER_DEFAULT_CONDITION,
+    language: CM_OFFER_LANGUAGES.includes(code) ? code : CM_OFFER_DEFAULT_LANGUAGE,
+  };
+}
 
 /** A `fields=graph` answer of a long window is one point per ISO week. */
 export const PRICE_HISTORY_GRAPH_FIELDS = 'graph';
@@ -101,12 +160,20 @@ export function priceHistoryRange(rangeKey, todayIso) {
  * day (or per ISO week for a long window), with TCGplayer already narrowed to
  * the one series `reverse` picks. A server that does not know the parameter still
  * answers the full shape, which reads the same way here.
+ *
+ * `cmCondition`/`cmLanguage` are the Cardmarket facet the desk plots, asked in
+ * the words the offers leg answers in: always sent, so the window the arrow
+ * warmer keeps is the same read the plain-facet desk makes and not two variants
+ * of it. A server that does not know them ignores them.
  */
-export async function fetchCardPriceHistory(cardId, { from, to, reverse, signal } = {}) {
+export async function fetchCardPriceHistory(cardId, {
+  from, to, reverse, cmCondition, cmLanguage, signal,
+} = {}) {
   const id = String(cardId || '').trim();
   if (!/^\d+$/.test(id)) {
     return null;
   }
+  const facet = cmOfferFacet(cmCondition, cmLanguage);
   const params = new URLSearchParams({ cardId: id });
   if (isIsoDay(from)) {
     params.set('from', from);
@@ -115,6 +182,8 @@ export async function fetchCardPriceHistory(cardId, { from, to, reverse, signal 
     params.set('to', to);
   }
   params.set('fields', PRICE_HISTORY_GRAPH_FIELDS);
+  params.set('cmCondition', facet.condition);
+  params.set('cmLanguage', facet.language);
   if (reverse === true) {
     params.set('reverse', '1');
   }
@@ -199,25 +268,64 @@ function pokoinAskDays(pokoin) {
 }
 
 /**
+ * The offered day of one floor: `cardmarketOffers.series[*]` holds a series per
+ * floor the window has days for, best grade first. A `fields=graph` answer holds
+ * only the floor that was asked, so a full answer and a graph answer of the same
+ * facet read the same way; a floor the answer has no series for is no line.
+ */
+function cardmarketOffersDays(cardmarketOffers, condition) {
+  const series = Array.isArray(cardmarketOffers?.series) ? cardmarketOffers.series : [];
+  const wanted = series.find((row) => String(row?.condition || '') === condition);
+  return pricedDays(dayRowsOf(wanted), (row) => row?.lowestPkn);
+}
+
+/** The one line the answer cannot name for itself: the facet that was asked. */
+function cardmarketOffersLine(facet) {
+  return {
+    ...CARDMARKET_OFFERS_SOURCE,
+    label: `Cardmarket · ${facet.condition} · ${facet.language}`,
+    short: `CM·${facet.condition}`,
+  };
+}
+
+/**
  * The fetched sources the graph can draw, in legend order, each with
  * `days: [{ day, pkn }]` oldest first. A source whose response has no PKN field
  * for this card (or a status that answered nothing) is left out; `reverse`
  * switches TCGplayer to its reverse series and Cardmarket to its foil trend.
+ *
+ * `cmCondition`/`cmLanguage` are the facet the answer was read for — they name
+ * the Cardmarket offers line and pick its floor out of the series. They come
+ * from what was asked, not from what the chips say now, so the lines that are
+ * already drawn keep the words that go with them while a new facet loads.
  */
-export function priceSourceSeries(history, { reverse } = {}) {
+export function priceSourceSeries(history, {
+  reverse, cmCondition, cmLanguage,
+} = {}) {
   const foil = reverse === true;
   const bucket = history?.bucket === 'week' ? 'week' : 'day';
+  const facet = cmOfferFacet(cmCondition, cmLanguage);
   const daysByKey = {
     tcgplayer: tcgplayerDays(history?.tcgplayer, foil),
     cardmarket: cardmarketDays(history?.cardmarket, foil),
     cardtrader_ask: cardtraderAskDays(history?.cardtrader),
     pokoin: pokoinAskDays(history?.pokoin),
+    cardmarket_offers: cardmarketOffersDays(history?.cardmarketOffers, facet.condition),
   };
-  return PRICE_SOURCES
-    .map((source) => ({
-      ...source,
-      gapDays: graphGapDays(source, bucket),
-      days: daysByKey[source.key] || [],
-    }))
-    .filter((source) => source.days.length);
+  const lines = PRICE_SOURCES.map((source) => ({
+    ...source,
+    gapDays: graphGapDays(source, bucket),
+    days: daysByKey[source.key] || [],
+  }));
+  const offers = {
+    ...cardmarketOffersLine(facet),
+    gapDays: graphGapDays(CARDMARKET_OFFERS_SOURCE, bucket),
+    days: daysByKey.cardmarket_offers,
+  };
+  if (offers.days.length) {
+    // Drawn next to the trend it belongs to, whether or not that one has days.
+    const guide = lines.findIndex((row) => row.key === 'cardmarket');
+    lines.splice(guide < 0 ? lines.length : guide + 1, 0, offers);
+  }
+  return lines.filter((line) => line.days.length);
 }
