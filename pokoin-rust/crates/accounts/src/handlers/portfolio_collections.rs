@@ -47,6 +47,14 @@ pub const POKEMON_BLUEPRINTS_SQL: &str = "\
   from public.marketplace_card_versions \
   where card_id = any($1::bigint[])";
 
+/// How long both Pokémon reads of one request may take **together** — the catalog that
+/// names each printing and the sold book that prices it. The other games are bounded by
+/// their own window inside [`price_other_games`], so this route cannot be held open
+/// longer than these two windows plus a Firestore round trip, whatever the market
+/// database is doing. A read that runs out leaves its cards held and unpriced and the
+/// answer saying so, never a request that waits forever.
+const POKEMON_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
+
 /// A `?action=` that is not one of the two writes, or a write attempted with the
 /// wrong method: the contract has no third verb.
 fn unknown_action_error() -> Box<ApiError> {
@@ -142,31 +150,48 @@ fn pokemon_card_ids(rows: &[Json]) -> Vec<i64> {
 /// This is the whole market read of a request: the Pokémon catalog pass, every other
 /// game's own database through [`price_other_games`], then one sold query for the
 /// blueprints both confirmed — the same three steps, in the same order, as the main
-/// series. A read that fails leaves its cards **held and unpriced** rather than
-/// failing the request: the lists themselves are Firestore data, and a graph that
-/// cannot price a card still shows the card.
-async fn read_collection_book(state: &DomainState, rows: &mut Rows) -> Book {
+/// series. Both Pokémon reads share [`POKEMON_READ_TIMEOUT`], and the other games
+/// share theirs, so the wait this route can add to a request is bounded whatever the
+/// market is doing.
+///
+/// A read that fails leaves its cards **held and unpriced** rather than failing the
+/// request: the lists themselves are Firestore data, and a graph that cannot price a
+/// card still shows the card. What it cannot do is pretend the series it then draws
+/// is the seller's worth, so a failed read is reported to the answer as well as the
+/// log.
+async fn read_collection_book(state: &DomainState, rows: &mut Rows) -> PriceRead {
     if rows.rows().is_empty() {
-        return Book::new();
+        return PriceRead::complete(Book::new());
     }
     let Ok(db) = state.marketplace_db() else {
         tracing::warn!("portfolio collections have no marketplace database to price from");
-        return Book::new();
+        return PriceRead::unavailable();
     };
+    let deadline = tokio::time::Instant::now() + POKEMON_READ_TIMEOUT;
+    let mut unavailable = false;
 
     let ids = pokemon_card_ids(rows.rows());
     let mut by_card = HashMap::new();
     if !ids.is_empty() {
-        match db
-            .query_json(POKEMON_BLUEPRINTS_SQL, &[SqlParam::IntArray(ids)])
-            .await
-        {
-            Ok(found) => by_card = pokemon_blueprints(&found),
-            Err(error) => {
+        let read = tokio::time::timeout_at(
+            deadline,
+            db.query_json(POKEMON_BLUEPRINTS_SQL, &[SqlParam::IntArray(ids)]),
+        )
+        .await;
+        match read {
+            Ok(Ok(found)) => by_card = pokemon_blueprints(&found),
+            Ok(Err(error)) => {
                 tracing::warn!(
                     %error,
                     "collection blueprints are unavailable; those cards stay unpriced"
                 );
+                unavailable = true;
+            }
+            Err(_elapsed) => {
+                tracing::warn!(
+                    "collection blueprints timed out; those cards stay unpriced"
+                );
+                unavailable = true;
             }
         }
     }
@@ -184,45 +209,113 @@ async fn read_collection_book(state: &DomainState, rows: &mut Rows) -> Book {
         .filter_map(|row| numeric_id(&row_text(row, "blueprint_id")))
         .collect::<BTreeSet<i64>>();
     if !blueprints.is_empty() {
-        match db
-            .query_json(
+        let read = tokio::time::timeout_at(
+            deadline,
+            db.query_json(
                 SOLD_BY_BLUEPRINT_SQL,
                 &[SqlParam::IntArray(blueprints.into_iter().collect())],
-            )
-            .await
-        {
-            Ok(found) => sold.extend(found),
-            Err(error) => {
+            ),
+        )
+        .await;
+        match read {
+            Ok(Ok(found)) => sold.extend(found),
+            Ok(Err(error)) => {
                 tracing::warn!(
                     %error,
                     "collection sold prices are unavailable; those cards stay unpriced"
                 );
+                unavailable = true;
+            }
+            Err(_elapsed) => {
+                tracing::warn!("collection sold prices timed out; those cards stay unpriced");
+                unavailable = true;
             }
         }
     }
-    sold_price_book(&sold)
+    PriceRead {
+        book: sold_price_book(&sold),
+        unavailable,
+    }
 }
+
+/// The market this answer is priced out of, and whether all of it arrived.
+pub struct PriceRead {
+    pub book: Book,
+    /// A read this answer needed did not happen — no market database, a query that
+    /// failed, or one that ran out its window. There is then no series to draw at
+    /// all: the lists are still the seller's and still answered, with
+    /// [`SERIES_ERROR`] beside them.
+    pub unavailable: bool,
+}
+
+impl PriceRead {
+    fn complete(book: Book) -> Self {
+        Self {
+            book,
+            unavailable: false,
+        }
+    }
+
+    fn unavailable() -> Self {
+        Self {
+            book: Book::new(),
+            unavailable: true,
+        }
+    }
+}
+
+/// The `seriesError` value of an answer whose price reads did not happen. The request
+/// is still a 200: the seller's lists are Firestore data, and a market outage is not a
+/// reason to tell them their collection is gone.
+pub const SERIES_ERROR: &str = "prices_unavailable";
 
 /// The answer of every method of this route: the seller's lists, each card priced
 /// as of the last day of its series, and the series of every list. The lists are the
 /// ones the caller read — or, after a write, the ones its own transaction read with
 /// the write applied — because a store that fails after a committed write must not
 /// turn a 200 into an error.
+///
+/// The maths — every list against every day of the window — is parked on the blocking
+/// pool: it is pure arithmetic over data already in hand, and a seller with the full
+/// allowance of lists and cards would otherwise hold an I/O thread through it.
 async fn answer(
     state: &DomainState,
     collections: &[Collection],
     saved: Option<&str>,
 ) -> Result<Response> {
     let mut rows = Rows::new(collections);
-    let book = read_collection_book(state, &mut rows).await;
+    let read = read_collection_book(state, &mut rows).await;
     let today = utc_day_key_ms(state.clock().now().timestamp_millis());
-    let days = collection_days(&rows, &book, &today);
-    let day = last_day(&days, &today);
-    Ok(json_cached(
-        StatusCode::OK,
-        answer_body(collections, &rows, &book, &days, &day, saved),
-        "private, no-store",
-    ))
+    let collections = collections.to_vec();
+    let saved = saved.map(str::to_string);
+    let body = tokio::task::spawn_blocking(move || {
+        let PriceRead {
+            book,
+            unavailable,
+        } = read;
+        // A book that was not read prices nothing, and a line drawn beneath cards
+        // this request never saw would be a graph of the wrong thing: the series is
+        // left empty and the answer says why.
+        let days = if unavailable {
+            Vec::new()
+        } else {
+            collection_days(&rows, &book, &today)
+        };
+        let day = last_day(&days, &today);
+        let mut body = answer_body(&collections, &rows, &book, &days, &day, saved.as_deref());
+        if unavailable {
+            body["seriesError"] = Json::from(SERIES_ERROR);
+        }
+        body
+    })
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, "the portfolio collections series could not be computed");
+        Box::new(ApiError::internal(
+            "The collection series could not be computed.",
+        ))
+    })?;
+    Ok(json_cached(StatusCode::OK, body, "private, no-store"))
 }
 
 async fn collections_inner(

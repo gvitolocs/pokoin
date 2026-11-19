@@ -1,12 +1,13 @@
 //! `GET|POST /api/marketplace-portfolio-collections` over the real router and a
 //! scripted Firestore.
 //!
-//! The database behind the prices is deliberately *not* configured here: with no
-//! market read model every card of every list answers held and unpriced, which is
-//! the answer the route owes a seller whose catalog is down, and it keeps these
-//! tests about the HTTP contract — who may read, what a write stores, which names
-//! collide and which ids exist. The prices themselves, and the fact that a card of
-//! another game is priced by its own database, are
+//! The database behind the prices is deliberately *not* reachable here: every card of
+//! every list answers held and unpriced and the answer says its series could not be
+//! drawn, which is what the route owes a seller whose market is down — never a graph of
+//! zeros. It keeps these tests about the HTTP contract: who may read, what a write
+//! stores, which names collide and which ids exist. The prices themselves, the series
+//! drawn out of them, and the fact that a card of another game is priced by its own
+//! database are
 //! [`portfolio_collections_flow`](../pokoin_accounts) territory.
 //!
 //! The scripted Firestore is a document store, not an echo: it holds what a commit
@@ -468,17 +469,6 @@ async fn post_raw(
     )
 }
 
-/// `[valuePkn, cardsPriced, cardsHeld]` of one collection of one day.
-fn segment(day: &Json, id: &str) -> Vec<f64> {
-    day["segments"][format!("collection:{id}")]
-        .as_array()
-        .cloned()
-        .unwrap_or_default()
-        .iter()
-        .map(|value| value.as_f64().unwrap_or_default())
-        .collect()
-}
-
 /// The names the answer lists, in the order it lists them.
 fn names_of(body: &Json) -> Vec<String> {
     body["collections"]
@@ -530,7 +520,14 @@ async fn a_seller_reads_their_own_lists_and_nobody_elses() {
         .unwrap_or_default();
     assert_eq!(
         keys,
-        ["priceBasis", "limits", "collections", "segmentDefs", "days"]
+        [
+            "priceBasis",
+            "limits",
+            "collections",
+            "segmentDefs",
+            "days",
+            "seriesError"
+        ]
     );
     assert_eq!(
         names_of(&body),
@@ -550,19 +547,19 @@ async fn a_seller_reads_their_own_lists_and_nobody_elses() {
         "one def per list, in creation order, empty or not"
     );
 
-    // No market read model is configured, so nothing is priceable: the series is
-    // today alone and every card is held at nothing.
-    let days = body["days"].as_array().cloned().unwrap_or_default();
-    assert_eq!(days.len(), 1, "body={body}");
+    // Neither Pokémon read reached the market, so there is no price book and no
+    // series to draw: the answer says so instead of drawing a line at nothing, which
+    // a seller would read as their worth having fallen to zero. The lists themselves
+    // are Firestore data and are still answered, priced as null per card.
     assert_eq!(
-        days[0]["date"],
-        json!(chrono::Utc::now().format("%Y-%m-%d").to_string())
+        body["days"],
+        Json::Array(Vec::new()),
+        "a request that could not price anything draws no series: body={body}"
     );
-    assert_eq!(segment(&days[0], "late"), vec![0.0, 0.0, 2.0]);
     assert_eq!(
-        days[0]["segments"].get("collection:mine"),
-        None,
-        "a list of no cards holds nothing"
+        body["seriesError"],
+        json!("prices_unavailable"),
+        "and the answer says which of the two it did"
     );
     assert_eq!(body["collections"][1]["items"][0]["pricePkn"], Json::Null);
     assert_eq!(body["collections"][1]["items"][0]["cardId"], json!("11"));
@@ -634,7 +631,16 @@ async fn a_save_answers_the_list_it_just_wrote() {
         Some(2),
         "the new list draws a line at once"
     );
-    assert_eq!(segment(&answer["days"][0], &saved), vec![0.0, 0.0, 4.0]);
+    assert_eq!(
+        answer["days"],
+        Json::Array(Vec::new()),
+        "the write committed, the market did not answer: answer={answer}"
+    );
+    assert_eq!(
+        answer["seriesError"],
+        json!("prices_unavailable"),
+        "and a save says so the same way a read does"
+    );
 
     // What was stored is the list and nothing else — no price, no blueprint.
     let written = store.lock().unwrap().document(&saved);
@@ -1016,6 +1022,11 @@ async fn a_delete_loses_the_list_and_its_line() {
         Some(0),
         "with no list holding a card there is no series to draw at all"
     );
+    assert_eq!(
+        answer["seriesError"],
+        Json::Null,
+        "and that is not the same answer as a market that could not be read"
+    );
 
     // A second delete of the same id is the same 404 a wrong id gets.
     let (status, answer, _) = post(&app, "delete", json!({ "id": "mine" }), SELLER).await;
@@ -1325,4 +1336,72 @@ async fn a_write_body_that_cannot_be_read_is_refused_as_malformed() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "answer={answer}");
     assert_eq!(answer["code"], json!("unknown_action"));
+}
+
+/// A market that is configured and *fails*, which is the other way a price read does
+/// not happen: `test_state` has no database at all, so every assertion above ran on
+/// the missing-database branch. Here the pool exists, connects to a port nothing
+/// listens on, and every query errors — which is what an outage looks like to this
+/// route.
+#[tokio::test]
+async fn a_price_read_that_failed_answers_the_lists_and_says_the_series_is_missing() {
+    let (state, _store, _transport) = store_state(vec![document(
+        "mine",
+        SELLER,
+        "Vault",
+        "2026-09-01T10:00:00Z",
+        vec![card("11", 3)],
+    )]);
+    let state = state.with_marketplace_db(Some(
+        pokoin_accounts::sql::MarketplaceDb::connect_lazy(
+            "postgres://pokoin:pokoin@127.0.0.1:1/pokoin_test",
+            1,
+        )
+        .expect("a lazy pool never connects"),
+    ));
+    let app = router(state);
+
+    // The lists survive: they are Firestore data, and a market outage is not a reason
+    // to tell a seller their collection is gone. The series does not survive, because
+    // there is nothing to price it out of — and a line drawn at zero would be read as
+    // their worth having collapsed.
+    let (status, body, headers) = get(&app, Some(SELLER)).await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    assert_eq!(names_of(&body), ["Vault"]);
+    assert_eq!(
+        body["collections"][0]["items"][0]["pricePkn"],
+        Json::Null,
+        "the card is held and unpriced, not free"
+    );
+    assert_eq!(body["segmentDefs"].as_array().map(Vec::len), Some(1));
+    assert_eq!(body["days"], Json::Array(Vec::new()), "body={body}");
+    assert_eq!(body["seriesError"], json!("prices_unavailable"));
+    assert_eq!(
+        headers.get("cache-control").map(String::as_str),
+        Some("private, no-store"),
+        "a series the market could not answer is never cacheable"
+    );
+
+    // The same through a write: the save commits, answers its own id and the state its
+    // transaction read, and still reports the missing series rather than a flat one.
+    let (status, body, _) = post(
+        &app,
+        "save",
+        json!({ "name": "Second", "items": [ { "cardId": "12", "quantity": 1 } ] }),
+        SELLER,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    let saved = body["saved"].as_str().unwrap_or_default().to_string();
+    assert!(
+        !saved.is_empty() && names_of(&body) == ["Vault", "Second"],
+        "the write still landed: body={body}"
+    );
+    assert_eq!(body["segmentDefs"].as_array().map(Vec::len), Some(2));
+    assert_eq!(body["days"], Json::Array(Vec::new()), "body={body}");
+    assert_eq!(
+        body["seriesError"],
+        json!("prices_unavailable"),
+        "a committed save reports the outage it could not price around"
+    );
 }
