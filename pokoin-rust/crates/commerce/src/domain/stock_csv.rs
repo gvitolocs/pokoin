@@ -388,17 +388,25 @@ pub struct LocationStyle {
     pub trailing: i64,
     pub as_is: i64,
     pub total: i64,
+    /// How many values end in a number that could be part of the box name.
+    pub ambiguous_count: i64,
+    /// Up to three distinct ambiguous values with both readings.
+    pub ambiguous_examples: Vec<pokoin_external::powertools::AmbiguousLocation>,
+    /// True when a writer must ask the seller before reading the locations.
+    pub confirmation_needed: bool,
 }
 
 /// `detectPowerToolsLocationStyle` — never invents box names.
 pub fn detect_powertools_location_style(locations: &[String]) -> LocationStyle {
     let mut examples: Vec<String> = Vec::new();
+    let mut cleaned: Vec<String> = Vec::new();
     let (mut structured, mut trailing, mut as_is) = (0i64, 0i64, 0i64);
     for raw in locations {
         let text = clean_str(raw, 120);
         if text.is_empty() {
             continue;
         }
+        cleaned.push(text.clone());
         if examples.len() < 6 && !examples.contains(&text) {
             examples.push(text.clone());
         }
@@ -423,6 +431,7 @@ pub fn detect_powertools_location_style(locations: &[String]) -> LocationStyle {
             location_parse = "trailing_stack";
         }
     }
+    let ambiguity = pokoin_external::powertools::location_ambiguity(&cleaned);
     LocationStyle {
         location_parse,
         location_examples: examples,
@@ -430,7 +439,26 @@ pub fn detect_powertools_location_style(locations: &[String]) -> LocationStyle {
         trailing,
         as_is,
         total,
+        ambiguous_count: ambiguity.count,
+        ambiguous_examples: ambiguity.examples,
+        confirmation_needed: ambiguity.confirmation_needed,
     }
+}
+
+/// The body a request that WRITES locations must answer with instead of
+/// writing while a trailing number is still the server's guess; `None` when the
+/// seller named a mode or the rows leave nothing to choose.
+pub fn location_style_refusal(style: &LocationStyle) -> Option<Value> {
+    if !style.confirmation_needed {
+        return None;
+    }
+    Some(json!({
+        "error": "location_style_unconfirmed",
+        "message": "Choose how to read locations that end in a number.",
+        "locationParse": style.location_parse,
+        "ambiguousCount": style.ambiguous_count,
+        "ambiguousExamples": style.ambiguous_examples.iter().map(pokoin_external::powertools::AmbiguousLocation::to_json).collect::<Vec<_>>(),
+    }))
 }
 
 /// `formatListingLocation`.
@@ -1257,6 +1285,11 @@ pub struct ImportResult {
     pub occupancy: Vec<Occupancy>,
     pub suggested_stack_size: i64,
     pub location_detection: Value,
+    /// [`location_style_refusal`] for the rows, set only when the request left
+    /// `locationParse` to detection: a caller that WRITES must answer with this
+    /// body instead of writing. `None` for a preview, an explicit mode, or rows
+    /// whose every trailing number is settled.
+    pub location_confirmation: Option<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -1312,14 +1345,19 @@ pub fn import_csv_text(text: &str, options: &ImportOptions) -> Result<ImportResu
     let mut occupancy = Vec::new();
     let mut suggested_stack_size = 1i64;
     let mut location_detection = Value::Null;
+    let mut location_confirmation: Option<Value> = None;
+    let mut location_parse = clean_str(&options.location_parse, 40);
+    if location_parse.is_empty() {
+        location_parse = "auto".to_string();
+    }
+    // Whether the request left the reading to detection, or named one.
+    let requested_auto = location_parse == "auto";
 
     let with_slots: Vec<Value> = if options.preserve_location {
         ok_rows
     } else if options.power_tools_sync {
-        let mut location_parse = clean_str(&options.location_parse, 40);
-        if location_parse.is_empty() {
-            location_parse = "auto".to_string();
-        }
+        // An absent or "auto" locationParse means the seller has not chosen a
+        // reading: detection's pick may only be previewed, never written.
         if location_parse == "auto" || options.detect_location {
             let locations: Vec<String> = ok_rows
                 .iter()
@@ -1342,7 +1380,17 @@ pub fn import_csv_text(text: &str, options: &ImportOptions) -> Result<ImportResu
                     "asIs": style.as_is,
                     "total": style.total,
                 },
+                "ambiguousCount": style.ambiguous_count,
+                "ambiguousExamples": style
+                    .ambiguous_examples
+                    .iter()
+                    .map(pokoin_external::powertools::AmbiguousLocation::to_json)
+                    .collect::<Vec<_>>(),
+                "confirmationNeeded": style.confirmation_needed,
             });
+            if requested_auto {
+                location_confirmation = location_style_refusal(&style);
+            }
         }
         let stack_size = match options.stack_size {
             Some(size) if size > 0 => size,
@@ -1358,6 +1406,21 @@ pub fn import_csv_text(text: &str, options: &ImportOptions) -> Result<ImportResu
         occupancy = assigned.occupancy;
         suggested_stack_size = assigned.suggested_stack_size;
         if location_detection.is_null() {
+            // An explicit mode was named, so nothing is refused; the ambiguity
+            // of these rows is reported the same way all detection is.
+            let cleaned: Vec<String> = ok_rows
+                .iter()
+                .map(|row| {
+                    clean_str(
+                        row.get("location")
+                            .or_else(|| row.get("box"))
+                            .and_then(Value::as_str)
+                            .unwrap_or_default(),
+                        120,
+                    )
+                })
+                .collect();
+            let ambiguity = pokoin_external::powertools::location_ambiguity(&cleaned);
             location_detection = json!({
                 "locationParse": location_parse,
                 "locationExamples": occupancy
@@ -1367,6 +1430,9 @@ pub fn import_csv_text(text: &str, options: &ImportOptions) -> Result<ImportResu
                     .filter(|label| !label.is_empty())
                     .collect::<Vec<_>>(),
                 "counts": Value::Null,
+                "ambiguousCount": ambiguity.count,
+                "ambiguousExamples": ambiguity.examples_json(),
+                "confirmationNeeded": ambiguity.confirmation_needed,
             });
         }
         assigned.rows
@@ -1395,6 +1461,7 @@ pub fn import_csv_text(text: &str, options: &ImportOptions) -> Result<ImportResu
         occupancy,
         suggested_stack_size,
         location_detection,
+        location_confirmation,
     })
 }
 
@@ -1690,5 +1757,116 @@ mod tests {
         assert_eq!(source_listing_id_for("powertools", &row), "pt:123:NM:EN:standard:box");
         assert_eq!(source_for_format("cardtrader", "link"), "cardtrader_csv_link");
         assert_eq!(source_for_format("cardmarket", ""), "cardmarket_csv_import");
+    }
+
+    // Every copy of the detector answers with the same numbers as this table.
+    #[test]
+    fn detection_answers_the_shared_ambiguity_table() {
+        use pokoin_external::powertools::ambiguous_location;
+        let table: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../external/src/fixtures/location_style_cases.json"
+        ))
+        .expect("shared location-style table");
+        for case in table["cases"].as_array().expect("cases") {
+            let value = case["raw"].as_str().expect("raw");
+            let ambiguous = ambiguous_location(value);
+            let reported =
+                detect_powertools_location_style(&[value.to_string()]).ambiguous_count > 0;
+            assert_eq!(
+                ambiguous.is_some(),
+                case["ambiguous"].as_bool().expect("ambiguous"),
+                "{value}"
+            );
+            assert_eq!(reported, ambiguous.is_some(), "{value}");
+            let Some(ambiguous) = ambiguous else {
+                continue;
+            };
+            assert_eq!(
+                ambiguous.as_box,
+                case["asBox"].as_str().expect("asBox"),
+                "{value}"
+            );
+            assert_eq!(
+                (ambiguous.box_name.as_str(), ambiguous.stack),
+                (
+                    case["asStack"]["box"].as_str().expect("stack box"),
+                    case["asStack"]["stack"].as_i64().expect("stack number")
+                ),
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_write_with_an_unconfirmed_box_reading_is_refused() {
+        let table: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../external/src/fixtures/location_style_cases.json"
+        ))
+        .expect("shared location-style table");
+        let header = "cardmarketId,quantity,name,set,cn,condition,language,isReverseHolo,finishType,price,comment,location\n";
+        let ambiguous = format!(
+            "{header}1,1,Darkrai,Base Set,45,NM,english,false,,1.50,,Focobomba 006\n\
+             2,1,Cresselia,Base Set,46,NM,english,false,,1.50,,Focobomba 007\n\
+             3,1,Jirachi,Base Set,47,NM,english,false,,1.50,,FUOCOBOMBA 006 - 16\n"
+        );
+        let settled = format!(
+            "{header}1,1,Darkrai,Base Set,45,NM,english,false,,1.50,,BOX 001 - 131\n\
+             2,1,Cresselia,Base Set,46,NM,english,false,,1.50,,BOX 001 - 132\n"
+        );
+
+        // A request that named no mode and one that named "auto" are refused
+        // with the detection result the seller has to confirm.
+        for parse in ["", "auto"] {
+            let options = ImportOptions {
+                power_tools_sync: true,
+                location_parse: parse.to_string(),
+                ..Default::default()
+            };
+            let plan = import_csv_text(&ambiguous, &options).expect("import");
+            assert_eq!(
+                plan.location_confirmation,
+                Some(table["refusalOfAmbiguousList"].clone()),
+                "locationParse {parse:?} is a guess, not a choice"
+            );
+        }
+
+        // A chosen mode is the seller's own reading, so the rows import.
+        let options = ImportOptions {
+            power_tools_sync: true,
+            location_parse: "as_is".to_string(),
+            ..Default::default()
+        };
+        let plan = import_csv_text(&ambiguous, &options).expect("as_is import");
+        assert_eq!(plan.location_confirmation, None);
+        let row = plan.results[0].row.clone().expect("as_is row");
+        assert_eq!(
+            (row["box"].as_str(), row["stack"].as_i64()),
+            (Some("Focobomba 006"), Some(1))
+        );
+        let options = ImportOptions {
+            power_tools_sync: true,
+            location_parse: "trailing_stack".to_string(),
+            ..Default::default()
+        };
+        let plan = import_csv_text(&ambiguous, &options).expect("trailing_stack import");
+        assert_eq!(plan.location_confirmation, None);
+        let row = plan.results[0].row.clone().expect("trailing_stack row");
+        assert_eq!(
+            (row["box"].as_str(), row["stack"].as_i64()),
+            (Some("Focobomba"), Some(6))
+        );
+
+        // Nothing to confirm when every trailing number is settled.
+        let options = ImportOptions {
+            power_tools_sync: true,
+            ..Default::default()
+        };
+        let plan = import_csv_text(&settled, &options).expect("settled import");
+        assert_eq!(plan.location_confirmation, None);
+        let row = plan.results[0].row.clone().expect("settled row");
+        assert_eq!(
+            (row["box"].as_str(), row["stack"].as_i64()),
+            (Some("BOX 001"), Some(131))
+        );
     }
 }

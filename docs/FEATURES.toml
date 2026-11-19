@@ -201,7 +201,7 @@ id = "listings-csv"
 name = "Seller bulk-imports a stock CSV and exports stock"
 money = true
 entry = ["solid/src/pages/SellSpreadsheet.jsx", "solid/src/pages/Inventory.jsx"]
-proof = ["pokoin-rust/crates/external/src/stock_csv.rs::csv_round_trip_and_detect"]
+proof = ["pokoin-rust/crates/external/src/stock_csv.rs::csv_round_trip_and_detect", "pokoin-rust/crates/external/src/powertools.rs::a_trailing_number_two_readings_can_mean", "pokoin-rust/crates/commerce/src/domain/stock_csv.rs::a_write_with_an_unconfirmed_box_reading_is_refused"]
 status = "partial"
 
 [[flow]]
@@ -225,7 +225,7 @@ id = "zero-picks"
 name = "Seller picks copies out of a CardTrader Zero line"
 money = true
 entry = ["solid/src/pages/CardTraderZero.jsx", "solid/src/pages/ZeroPicked.jsx"]
-proof = ["pokoin-rust/crates/commerce/tests/zero_picks_flow.rs::picks_move_inventory_once_and_undo_reverses_them", "market/src/zero-pick.test.js"]
+proof = ["pokoin-rust/crates/commerce/tests/zero_picks_flow.rs::picks_move_inventory_once_and_undo_reverses_them", "market/src/zero-pick.test.js", "pokoin-rust/crates/external/src/cardtrader/zero.rs::power_tools_location_names_rank_in_the_slot_model"]
 status = "proved"
 
 [[flow]]
@@ -241,7 +241,7 @@ id = "cardtrader-connect"
 name = "Seller connects CardTrader; webhooks decrement stock and write sales"
 money = true
 entry = ["solid/src/pages/CardTraderZero.jsx", "solid/src/pages/SyncReview.jsx", "market/src/api.js"]
-proof = ["pokoin-rust/crates/external/src/cardtrader/integration.rs::connect_disconnect_status_cycle", "solid/src/pages/SyncReview.test.js"]
+proof = ["pokoin-rust/crates/external/src/cardtrader/integration.rs::connect_disconnect_status_cycle", "solid/src/pages/SyncReview.test.js", "pokoin-rust/crates/external/src/cardtrader/link.rs::detection_names_the_trailing_numbers_it_cannot_read", "pokoin-rust/crates/external/src/cardtrader/link.rs::an_import_would_have_to_guess_the_box_name", "pokoin-rust/crates/external/tests/router_smoke.rs::cardtrader_sync_refuses_an_unconfirmed_box_reading"]
 status = "partial"
 
 [[flow]]
