@@ -9,7 +9,7 @@
  * other levels.
  */
 
-import { DEFAULT_LIMITS } from './portfolio-collections.js';
+import { DEFAULT_LIMITS, itemIdOf } from './portfolio-collections.js';
 
 /** Two lists: one priced through and one with a sealed box nobody has sold. */
 export const PREVIEW_COLLECTIONS = [
@@ -45,6 +45,32 @@ export const PREVIEW_COLLECTIONS = [
 const WOBBLE_AMPLITUDE = 0.012;
 const WOBBLE_PERIOD_DAYS = 9;
 
+/**
+ * The fixture's own sold-price book, by slice — the preview's stand-in for the
+ * market read the live answer prices out of. A write carries no price (the
+ * server resolves every one), so the lists the desk holds are priced back from
+ * here on every ask: a slice this book knows keeps its price whatever the list
+ * else says about it, and one it does not — a card the seller just searched —
+ * is one nobody has sold.
+ */
+const PRICE_BOOK = new Map(PREVIEW_COLLECTIONS.flatMap((collection) => (collection.items || [])
+  .map((item) => [itemIdOf(item), Number(item.pricePkn) > 0 ? item.pricePkn : null])));
+
+/** What one copy of this slice sold for in the fixture, or null when nobody has. */
+export function previewPriceOf(item) {
+  return PRICE_BOOK.get(itemIdOf(item)) ?? null;
+}
+
+function pricedRows(rows) {
+  return (Array.isArray(rows) ? rows : []).map((collection) => ({
+    ...collection,
+    items: (Array.isArray(collection?.items) ? collection.items : []).map((item) => ({
+      ...item,
+      pricePkn: previewPriceOf(item),
+    })),
+  }));
+}
+
 function round2(value) {
   return Math.round(value * 100) / 100;
 }
@@ -71,18 +97,20 @@ function dayValue(items, factor) {
 }
 
 /**
- * The API's own answer shape for the preview lists over `series`. A day the
- * book has no value for carries no segments at all, exactly like the live
+ * The API's own answer shape for the preview lists over `series`. The items are
+ * priced from the fixture's book, never from what the write carried, and a day
+ * the book has no value for carries no segments at all — exactly like the live
  * split of a series that only started recording recently.
  */
 export function previewCollectionsFrom(series, collections = PREVIEW_COLLECTIONS) {
-  const rows = (Array.isArray(series) ? series : []).filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(String(day?.date || '')));
-  const values = rows.map((day) => amountOf(day, 'cardsValuePkn'));
+  const rows = pricedRows(collections);
+  const dayRows = (Array.isArray(series) ? series : []).filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(String(day?.date || '')));
+  const values = dayRows.map((day) => amountOf(day, 'cardsValuePkn'));
   const baseIndex = values.findIndex((value) => value != null && value > 0);
   const base = baseIndex < 0 ? null : values[baseIndex];
   const days = [];
   let cardDay = 0;
-  rows.forEach((day, index) => {
+  dayRows.forEach((day, index) => {
     const value = values[index];
     if (!(value > 0)) {
       days.push({ date: day.date, cardsValuePkn: value, segments: {} });
@@ -90,7 +118,7 @@ export function previewCollectionsFrom(series, collections = PREVIEW_COLLECTIONS
     }
     cardDay += 1;
     const segments = {};
-    collections.forEach((collection, at) => {
+    rows.forEach((collection, at) => {
       const items = Array.isArray(collection?.items) ? collection.items : [];
       const angle = ((cardDay + at * 3) / WOBBLE_PERIOD_DAYS) * Math.PI * 2;
       const factor = (value / base) * (1 + WOBBLE_AMPLITUDE * Math.sin(angle));
@@ -106,8 +134,8 @@ export function previewCollectionsFrom(series, collections = PREVIEW_COLLECTIONS
   return {
     priceBasis: 'ct-last-sold',
     limits: DEFAULT_LIMITS,
-    collections,
-    segmentDefs: collections.map((collection) => ({
+    collections: rows,
+    segmentDefs: rows.map((collection) => ({
       key: `collection:${collection.id}`,
       group: 'collection',
       label: collection.name,

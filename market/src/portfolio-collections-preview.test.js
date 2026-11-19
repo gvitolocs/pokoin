@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { normalizeCollections } from './portfolio-collections.js';
+import {
+  itemPriceLine,
+  newDraft,
+  normalizeCollections,
+  setItem,
+} from './portfolio-collections.js';
+import { createCollectionsStore } from './portfolio-collections-store.js';
 import { PREVIEW_COLLECTIONS, previewCollectionsFrom } from './portfolio-collections-preview.js';
 import { COLLECTIONS_LEVEL, segmentGroups } from './portfolio-segments.js';
 
@@ -52,4 +58,48 @@ test('the answer normalizes into the rows the Collections level tables', () => {
   assert.deepEqual(previewCollectionsFrom([]).days, []);
   assert.deepEqual(previewCollectionsFrom('junk').days, []);
   assert.deepEqual(previewCollectionsFrom(SERIES, []).segmentDefs, []);
+});
+
+test('the fixture prices every list from its own book, never from the write', () => {
+  // A save body carries no price (the server resolves them), so a preview that
+  // rebuilt its answer off the body would leave every item unpriced after it.
+  const asked = [
+    { ...PREVIEW_COLLECTIONS[0].items[0], quantity: 5, pricePkn: 1 },
+    { game: 'pokemon', cardId: '999999', condition: 'NM', language: 'EN', quantity: 1, pricePkn: 777 },
+  ];
+  const answer = previewCollectionsFrom(SERIES, [{ id: 'moved', name: 'Moved list', items: asked }]);
+  const [kept, unknown] = answer.collections[0].items;
+  assert.equal(kept.pricePkn, 480, 'the price the book has for that slice, whatever the body said');
+  assert.equal(unknown.pricePkn, null, 'a slice the book does not know is one nobody has sold');
+  const items = normalizeCollections(answer).collections[0].items;
+  assert.equal(itemPriceLine(items[0]), 'amount');
+  assert.equal(itemPriceLine(items[1]), 'sold', 'and the row says the truth about it');
+  // The moved quantity counts, so the list is worth more than it was.
+  const day = answer.days.at(-1).segments['collection:moved'];
+  assert.ok(day[0] > 480, `the row keeps a value: ${day[0]}`);
+  assert.deepEqual(day.slice(1), [5, 6], 'the unsold card is held and not priced');
+});
+
+test('saving a changed list in preview keeps the prices of what was not touched', async () => {
+  const store = createCollectionsStore({
+    bearer: () => 't',
+    fetchCollections: () => Promise.reject(new Error('the preview asks nothing')),
+    saveCollection: () => Promise.reject(new Error('the preview asks nothing')),
+    deleteCollection: () => Promise.reject(new Error('the preview asks nothing')),
+    previewAnswer: (rows, seeding) => previewCollectionsFrom(SERIES, seeding ? PREVIEW_COLLECTIONS : rows),
+  });
+  await store.load('preview');
+  const list = store.get().collections[0];
+  const before = list.items.map((item) => item.pricePkn);
+  const draft = setItem(newDraft(list), list.items[0].id, { quantity: 3 });
+  const result = await store.save(draft);
+  assert.equal(result.ok, true);
+  const after = store.get().collections[0];
+  assert.equal(after.items[0].quantity, 3, 'the change landed');
+  assert.deepEqual(after.items.map((item) => item.pricePkn), before, 'every item is priced as it was');
+  assert.deepEqual(after.items.map((item) => itemPriceLine(item)), after.items.map(() => 'amount'));
+  const rows = segmentGroups({ defs: [], days: [], collections: store.model() }, COLLECTIONS_LEVEL, {})[0].rows;
+  assert.equal(rows[0].state, 'ok', 'and the row still has a line to plot');
+  assert.deepEqual(rows.map((row) => row.held), [9, 6], 'the changed copies count in the row');
+  assert.ok(rows[0].valuePkn > 0);
 });
