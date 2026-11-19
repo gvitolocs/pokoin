@@ -22,6 +22,7 @@ use crate::firestore::{DocData, Document, Firestore, Query as FirestoreQuery, Va
 
 use super::collection::iso_timestamp;
 use super::marketplace_game::{is_pokemon_ingest_game, normalize_ingest_game};
+use super::poko_market_math::{normalize_language, CONDITIONS};
 use super::portfolio_history::{
     add_utc_days, condition_key, holding_slices, language_key, last_sold_for, num, round2,
     sold_slice_key, value_holdings_on, PricePoint, HISTORY_DAYS, PRICE_BASIS,
@@ -59,10 +60,16 @@ pub const GROUP: &str = "collection";
 const READ_LIMIT: i64 = 64;
 
 /// The facet a saved item takes when the client leaves it out. Both are already the
-/// key their `*_key` function answers with, and those functions are idempotent, so
-/// the round trip is the slice the price book is filed under either way.
-const DEFAULT_CONDITION: &str = "Near Mint";
+/// vocabulary their own rule answers with — `NM` is one of
+/// [`crate::domain::poko_market_math::CONDITIONS`] and `EN` one of its `LANGUAGES` —
+/// so the round trip is the slice the price book is filed under either way.
+const DEFAULT_CONDITION: &str = "NM";
 const DEFAULT_LANGUAGE: &str = "EN";
+
+/// How long either facet may be written, counted before anything is normalised: a
+/// card name pasted into the condition field is a mistake, not a slice, and no price
+/// key is ever that long.
+const MAX_FACET_LEN: usize = 24;
 
 /// Every slice's sold medians, oldest first — the one book the main series and
 /// all of this seller's collections are priced out of.
@@ -229,31 +236,58 @@ fn sanitize_quantity(value: Option<&Json>) -> Option<i64> {
     (1..=MAX_QUANTITY).contains(&quantity).then_some(quantity)
 }
 
-/// A facet as its price-book key, [`DEFAULT_CONDITION`] and [`DEFAULT_LANGUAGE`]
-/// when the client left it out.
-fn sanitize_facet(value: Option<&Json>, default_value: &str, key: fn(&str) -> String) -> String {
-    let text = text_of(value);
-    if clean_text(&text).is_empty() {
-        key(default_value)
-    } else {
-        key(&text)
+/// A facet a stored document carries that a body would be refused for: kept, so the
+/// seller still sees the line they wrote, and capped so it cannot bloat the answer.
+fn kept_facet(raw: &str) -> String {
+    clean_text(raw).chars().take(MAX_FACET_LEN).collect()
+}
+
+/// The condition an item is stored and answered with: one of
+/// [`crate::domain::poko_market_math::CONDITIONS`], the scale the listing forms and
+/// the sold rows are filed in. [`condition_key`] is the accept-list, so `Near Mint`,
+/// `near mint` and `NM` are one slice and `poor`, `PO` and `Poor` one more; a wear
+/// phrase it does not understand names no slice, so a body is refused and a stored
+/// card keeps its line at nothing.
+fn sanitize_condition(value: Option<&Json>, at: Where) -> Result<String> {
+    let raw = text_of(value);
+    if clean_text(&raw).is_empty() {
+        return Ok(DEFAULT_CONDITION.to_string());
+    }
+    if raw.chars().count() > MAX_FACET_LEN {
+        return at.refused("condition", || kept_facet(&raw));
+    }
+    let key = condition_key(&raw);
+    match CONDITIONS.iter().find(|name| condition_key(name) == key) {
+        Some(name) => Ok((*name).to_string()),
+        None => at.refused("condition", || kept_facet(&raw)),
     }
 }
 
-/// A language as its price-book key. The code is the marketplace's own vocabulary
-/// ([`crate::domain::poko_market_math::normalize_language`]), so `English`, `english`
-/// and `EN` are one slice: a sold row is stored as `en` and keys as `EN`, and a name
-/// uppercased as it stands would price nothing. Text it does not recognise keeps the
-/// uppercase key of the main series, which files it under a key no sale has.
-fn sanitize_language(value: Option<&Json>) -> String {
+/// The language an item is stored and answered with, as the code the sold book is
+/// filed under: `English`, `english`, `en` and `EN` are the one `EN` slice, `ja` and
+/// `Japanese` the one `JP`, `zh-tw` the one `ZHT`. The marketplace's own normalizer is
+/// the accept-list, and a code that is not two or three ASCII letters keys no slice at
+/// all — so a body is refused rather than filed under a key no sale has, and a stored
+/// card keeps its line at nothing.
+fn sanitize_language(value: Option<&Json>, at: Where) -> Result<String> {
     let raw = text_of(value);
-    let text = if clean_text(&raw).is_empty() {
-        DEFAULT_LANGUAGE.to_string()
+    if clean_text(&raw).is_empty() {
+        return Ok(DEFAULT_LANGUAGE.to_string());
+    }
+    if raw.chars().count() > MAX_FACET_LEN {
+        return at.refused("language", || kept_facet(&raw));
+    }
+    let guess = normalize_language(&raw);
+    let code = if guess.matched {
+        guess.code.to_string()
     } else {
-        raw
+        language_key(&raw)
     };
-    let guess = crate::domain::poko_market_math::normalize_language(&text);
-    language_key(if guess.matched { guess.code } else { &text })
+    let letters = code.bytes().all(|byte| byte.is_ascii_alphabetic());
+    if !letters || code.len() < 2 || code.len() > 3 {
+        return at.refused("language", || kept_facet(&raw));
+    }
+    Ok(code)
 }
 
 /// What [`crate::firestore::new_document_id`] writes: an id outside that shape
@@ -368,8 +402,8 @@ impl Item {
         Ok(Self {
             game: sanitize_game(object.get("game"), at)?,
             card_id,
-            condition: sanitize_facet(object.get("condition"), DEFAULT_CONDITION, condition_key),
-            language: sanitize_language(object.get("language")),
+            condition: sanitize_condition(object.get("condition"), at)?,
+            language: sanitize_language(object.get("language"), at)?,
             reverse: bool_of(object, "reverse"),
             first_edition: bool_of(object, "firstEdition") || bool_of(object, "first_edition"),
             graded: bool_of(object, "graded"),
@@ -1198,6 +1232,150 @@ mod tests {
                 "segments": { "collection:c1": [0, 0, 1] },
             })),
             "held at nothing, while a Pokémon card of the same id has sold"
+        );
+    }
+
+    /// One sold row of one blueprint, condition and day, as `sold_price_book` reads it.
+    fn sold_condition(condition: &str, day: &str, pkn: f64) -> Json {
+        json!({
+            "game": "pokemon",
+            "card_id": "42",
+            "blueprint_id": "777",
+            "condition": condition,
+            "language": "en",
+            "reverse": false,
+            "first_edition": false,
+            "graded": false,
+            "observed_day": day,
+            "median_pkn": pkn,
+        })
+    }
+
+    #[test]
+    fn the_five_conditions_are_the_scale_the_sold_book_is_filed_in() {
+        for (spelled, name) in [
+            ("NM", "NM"),
+            ("nm", "NM"),
+            ("mint", "NM"),
+            ("Near Mint", "NM"),
+            ("SP", "SP"),
+            ("excellent", "SP"),
+            ("lightly played", "SP"),
+            ("MP", "MP"),
+            ("good", "MP"),
+            ("moderately played", "MP"),
+            ("PL", "PL"),
+            ("played", "PL"),
+            ("heavily played", "PL"),
+            ("Poor", "Poor"),
+            ("poor", "Poor"),
+            ("PO", "Poor"),
+            ("damaged", "Poor"),
+        ] {
+            let saved =
+                Item::from_input(&json!({ "cardId": "42", "condition": spelled }), 0).unwrap();
+            assert_eq!(saved.condition, name, "{spelled} is the {name} step");
+            assert_eq!(
+                Item::from_input(&saved.to_json(), 0).unwrap(),
+                saved,
+                "what is answered is read back as itself"
+            );
+
+            // The slice key still goes through `condition_key`, so the sold row of
+            // that step is the one the card prices out of.
+            let rows = resolved(
+                &[collection(
+                    "c1",
+                    "Vault",
+                    "2026-09-01T10:00:00",
+                    vec![saved.clone()],
+                )],
+                &[("42", "777")],
+            );
+            let book = book_of(&[sold_condition(&condition_key(name), "2026-10-01", 50.0)]);
+            assert_eq!(
+                day_segments(&rows, &book, "2026-10-08"),
+                Some(json!({
+                    "date": "2026-10-08",
+                    "segments": { "collection:c1": [50, 1, 1] },
+                })),
+                "{spelled} prices under the {} slice",
+                condition_key(name)
+            );
+        }
+
+        // The three spellings of the last step are one slice, so they are one line.
+        let merged = sanitize_items(&[
+            json!({ "cardId": "7", "condition": "poor" }),
+            json!({ "cardId": "7", "condition": "PO" }),
+            json!({ "cardId": "7", "condition": "Poor", "quantity": 2 }),
+        ])
+        .unwrap();
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].condition, "Poor");
+        assert_eq!(merged[0].quantity, 4);
+    }
+
+    #[test]
+    fn a_facet_the_book_has_no_slice_for_is_refused_by_card() {
+        for condition in ["Like New", "Mint Condition", "As Shipped"] {
+            let error = Item::from_input(&json!({ "cardId": "42", "condition": condition }), 3)
+                .unwrap_err();
+            assert_eq!(error.code(), Some("collection_item_invalid"), "{condition}");
+            assert!(
+                error.message().contains("condition") && error.message().contains("4"),
+                "the card and the facet are named: {}",
+                error.message()
+            );
+        }
+        for language in ["Finnish", "中文", "english english english english"] {
+            let error =
+                Item::from_input(&json!({ "cardId": "42", "language": language }), 0).unwrap_err();
+            assert_eq!(error.code(), Some("collection_item_invalid"), "{language}");
+            assert!(error.message().contains("language"), "{}", error.message());
+        }
+
+        // Past the bound, refused before anything is normalised: `Near Mint` padded to
+        // 25 characters is not the NM slice, it is a field that got the wrong text.
+        let padded = format!("{}{}", "Near Mint", " ".repeat(16));
+        assert_eq!(padded.chars().count(), MAX_FACET_LEN + 1);
+        let condition =
+            Item::from_input(&json!({ "cardId": "42", "condition": &padded }), 0).unwrap_err();
+        assert!(
+            condition.message().contains("condition"),
+            "{}",
+            condition.message()
+        );
+        let language =
+            Item::from_input(&json!({ "cardId": "42", "language": &padded }), 0).unwrap_err();
+        assert!(
+            language.message().contains("language"),
+            "{}",
+            language.message()
+        );
+
+        // A stored document keeps what it holds: the line stays, at nothing, rather
+        // than vanishing from a list written before these rules existed.
+        let kept = Item::stored(&json!({
+            "cardId": "42",
+            "condition": "Like New",
+            "language": "Finnish",
+        }))
+        .unwrap();
+        assert_eq!(kept.condition, "Like New");
+        assert_eq!(kept.language, "Finnish");
+        let rows = resolved(
+            &[collection("c1", "Vault", "2026-09-01T10:00:00", vec![kept])],
+            &[("42", "777")],
+        );
+        let book = book_of(&[sold_condition("NM", "2026-10-01", 50.0)]);
+        assert_eq!(
+            day_segments(&rows, &book, "2026-10-08"),
+            Some(json!({
+                "date": "2026-10-08",
+                "segments": { "collection:c1": [0, 0, 1] },
+            })),
+            "held at nothing rather than priced off the NM sales"
         );
     }
 

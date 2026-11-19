@@ -225,16 +225,27 @@ through its own catalog and its own sold book — so a client cannot name a blue
 and price its graph off a card it does not hold, and a Riftbound card whose public
 id collides with a pricey Pokémon one still answers its own game's price.
 
-An item's facets are keys into that book, so they are stored as the book is filed:
-`Near Mint`, `nm` and `NM` are the one `NM` slice, `English`, `english` and `en` the
-one `EN` one, `ja` and `Japanese` the one `JP`, and a `game` may be written as its id
-or the display name the marketplace uses. Absent means `NM` / `EN`, Pokémon. A `game`
-the platform's own game table does not list is a 400 on the save: it has no database
-to price from, so there is no honest series to draw. A list that stored such a game
-before it left the table keeps its line — the row reads as `unknown`, held at nothing,
-and is never looked up in the Pokémon tables by a card id that only looks alike. A
-`language` it has no code for keys nothing, and that card comes back held and
-unpriced rather than priced off some other card's sales.
+An item's facets are keys into that book, so they are stored as the book is filed.
+Condition is answered and stored as one of the five the listing forms and the sold
+rows use — `NM`, `SP`, `MP`, `PL`, `Poor` — and the spellings `condition_key` already
+understands map onto them, so `Near Mint`, `nm`, `NM`, `mint` are one slice and
+`poor`, `PO`, `damaged`, `Poor` one more. The slice key still goes through
+`condition_key`, so the stored name and the sold row reach the same slice either way.
+Language is answered as the code the sold rows carry: `English`, `english`, `en` and
+`EN` are the one `EN` slice, `ja` and `Japanese` the one `JP`, `zh-tw` the one `ZHT`.
+A `game` may be written as its id or the display name the marketplace uses. Absent
+means `NM` / `EN`, Pokémon.
+
+The two vocabularies are closed: a `condition` outside those five, a `language` that
+does not come back as the two or three ASCII letters of a code, and either written
+past 24 characters — counted before anything is normalised — is a
+`collection_item_invalid` that names the card and the facet, because such a slice has
+no sales to carry a series and a save that quietly stored it would draw a line that
+can only ever read zero. A `game` the platform's own game table does not list is a 400
+on the save for the same reason: it has no database to price from. A list that stored
+any of these before the rule existed keeps the line — held at nothing, and with a game
+no longer listed the row reads as `unknown`, so it is never looked up in the Pokémon
+tables by a card id that only looks alike.
 
 **The series is not stored.** It is a question about a list, not a fact: the day a
 card last sold changes under it, the seller renames or re-orders the list, and a
