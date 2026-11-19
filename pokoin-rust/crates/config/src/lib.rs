@@ -10,6 +10,10 @@ pub struct Config {
     pub redis_index: String,
     pub search_engine: String,
     pub db_pool_max: u32,
+    /// search-page gate slots. 0 means "derive it from `db_pool_max`".
+    pub search_page_slots: u32,
+    /// How long a search-page request waits for a slot before it is shed.
+    pub search_page_wait_ms: u64,
 }
 
 fn env_first(names: &[&str]) -> Option<String> {
@@ -47,6 +51,16 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(16),
+            // 0 (unset or explicitly 0) means search_page::default_slots derives
+            // it from db_pool_max: half the catalogue pool per parallel statement.
+            search_page_slots: std::env::var("POKOIN_RUST_SEARCH_PAGE_SLOTS")
+                .ok()
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(0),
+            search_page_wait_ms: std::env::var("POKOIN_RUST_SEARCH_PAGE_WAIT_MS")
+                .ok()
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(1500),
         }
     }
 }
