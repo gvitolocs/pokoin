@@ -7,10 +7,12 @@ import {
   closeIntent,
   commitQuantity,
   draftChanged,
+  gameDisplayName,
   itemPriceLine,
   newDraft,
   newItem,
   removeItem,
+  rowsShowGame,
   setItem,
 } from '@market/portfolio-collections.js';
 import { GAMES, game, isPokemonGame } from '@market/game.js';
@@ -190,6 +192,13 @@ function CatalogCardSearch(props) {
 function ItemRow(props) {
   const item = () => props.item;
   const patch = (changes) => props.onPatch(item().id, changes);
+  // The set line names the game only when the list holds more than one: a
+  // "Base Set 4/102 · Pokémon" under every card of a Pokémon list would just
+  // repeat the picker above, and the catalog id alone reads like a field name.
+  const meta = createMemo(() => [
+    item().setName,
+    props.showGame && gameDisplayName(item().game),
+  ].filter(Boolean).join(' · '));
   // What the seller is typing, until the field lets go of it. The row's quantity
   // is a committed number; an empty field is a number still being written, not a
   // quantity of none, so it stays on screen exactly as typed until blur or Enter.
@@ -209,7 +218,7 @@ function ItemRow(props) {
     <li class="collections-item" data-testid="collections-item">
       <div class="collections-item-identity">
         <strong>{item().name || 'Card'}</strong>
-        <em>{[item().setName, item().game].filter(Boolean).join(' · ')}</em>
+        <em>{meta()}</em>
         <span
           class={`collections-item-price${line() === 'amount' ? '' : ' is-note'}`}
           title={PRICE_TITLE[line()]}
@@ -475,6 +484,7 @@ export default function CollectionEditor(props) {
                 {(item) => (
                   <ItemRow
                     item={item()}
+                    showGame={rowsShowGame(draft().items)}
                     limits={limits()}
                     currency={props.currency}
                     currencyPending={Boolean(props.currencyPending)}

@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { normalizeCollections } from '../../../market/src/portfolio-collections.js';
+import {
+  gameDisplayName,
+  newItem,
+  normalizeCollections,
+  rowsShowGame,
+} from '../../../market/src/portfolio-collections.js';
 import {
   PREVIEW_COLLECTIONS,
   previewCollectionsFrom,
@@ -258,6 +263,20 @@ test('the item rows use the listing forms vocabulary and clamp copies', () => {
   assert.match(editorSrc, /'No sold price'/);
   // The count the brief asks for, straight off the server's limit.
   assert.match(editorSrc, /\$\{draft\(\)\.items\.length\} of \$\{limits\(\)\.items\} cards/);
+});
+
+test('a row names its game in the game\'s own words, and only when the list holds two', () => {
+  // The catalog id ("Base Set 4/102 · pokemon") is a field name, not a game a
+  // seller reads; the display name comes from the module and the decision of
+  // whether to show it at all is the module's too.
+  assert.match(editorSrc, /gameDisplayName,[\s\S]*rowsShowGame,[\s\S]*\} from '@market\/portfolio-collections\.js';/);
+  assert.match(editorSrc, /props\.showGame && gameDisplayName\(item\(\)\.game\)/);
+  assert.match(editorSrc, /showGame=\{rowsShowGame\(draft\(\)\.items\)\}/);
+  assert.doesNotMatch(editorSrc, /\[item\(\)\.setName, item\(\)\.game\]/, 'the raw game id is gone from the row');
+  const mixed = [newItem({ cardId: '1' }), newItem({ cardId: '2', game: 'yugioh' })];
+  assert.equal(rowsShowGame(mixed), true);
+  assert.deepEqual(mixed.map((item) => [item.setName, rowsShowGame(mixed) && gameDisplayName(item.game)].filter(Boolean).join(' · ')),
+    ['Pokémon', 'Yu-Gi-Oh!'], 'the words a person reads');
 });
 
 test('one card in the draft is one row, and keeps what is typed in it', () => {

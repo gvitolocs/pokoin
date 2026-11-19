@@ -12,6 +12,7 @@
  * answer becomes the empty state, never a throw and never a half-row.
  */
 
+import { GAMES } from './game.js';
 import { normalizeSegmentDefs, normalizeSegments } from './portfolio-segments.js';
 
 /** What the server answers in `limits` when it says nothing. */
@@ -21,7 +22,8 @@ export const DEFAULT_LIMITS = Object.freeze({ collections: 20, items: 300, quant
 export const COLLECTION_GROUP = 'collection';
 export const COLLECTION_KEY_PREFIX = 'collection:';
 
-/** The conditions and languages the listing forms already send (market/src/card-desk.js). */
+/** The game, condition and language a row prices under when nothing says otherwise (market/src/card-desk.js). */
+export const DEFAULT_ITEM_GAME = 'pokemon';
 export const DEFAULT_ITEM_CONDITION = 'NM';
 export const DEFAULT_ITEM_LANGUAGE = 'EN';
 
@@ -89,7 +91,7 @@ export function normalizeLimits(limits) {
 /** The slice a row prices at: id and facets, nothing else. */
 export function itemIdOf(item = {}) {
   return [
-    text(item.game) || 'pokemon',
+    text(item.game) || DEFAULT_ITEM_GAME,
     cardIdText(item.cardId),
     text(item.condition) || DEFAULT_ITEM_CONDITION,
     languageText(item.language),
@@ -117,6 +119,27 @@ export function itemPriceLine(item, { currencyPending = false } = {}) {
   return Number(item?.pricePkn) > 0 ? 'amount' : 'sold';
 }
 
+/**
+ * The game a row belongs to, in the words a seller uses for it. A collection
+ * item carries the catalog id (`pokemon`), and a line that reads "Base Set 4/102
+ * • pokemon" says nothing a person reads as a game.
+ */
+export function gameDisplayName(id) {
+  const clean = text(id);
+  return GAMES[clean]?.name || clean;
+}
+
+/**
+ * Whether the rows have to name their game at all: a list of one game is that
+ * game's list, and the label under every card would only repeat the picker
+ * above it. Two games in one list is the case where a row must say.
+ */
+export function rowsShowGame(items) {
+  const games = new Set((Array.isArray(items) ? items : [])
+    .map((item) => text(item?.game) || DEFAULT_ITEM_GAME));
+  return games.size > 1;
+}
+
 function pricePknOf(row) {
   const price = numberOrNull(row?.pricePkn ?? row?.price_pkn);
   return price == null || price < 0 ? null : price;
@@ -128,7 +151,7 @@ function normalizeItem(row, limits) {
   const cardId = cardIdText(row?.cardId ?? row?.card_id);
   if (!cardId) return null;
   const item = {
-    game: text(row?.game) || 'pokemon',
+    game: text(row?.game) || DEFAULT_ITEM_GAME,
     cardId,
     // The listing forms' own vocabulary: NM/SP/MP/PL/Poor and the page codes.
     condition: text(row?.condition) || DEFAULT_ITEM_CONDITION,

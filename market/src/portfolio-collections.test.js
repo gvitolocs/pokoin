@@ -13,6 +13,7 @@ import {
   DEFAULT_LIMITS,
   emptyCollections,
   errorCode,
+  gameDisplayName,
   itemIdOf,
   itemPriceLine,
   nameProblem,
@@ -21,6 +22,7 @@ import {
   normalizeCollections,
   normalizeLimits,
   removeItem,
+  rowsShowGame,
   saveBody,
   setItem,
 } from './portfolio-collections.js';
@@ -143,6 +145,18 @@ test('the key is the slice: id, condition, language and the three flags', () => 
     'pokemon|1|Poor|EN|R|-|G',
     'a language is a code, a grade keeps the form the listing sends',
   );
+});
+
+test('the game a row is named by, and when a row has to name it at all', () => {
+  assert.equal(gameDisplayName('pokemon'), 'Pokémon');
+  assert.equal(gameDisplayName(' one_piece '), 'One Piece');
+  assert.equal(gameDisplayName(''), '', 'nothing to say');
+  assert.equal(gameDisplayName('newgame'), 'newgame', 'an id no brand table knows is still readable');
+  assert.equal(rowsShowGame([]), false, 'an empty list names nothing');
+  assert.equal(rowsShowGame([{ game: 'pokemon' }, { cardId: '1' }]), false, 'no game is the default game');
+  assert.equal(rowsShowGame([{ game: 'pokemon' }, { game: 'yugioh' }]), true, 'two games in one list');
+  const saved = normalizeCollections(payload()).collections[0];
+  assert.equal(rowsShowGame(saved.items), false, 'a list of one game is that game list');
 });
 
 test('newDraft starts from a saved list, and a card straight from search', () => {
