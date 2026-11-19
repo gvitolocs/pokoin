@@ -27,19 +27,17 @@ use super::marketplace_game::{is_pokemon_ingest_game, normalize_ingest_game};
 use super::poko_market_math::{normalize_language, CONDITIONS};
 use super::portfolio_history::{
     add_utc_days, condition_key, holding_slices, language_key, last_sold_for, num, round2,
-    sold_slice_key, value_holdings_on, PricePoint, HISTORY_DAYS, PRICE_BASIS,
+    sold_slice_key, value_holdings_on, Holding, PricePoint, HISTORY_DAYS, PRICE_BASIS,
 };
 use super::portfolio_segments::POKEMON;
 
 /// `ApiError` is wide, so every fallible function here hands the refusal over
 /// boxed and the handler answers from the unboxed error, as
-/// [`crate::handlers::poko_market`]'s boxed tools do.
+/// [`crate::handlers::poko_market`]'s boxed tools do — including the helpers called
+/// inside [`Firestore::run_transaction`], whose body fixes its error to an unboxed
+/// `ApiError`: each moves the refusal out of its box at that one boundary, never
+/// rebuilds it.
 type Result<T> = std::result::Result<T, Box<ApiError>>;
-
-/// [`Firestore::run_transaction`] fixes its body's error to an unboxed `ApiError`,
-/// so a write's body and its helpers answer in that and the caller boxes what comes
-/// back. The refusals are moved out of their boxes here, never rebuilt.
-type Tx<T> = std::result::Result<T, ApiError>;
 
 /// Firestore collection of the seller's own card lists: one document per
 /// collection, found by `uid`.
@@ -980,12 +978,21 @@ pub fn series_start(rows: &Rows, book: &Book, today: &str) -> String {
     start
 }
 
-/// What every collection held on `day`, as one `segments` map, or nothing when no
-/// collection held anything.
-pub fn day_segments(rows: &Rows, book: &Book, day: &str) -> Option<Json> {
+/// What every collection held on `day`, out of holdings that are already keyed, as
+/// one `segments` map, or nothing when no collection held anything.
+///
+/// A slice key is a fact about a row — its blueprint, condition, language, foil and
+/// edition — never about a day, so it is built once per collection by
+/// [`collection_holdings`] and this reads what that produced. A month of days drawing
+/// the same keys again per day is the same work done thirty times over.
+pub fn day_segments_on(
+    holdings: &[(String, Vec<Holding>)],
+    book: &Book,
+    day: &str,
+) -> Option<Json> {
     let mut segments = Map::new();
-    for (id, item_rows) in rows.iter() {
-        if let Some(value) = value_holdings_on(&holding_slices(item_rows), book, day) {
+    for (id, held) in holdings {
+        if let Some(value) = value_holdings_on(held, book, day) {
             segments.insert(
                 segment_key(id),
                 json!([
@@ -999,6 +1006,19 @@ pub fn day_segments(rows: &Rows, book: &Book, day: &str) -> Option<Json> {
     (!segments.is_empty()).then(|| json!({ "date": day, "segments": segments }))
 }
 
+/// Every collection's holdings, each group keyed once for the whole request.
+pub fn collection_holdings(rows: &Rows) -> Vec<(String, Vec<Holding>)> {
+    rows.iter()
+        .map(|(id, item_rows)| (id.to_string(), holding_slices(item_rows)))
+        .collect()
+}
+
+/// [`day_segments_on`] for rows, which keys them first: what one day of one list
+/// costs, asked directly.
+pub fn day_segments(rows: &Rows, book: &Book, day: &str) -> Option<Json> {
+    day_segments_on(&collection_holdings(rows), book, day)
+}
+
 /// The daily series of every collection at once, from [`series_start`] to `today`.
 ///
 /// Nothing of it is stored: a list changes the moment the seller edits it, and a
@@ -1006,13 +1026,14 @@ pub fn day_segments(rows: &Rows, book: &Book, day: &str) -> Option<Json> {
 /// collection appears in is left out, and an empty collection never enters
 /// `segments` while keeping its def.
 pub fn collection_days(rows: &Rows, book: &Book, today: &str) -> Vec<Json> {
+    let holdings = collection_holdings(rows);
     let mut days = Vec::new();
     let mut day = series_start(rows, book, today);
     for _ in 0..=HISTORY_DAYS {
         if day.as_str() > today {
             break;
         }
-        if let Some(entry) = day_segments(rows, book, &day) {
+        if let Some(entry) = day_segments_on(&holdings, book, &day) {
             days.push(entry);
         }
         let next = add_utc_days(&day, 1);
@@ -2036,6 +2057,48 @@ mod tests {
         assert_eq!(value_of("2026-10-07"), Some(json!([140, 1, 1])));
         assert_eq!(last_day(&days, "2026-10-09"), "2026-10-07");
         assert_eq!(last_day(&[], "2026-10-09"), "2026-10-09");
+    }
+
+    #[test]
+    fn a_day_is_drawn_from_keyed_holdings_and_never_from_a_row() {
+        // Not a timing test: `day_segments_on` has no way to ask what a slice key is,
+        // because its arguments hold no row. A key is a fact about a card and is built
+        // once per collection, so a thirty-day series is thirty lookups of the same
+        // keys rather than thirty rebuilds of them.
+        let collections = vec![
+            collection("a", "A", "", vec![item("11")]),
+            collection("b", "B", "", vec![item("11"), item("12")]),
+        ];
+        let rows = resolved(&collections, &[("11", "500"), ("12", "600")]);
+        let book = book_of(&[
+            sold_row("11", "500", false, "2026-10-01", 100.0),
+            sold_row("12", "600", false, "2026-10-02", 60.0),
+        ]);
+        let holdings = collection_holdings(&rows);
+        assert_eq!(
+            holdings.len(),
+            2,
+            "one keyed group per collection, not one per day of the series"
+        );
+        assert_eq!(
+            holdings
+                .iter()
+                .map(|(id, held)| (id.as_str(), held.len()))
+                .collect::<Vec<_>>(),
+            vec![("a", 1), ("b", 2)],
+            "each group is that collection's own slices"
+        );
+
+        let whole = collection_days(&rows, &book, "2026-10-03");
+        drop(rows);
+        let one_by_one = (1..=3)
+            .map(|day| format!("2026-10-0{day}"))
+            .filter_map(|day| day_segments_on(&holdings, &book, &day))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            one_by_one, whole,
+            "the days drawn from keyed holdings, with no row left in hand, are the series"
+        );
     }
 
     #[test]
