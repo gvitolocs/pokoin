@@ -424,8 +424,10 @@ async fn build_game(app: &Router, state: &AppState, o: &Options, game: &str) -> 
         let cardtrader = game == "pokemon"
             || pokoin_api_common::game::ingest_game_config(game).is_some_and(|g| !g.cardmarket_only);
         if o.kinds.iter().any(|k| k == "median") && cardtrader {
-            let n = build_medians(&pool).await?;
-            tracing::info!(%game, medians = n, "build-lists medians");
+            match build_medians(&pool).await {
+                Ok(n) => tracing::info!(%game, medians = n, "build-lists medians"),
+                Err(error) => kind_failed(game, "median", &error),
+            }
         }
         if o.kinds.iter().any(|k| k == "set") {
             // Stored set positions first (card desk arrows, set lists).
@@ -433,51 +435,84 @@ async fn build_game(app: &Router, state: &AppState, o: &Options, game: &str) -> 
                 Ok(moved) => tracing::info!(%game, moved, "build-lists set_order"),
                 Err(error) => tracing::warn!(%game, %error, "build-lists set_order refresh failed"),
             }
-            let n = build_sets(app, &pool, game, o.key.as_deref()).await?;
-            tracing::info!(%game, sets = n, "build-lists sets");
+            match build_sets(app, &pool, game, o.key.as_deref()).await {
+                Ok(n) => tracing::info!(%game, sets = n, "build-lists sets"),
+                Err(error) => kind_failed(game, "set", &error),
+            }
         }
         if o.kinds.iter().any(|k| k == "name") && game == "pokemon" {
-            let n = build_names(app, &pool, game).await?;
-            tracing::info!(%game, names = n, "build-lists names");
+            match build_names(app, &pool, game).await {
+                Ok(n) => tracing::info!(%game, names = n, "build-lists names"),
+                Err(error) => kind_failed(game, "name", &error),
+            }
         }
         if o.kinds.iter().any(|k| k == "species") && game == "pokemon" {
             let started = std::time::Instant::now();
-            let n = build_species(&pool, game).await?;
-            tracing::info!(%game, species = n, seconds = started.elapsed().as_secs_f64(), "build-lists species");
+            match build_species(&pool, game).await {
+                Ok(n) => tracing::info!(%game, species = n, seconds = started.elapsed().as_secs_f64(), "build-lists species"),
+                Err(error) => kind_failed(game, "species", &error),
+            }
         }
         // Artist snapshots follow the route: a game without an artist catalog
         // answers an empty index, so there is nothing to store for it.
         if o.kinds.iter().any(|k| k == "artist") && pokoin_catalog_api::reads::artist_cards::has_artist_catalog(game) {
-            let n = build_artists(app, &pool, game, o.key.as_deref()).await?;
-            tracing::info!(%game, artists = n, "build-lists artists");
+            match build_artists(app, &pool, game, o.key.as_deref()).await {
+                Ok(n) => tracing::info!(%game, artists = n, "build-lists artists"),
+                Err(error) => kind_failed(game, "artist", &error),
+            }
         }
         if o.kinds.iter().any(|k| k == "version") && game == "pokemon" {
-            let n = build_versions(app, &pool, game, o.key.as_deref()).await?;
-            tracing::info!(%game, versions = n, "build-lists versions");
+            match build_versions(app, &pool, game, o.key.as_deref()).await {
+                Ok(n) => tracing::info!(%game, versions = n, "build-lists versions"),
+                Err(error) => kind_failed(game, "version", &error),
+            }
         }
         if o.kinds.iter().any(|k| k == "seller") {
-            let Some(commerce) = state.commerce.read().await.clone() else {
-                anyhow::bail!("seller books need the commerce domain (MARKETPLACE_DATABASE_URL)");
-            };
-            let started = std::time::Instant::now();
-            use pokoin_commerce::handlers::seller_book;
-            let directory = seller_book::FirestoreDirectory(&commerce);
-            let built = seller_book::build_all(&commerce, &directory, game, brotli11, o.key.as_deref(), o.force, o.dry_run)
-                .await
-                .map_err(|error| anyhow::anyhow!(error.message))?;
-            tracing::info!(
-                %game, sellers = built.sellers, built = built.built, skipped = built.skipped, failed = built.failed,
-                removed = built.removed, dry_run = o.dry_run, seconds = started.elapsed().as_secs_f64(), "build-lists sellers"
-            );
+            if let Err(error) = build_sellers(state, o, game).await {
+                kind_failed(game, "seller", &error);
+            }
         }
         for (kind, delta) in [("related", false), ("related-delta", true)] {
             if o.kinds.iter().any(|k| k == kind) && game == "pokemon" {
                 let started = std::time::Instant::now();
-                let (cards, written) = build_related(&pool, delta, o.dry_run).await?;
-                tracing::info!(%game, cards, written, delta, dry_run = o.dry_run, seconds = started.elapsed().as_secs_f64(), "build-lists related");
+                match build_related(&pool, delta, o.dry_run).await {
+                    Ok((cards, written)) => tracing::info!(%game, cards, written, delta, dry_run = o.dry_run, seconds = started.elapsed().as_secs_f64(), "build-lists related"),
+                    Err(error) => kind_failed(game, kind, &error),
+                }
             }
         }
     }
+    Ok(())
+}
+
+/// One kind's build that could not read at all (review point B). The kinds run in
+/// one job in a fixed order — name, then species, then artist — and the species
+/// lists are not the artist lists' problem: an initial read that fails (a missing
+/// column, a timeout) is logged with the kind's name, and the job carries on with
+/// the kinds after it. `store_all` already skips a single list that fails, so
+/// this was the only step that could stop the other kinds. The job's exit status
+/// does not change either way: `build` has always swallowed a whole game's error,
+/// so `job build-lists` exits 0 as it does today.
+fn kind_failed(game: &str, kind: &str, error: &anyhow::Error) {
+    tracing::error!(%game, kind, error = %format!("{error:#}"), "build-lists kind failed");
+}
+
+/// `kind=seller`: every shop book, from the commerce domain. Split out of
+/// `build_game` so the step can fail like any other kind.
+async fn build_sellers(state: &AppState, o: &Options, game: &str) -> anyhow::Result<()> {
+    let Some(commerce) = state.commerce.read().await.clone() else {
+        anyhow::bail!("seller books need the commerce domain (MARKETPLACE_DATABASE_URL)");
+    };
+    let started = std::time::Instant::now();
+    use pokoin_commerce::handlers::seller_book;
+    let directory = seller_book::FirestoreDirectory(&commerce);
+    let built = seller_book::build_all(&commerce, &directory, game, brotli11, o.key.as_deref(), o.force, o.dry_run)
+        .await
+        .map_err(|error| anyhow::anyhow!(error.message))?;
+    tracing::info!(
+        %game, sellers = built.sellers, built = built.built, skipped = built.skipped, failed = built.failed,
+        removed = built.removed, dry_run = o.dry_run, seconds = started.elapsed().as_secs_f64(), "build-lists sellers"
+    );
     Ok(())
 }
 
@@ -643,6 +678,7 @@ async fn build_species(pool: &PgPool, game: &str) -> anyhow::Result<usize> {
     )
     .fetch_all(pool)
     .await?;
+    let keys: Vec<String> = groups.iter().map(|(dex, _)| species_key(*dex)).collect();
     let jobs: Vec<_> = groups
         .into_iter()
         .map(|(dex, ids)| {
@@ -659,7 +695,28 @@ async fn build_species(pool: &PgPool, game: &str) -> anyhow::Result<usize> {
             }
         })
         .collect();
-    store_all(pool, "species", game, jobs, 6, None).await
+    let written = store_all(pool, "species", game, jobs, 6, None).await?;
+    // A species that lost its last qualifying single emits no group, and upserts
+    // alone would keep serving that old list for ever (the route does not check
+    // `built_at`). The read is the authority for this kind, so a key it did not
+    // return is deleted — only ever after a read that found groups: a failed read
+    // returns above, and an empty one deletes nothing rather than wiping every
+    // hub, because an outage is not a catalogue with no Pokémon in it.
+    if keys.is_empty() {
+        return Ok(written);
+    }
+    let removed = sqlx::query(
+        "delete from public.marketplace_list_snapshots
+         where kind = 'species' and not (key = any($1::text[]))",
+    )
+    .bind(&keys)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    if removed > 0 {
+        tracing::info!(%game, removed, "build-lists species pruned");
+    }
+    Ok(written)
 }
 
 /// application/x-www-form-urlencoded value encoding (search queries carry
@@ -1406,7 +1463,7 @@ insert into public.marketplace_card_urls (card_id, canonical_path, language)
   values (4871, '/marketplace/en/cards/4871-giratina-91-127', 'en');
 "#;
 
-    async fn scratch_database() -> Option<(PgPool, PgPool, String)> {
+    async fn scratch_database(tag: &str) -> Option<(PgPool, PgPool, String)> {
         let Ok(url) = std::env::var("POKOIN_TEST_DATABASE_URL") else {
             eprintln!("skipped: POKOIN_TEST_DATABASE_URL is not set");
             return None;
@@ -1414,7 +1471,7 @@ insert into public.marketplace_card_urls (card_id, canonical_path, language)
         let admin = PgPool::connect(&url)
             .await
             .expect("connect POKOIN_TEST_DATABASE_URL");
-        let name = format!("pokoin_species_lists_{}", std::process::id());
+        let name = format!("pokoin_species_{}_{}", tag, std::process::id());
         // `with (force)`: a closed pool's backends take a moment to leave, and
         // `drop database` refuses a database any session is still on.
         sqlx::query(&format!("drop database if exists {name} with (force)"))
@@ -1431,13 +1488,36 @@ insert into public.marketplace_card_urls (card_id, canonical_path, language)
     }
 
     /// The real route, with the scratch database behind the Pokémon pool.
-    async fn app(pool: &PgPool) -> Router {
+    async fn router_and_state(pool: &PgPool) -> (Router, AppState) {
         let state =
             crate::new_state(pokoin_config::Config::from_env(), std::time::Instant::now()).unwrap();
         *state.db.write().await = Some(pool.clone());
-        Router::new()
+        let app = Router::new()
             .route("/api/marketplace-list", get(list))
-            .with_state(state)
+            .with_state(state.clone());
+        (app, state)
+    }
+
+    async fn app(pool: &PgPool) -> Router {
+        router_and_state(pool).await.0
+    }
+
+    /// Snapshot table (112), its compressed columns (121) and the catalogue
+    /// fixture, in a scratch database.
+    async fn apply_schema(pool: &PgPool) {
+        sqlx::raw_sql(include_str!(
+            "../../../../scripts/sql/112_marketplace_list_snapshots.sql"
+        ))
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::raw_sql(include_str!(
+            "../../../../scripts/sql/121_list_snapshot_formats.sql"
+        ))
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::raw_sql(FIXTURE).execute(pool).await.unwrap();
     }
 
     async fn read(app: &Router, path: &str) -> (StatusCode, HeaderMap, Value) {
@@ -1465,7 +1545,7 @@ insert into public.marketplace_card_urls (card_id, canonical_path, language)
 
     #[tokio::test]
     async fn species_lists_hold_every_single_of_the_dex_number_and_serve_like_name_lists() {
-        let Some((admin, pool, name)) = scratch_database().await else {
+        let Some((admin, pool, name)) = scratch_database("lists").await else {
             return;
         };
         // 112 makes the table, 121 the c1v2/brotli columns `upsert` writes.
@@ -1586,6 +1666,136 @@ insert into public.marketplace_card_urls (card_id, canonical_path, language)
             "{answer}"
         );
 
+        pool.close().await;
+        sqlx::query(&format!("drop database if exists {name} with (force)"))
+            .execute(&admin)
+            .await
+            .unwrap();
+    }
+
+    /// Review point B: `--kind=name,species` runs the name builder first, so an
+    /// initial read that fails there used to return before the species step —
+    /// one kind's missing column stopped the next. Each kind is built on its own:
+    /// the failure is logged with its name and the job carries on.
+    #[tokio::test]
+    async fn a_kind_cannot_read_leaves_the_other_kinds_to_build() {
+        let Some((admin, pool, name)) = scratch_database("kinds").await else {
+            return;
+        };
+        apply_schema(&pool).await;
+        // The name builder's first read is `select distinct name …`; the species
+        // read never asks for that column, so this one rename breaks exactly one
+        // kind.
+        sqlx::query(
+            "alter table public.marketplace_search_candidates rename column name to card_name",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let (app, state) = router_and_state(&pool).await;
+        let o = options(&[
+            "--kind=name,species".to_owned(),
+            "--game=pokemon".to_owned(),
+        ]);
+        build_game(&app, &state, &o, "pokemon")
+            .await
+            .expect("build_game");
+        // The kind that could not read stored nothing…
+        let name_path = format!(
+            "/api/marketplace-list?kind=name&key={}",
+            name_key("Giratina")
+        );
+        let (name_status, _, _) = read(&app, &name_path).await;
+        assert_eq!(
+            name_status,
+            StatusCode::NOT_FOUND,
+            "the failed kind wrote no list"
+        );
+        // …and the kind after it still ran.
+        let (status, _, list) = read(&app, "/api/marketplace-list?kind=species&key=487").await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "a failing name read must not stop the species build"
+        );
+        assert_eq!(list["cards"].as_array().unwrap().len(), 3);
+        pool.close().await;
+        sqlx::query(&format!("drop database if exists {name} with (force)"))
+            .execute(&admin)
+            .await
+            .unwrap();
+    }
+
+    /// Review point C: the grouped read is the authority for `kind=species`, so
+    /// a species it no longer returns stops answering; a read that failed, or
+    /// that returned no group at all, deletes nothing.
+    #[tokio::test]
+    async fn a_species_without_cards_stops_answering_and_a_failed_read_deletes_nothing() {
+        let Some((admin, pool, name)) = scratch_database("prune").await else {
+            return;
+        };
+        apply_schema(&pool).await;
+        let app = app(&pool).await;
+        assert_eq!(build_species(&pool, "pokemon").await.unwrap(), 2);
+        let giratina = "/api/marketplace-list?kind=species&key=487";
+        let dialga = "/api/marketplace-list?kind=species&key=493";
+        assert_eq!(read(&app, giratina).await.0, StatusCode::OK);
+        assert_eq!(read(&app, dialga).await.0, StatusCode::OK);
+
+        // The last Giratina single leaves the catalogue; the next build emits no
+        // 487 group, so that key must go the way of an unbuilt one.
+        sqlx::query("delete from public.marketplace_search_candidates where pokedex_num = 487")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            build_species(&pool, "pokemon").await.unwrap(),
+            1,
+            "only the species the read still found"
+        );
+        let (status, headers, missing) = read(&app, giratina).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "the emptied species answers like an unknown key");
+        assert_eq!(missing["missing"], json!(true));
+        assert_eq!(
+            headers["cache-control"], "public, max-age=60, s-maxage=120",
+            "the same answer as an unknown name key"
+        );
+        assert_eq!(
+            read(&app, dialga).await.0,
+            StatusCode::OK,
+            "the species the read returned stays"
+        );
+
+        // A read that fails is not a catalogue with nothing in it: no prune runs.
+        sqlx::query("alter table public.marketplace_search_candidates rename to candidates_gone")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(
+            build_species(&pool, "pokemon").await.is_err(),
+            "a failed grouped read is an error, not an empty species list"
+        );
+        assert_eq!(
+            read(&app, dialga).await.0,
+            StatusCode::OK,
+            "a failed read deleted nothing"
+        );
+        sqlx::query("alter table public.candidates_gone rename to marketplace_search_candidates")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // …and neither is a read that succeeded and returned zero groups.
+        sqlx::query("delete from public.marketplace_search_candidates")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(build_species(&pool, "pokemon").await.unwrap(), 0);
+        assert_eq!(
+            read(&app, dialga).await.0,
+            StatusCode::OK,
+            "an empty read deleted nothing either"
+        );
         pool.close().await;
         sqlx::query(&format!("drop database if exists {name} with (force)"))
             .execute(&admin)

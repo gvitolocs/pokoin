@@ -105,7 +105,7 @@ The slow public desks answer from `marketplace_page_snapshots` (migration `scrip
 
 `related` is a nearest-neighbour index: for every single, the 12 best cards by the SPA's `scoreRelated` weights plus same CLIP artwork, Pokédex ±2 (evolution-line proxy), era, release proximity and print language, ties broken by listed availability and popularity. Rows are list-snapshot tile rows (`cardFromCatalogRow`). Contract: `related` is an array of at most 12 tile rows, best first; absent or empty means the client uses its own picker.
 
-`kind=species` lives in `marketplace_list_snapshots` (migrations `112`, `121`) beside `name`: `GET /api/marketplace-list?kind=species&key=<National Dex number>&format=c1v2` holds every single of that Pokémon, chosen by the catalogue's `pokedex_num` column and never by a card-name match, so the species hub paints "Giratina VSTAR" beside "Giratina"; `build-lists-artists` runs it next to `--kind=name`, and a hub falls back to the exact-name read while a species list is not built.
+`kind=species` lives in `marketplace_list_snapshots` (migrations `112`, `121`) beside `name`: `GET /api/marketplace-list?kind=species&key=<National Dex number>&format=c1v2` holds every single of that Pokémon, chosen by the catalogue's `pokedex_num` column and never by a card-name match, so the species hub paints "Giratina VSTAR" beside "Giratina"; `build-lists-artists` runs it next to `--kind=name`, and the hub unions it with the exact-name read, so a species list that is missing, stale or partial never shows fewer cards than the old path did. A key a successful grouped read did not return is deleted (a species whose last single left the catalogue stops answering), and a failed or empty read deletes nothing.
 
 ### Seller shops
 
