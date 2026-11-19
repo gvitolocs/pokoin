@@ -449,7 +449,9 @@ async fn build_game(app: &Router, state: &AppState, o: &Options, game: &str) -> 
         if o.kinds.iter().any(|k| k == "species") && game == "pokemon" {
             let started = std::time::Instant::now();
             match build_species(&pool, game).await {
-                Ok(n) => tracing::info!(%game, species = n, seconds = started.elapsed().as_secs_f64(), "build-lists species"),
+                Ok(n) => {
+                    tracing::info!(%game, species = n, seconds = started.elapsed().as_secs_f64(), "build-lists species")
+                }
                 Err(error) => kind_failed(game, "species", &error),
             }
         }
@@ -476,7 +478,9 @@ async fn build_game(app: &Router, state: &AppState, o: &Options, game: &str) -> 
             if o.kinds.iter().any(|k| k == kind) && game == "pokemon" {
                 let started = std::time::Instant::now();
                 match build_related(&pool, delta, o.dry_run).await {
-                    Ok((cards, written)) => tracing::info!(%game, cards, written, delta, dry_run = o.dry_run, seconds = started.elapsed().as_secs_f64(), "build-lists related"),
+                    Ok((cards, written)) => {
+                        tracing::info!(%game, cards, written, delta, dry_run = o.dry_run, seconds = started.elapsed().as_secs_f64(), "build-lists related")
+                    }
                     Err(error) => kind_failed(game, kind, &error),
                 }
             }
@@ -1754,7 +1758,11 @@ insert into public.marketplace_card_urls (card_id, canonical_path, language)
             "only the species the read still found"
         );
         let (status, headers, missing) = read(&app, giratina).await;
-        assert_eq!(status, StatusCode::NOT_FOUND, "the emptied species answers like an unknown key");
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "the emptied species answers like an unknown key"
+        );
         assert_eq!(missing["missing"], json!(true));
         assert_eq!(
             headers["cache-control"], "public, max-age=60, s-maxage=120",
