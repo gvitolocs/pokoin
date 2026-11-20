@@ -96,7 +96,9 @@ pub(crate) const PARALLEL_STATEMENTS: u32 = 4;
 
 /// What the gate sizes itself with when `POKOIN_RUST_SEARCH_PAGE_SLOTS` is 0 or
 /// unset: half the catalogue pool divided by the statements one request runs at
-/// once, with a floor of one slot rather than a door that admits nothing.
+/// once, with a floor of one slot rather than a door that admits nothing. It is
+/// also the most the setting may ask for: a gate built from a larger number would
+/// hold the whole pool (`apps/api/src/main.rs`, `bounded_gate`).
 ///
 /// The floor is what leaves the reserve exact only from a pool of 8 up. The Pi's
 /// pool of 16 gives 2 slots: two search-page requests hold 8 of its 16

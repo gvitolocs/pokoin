@@ -185,29 +185,28 @@ const MAX_SEARCH_PAGE_WAIT_MS: u64 = 10_000;
 /// The search-page gate's (slots, wait ms) as the settings ask for them, bounded
 /// by what the pool can carry.
 ///
-/// `POKOIN_RUST_SEARCH_PAGE_SLOTS` above half the catalogue pool is clamped to
-/// `max(1, pool_max / 2)` and said once: it admits exactly the crawler
-/// concurrency the gate exists to limit, and the shed arrives too late to
-/// protect the pool it is sharing. 0 still means "derive it"
-/// ([`search_page::default_slots`]). `POKOIN_RUST_SEARCH_PAGE_WAIT_MS` is
-/// clamped to 0..=[`MAX_SEARCH_PAGE_WAIT_MS`] for the same reason.
+/// The ceiling on slots is [`search_page::default_slots`] — the derived number
+/// itself, the pool's reserve divided by the statements one search-page request
+/// runs at once. A setting may only LOWER it: `POKOIN_RUST_SEARCH_PAGE_SLOTS=8` on
+/// the Pi's pool of 16 asks for 8 requests of four statements each, which is the
+/// whole pool, and the shed then arrives only after the pool is gone — the failure
+/// this gate exists to prevent, with the setting pointed at it. So a larger
+/// setting is clamped to the derived value and said once. 0 still means "derive
+/// it". `POKOIN_RUST_SEARCH_PAGE_WAIT_MS` is clamped to
+/// 0..=[`MAX_SEARCH_PAGE_WAIT_MS`] for the same reason.
 ///
-/// Neither setting can be asked for an unusable number by accident:
-/// [`Config::from_env`] reads each with `parse`, so an unparsable, negative or
-/// overflowing value is not a huge one — it is the default it stands for.
+/// A value that does not parse at all is not a huge one: [`Config::from_env`]
+/// falls back to the default and keeps the variable's name, and
+/// [`new_state`] says that line too.
 fn bounded_gate(pool_max: u32, asked_slots: u32, asked_wait_ms: u64) -> (u32, u64) {
-    let reserve = (pool_max / 2).max(1);
-    let slots = if asked_slots == 0 {
-        search_page::default_slots(pool_max)
-    } else {
-        asked_slots.min(reserve)
-    };
-    if asked_slots > reserve {
+    let ceiling = search_page::default_slots(pool_max);
+    let slots = if asked_slots == 0 { ceiling } else { asked_slots.min(ceiling) };
+    if asked_slots > ceiling {
         tracing::warn!(
             asked_slots,
             slots,
             pool_max,
-            "search-page gate slots above half the catalogue pool are clamped to it"
+            "search-page gate slots above the reserve derived from the catalogue pool are clamped to it"
         );
     }
     let wait_ms = asked_wait_ms.min(MAX_SEARCH_PAGE_WAIT_MS);
@@ -222,9 +221,19 @@ fn bounded_gate(pool_max: u32, asked_slots: u32, asked_wait_ms: u64) -> (u32, u6
 }
 
 fn new_state(config: Config, booted: Instant) -> anyhow::Result<AppState> {
-    // 0 in the setting means "derive it": half the catalogue pool per statement
-    // one search-page request can run at once. What the settings do ask for is
-    // bounded by the pool they share ([`bounded_gate`]).
+    // A `POKOIN_RUST_SEARCH_PAGE_*` variable that does not parse leaves its
+    // default standing, which is the right fallback and the wrong silence: the
+    // operator believes they moved a knob that never moved. The name is what the
+    // line carries, never the value — that belongs to their file, not to the log.
+    for variable in &config.gate_settings_ignored {
+        tracing::warn!(
+            variable = *variable,
+            "search-page gate setting does not parse, so its default stands"
+        );
+    }
+    // 0 in the setting means "derive it": the catalogue pool's reserve divided by
+    // the statements one search-page request runs at once. What the settings do
+    // ask for is bounded by that derivation ([`bounded_gate`]).
     let (slots, wait_ms) = bounded_gate(
         config.db_pool_max,
         config.search_page_slots,
@@ -971,36 +980,46 @@ mod tests {
         }
     }
 
-    /// A setting cannot ask past what the pool it shares has: slots above half of
-    /// it are clamped, and a wait long enough to become a queue is bounded.
+    /// A setting cannot widen the door the derivation opened: the ceiling is the
+    /// derived reserve itself, so a setting only lowers it. A wait long enough to
+    /// become a queue is bounded too.
     #[test]
     fn a_gate_setting_is_bounded_by_the_pool_it_shares() {
         assert_eq!(
             bounded_gate(16, 4_294_967_295, 1_500),
-            (8, 1_500),
-            "the Pi's pool of 16 admits at most half of itself"
+            (2, 1_500),
+            "the Pi's pool of 16 derives 2 slots, and the derived number is the ceiling"
         );
         assert_eq!(
-            bounded_gate(16, 9, 1_500),
-            (8, 1_500),
-            "one above the reserve"
+            bounded_gate(16, 3, 1_500),
+            (2, 1_500),
+            "one above the ceiling is clamped to it"
         );
         assert_eq!(
-            bounded_gate(16, 8, 1_500),
-            (8, 1_500),
-            "at the reserve it stays"
+            bounded_gate(16, 2, 1_500),
+            (2, 1_500),
+            "at the ceiling it stays"
         );
         assert_eq!(
-            bounded_gate(16, 5, 1_500),
-            (5, 1_500),
-            "below it nothing moves"
+            bounded_gate(16, 1, 1_500),
+            (1, 1_500),
+            "below the ceiling the setting is honoured: it may only lower the gate"
         );
         assert_eq!(
             bounded_gate(1, 64, 1_500),
             (1, 1_500),
-            "a pool of 1 has no half: the floor is one slot"
+            "a pool of 1 has the floor of one slot, and 64 cannot raise it"
         );
         assert_eq!(bounded_gate(16, 0, 1_500), (2, 1_500), "0 stays derived");
+        // The ceiling IS the derivation, at every pool: no setting reaches past
+        // what the reserve was computed to be.
+        for pool in [1, 2, 3, 4, 6, 7, 8, 12, 16, 32, 64, 128] {
+            assert_eq!(
+                bounded_gate(pool, u32::MAX, 1_500).0,
+                search_page::default_slots(pool),
+                "a pool of {pool} is bounded by its own derived reserve"
+            );
+        }
         assert_eq!(
             bounded_gate(16, 2, 600_000),
             (2, 10_000),
