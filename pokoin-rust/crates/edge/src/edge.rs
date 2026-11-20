@@ -430,6 +430,12 @@ struct FlightGuard {
     edge: Edge,
     key: String,
     tx: Option<watch::Sender<Flight>>,
+    /// Whether the response head the leader has already seen refused to be
+    /// answered from the cache's last good copy (`lead`'s `replaceable`, negated).
+    /// A leader that unwinds never reaches the code that publishes that decision,
+    /// so the guard has to hold it: no head, or a head that allowed the swap, is
+    /// `false` and the failure stays one a copy may answer.
+    refused: bool,
 }
 
 impl FlightGuard {
@@ -446,7 +452,13 @@ impl FlightGuard {
 
 impl Drop for FlightGuard {
     fn drop(&mut self) {
-        let outcome = if std::thread::panicking() { Flight::Failed(StatusCode::BAD_GATEWAY) } else { Flight::Abandoned };
+        let outcome = if !std::thread::panicking() {
+            Flight::Abandoned
+        } else if self.refused {
+            Flight::FailedWithoutCopy(StatusCode::BAD_GATEWAY)
+        } else {
+            Flight::Failed(StatusCode::BAD_GATEWAY)
+        };
         self.settle(outcome);
     }
 }
@@ -762,7 +774,12 @@ impl Edge {
         }
         let (tx, rx) = watch::channel(Flight::Pending);
         flights.insert(key.to_owned(), rx);
-        Role::Lead(FlightGuard { edge: self.clone(), key: key.to_owned(), tx: Some(tx) })
+        Role::Lead(FlightGuard {
+            edge: self.clone(),
+            key: key.to_owned(),
+            tx: Some(tx),
+            refused: false,
+        })
     }
 
     /// One buffered upstream fetch for a cacheable key (`fetchEntry` + `refresh`),
@@ -770,7 +787,7 @@ impl Edge {
     async fn lead(
         &self,
         req: Request,
-        flight: FlightGuard,
+        mut flight: FlightGuard,
         pathname: &str,
         game: &str,
     ) -> Response {
@@ -793,6 +810,9 @@ impl Edge {
         // was actually giving, not to whatever the edge manages to buffer.
         let replaceable =
             answers_error(status) && !response.headers().contains_key(header::SET_COOKIE);
+        // And the guard holds it too: a body that unwinds the leader leaves no
+        // code behind to publish this decision, only the drop.
+        flight.refused = !replaceable;
         let max_ttl = self.inner.cfg.cache_max_ttl;
         let policy = policy_for_path(pathname, status, response.headers(), max_ttl);
         if policy.is_none() && !answers_error(status) {
@@ -2398,11 +2418,11 @@ mod tests {
 
     /// A head that arrives and a body that does not. `head` names which head:
     /// `cookie` the 503 that also hands the client a `Set-Cookie`, `cacheable` a
-    /// 200 with a real lifetime, and `plain` a 503 with nothing about the client
-    /// in it.
+    /// 200 with a real lifetime, `plain` a 503 with nothing about the client in it,
+    /// and `cookie-panic` the cookie error whose body panics whoever reads it.
     fn cut_body(head: &str) -> Response {
         let (status, extra): (StatusCode, &[(&'static str, &'static str)]) = match head {
-            "cookie" => (
+            "cookie" | "cookie-panic" => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 &[
                     ("cache-control", "no-store"),
@@ -2421,14 +2441,26 @@ mod tests {
         for (name, value) in extra {
             builder = builder.header(*name, *value);
         }
-        builder
-            .body(Body::from_stream(futures_util::stream::once(async {
-                Err::<Bytes, std::io::Error>(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "body cut mid-flight",
-                ))
-            })))
-            .unwrap()
+        let body = if head == "cookie-panic" {
+            Body::from_stream(futures_util::stream::once(panicking_read()))
+        } else {
+            Body::from_stream(futures_util::stream::once(cut_read()))
+        };
+        builder.body(body).unwrap()
+    }
+
+    /// The body that never arrives: an error at its first poll.
+    async fn cut_read() -> Result<Bytes, std::io::Error> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "body cut mid-flight",
+        ))
+    }
+
+    /// The body that panics at its first poll: the reader unwinds holding the head
+    /// it was already given.
+    async fn panicking_read() -> Result<Bytes, std::io::Error> {
+        panic!("the body panics the leader that reads it")
     }
 
     /// The origin of the follower round: `/api/marketplace-card-page` answers one
@@ -2557,6 +2589,67 @@ mod tests {
             edge.inner.stats.stale_error.load(Ordering::Relaxed),
             2,
             "leader and follower both counted"
+        );
+    }
+
+    /// The head's decision survives even the worst way out of a leader: a body that
+    /// panics unwinds the request, and the only code left to settle the flight is
+    /// the guard's drop — which knows what the head said. The follower that joined
+    /// before the panic is answered with the leader's 502, not with the copy the
+    /// `Set-Cookie` refused. The leader panics by construction, so it runs in a task
+    /// of its own and the test reads its `JoinError`: a panic in the test's own task
+    /// would abort the test instead of proving anything.
+    #[tokio::test]
+    async fn an_unwinding_leader_leaves_its_heads_decision_to_its_follower() {
+        let calls = Arc::new(AtomicU64::new(0));
+        let dir = tempfile::tempdir().unwrap();
+        let edge = Edge::new(
+            config(dir.path().to_path_buf(), Duration::from_secs(30)),
+            cut_head_api("cookie-panic", calls.clone()),
+            Router::new(),
+        );
+        let fetch = |edge: &Edge| {
+            let edge = edge.clone();
+            async move { proxy(State(edge), req("GET", "/api/marketplace-card-page", &[])).await }
+        };
+        assert_eq!(
+            fetch(&edge).await.headers()["x-pokoin-edge-cache"],
+            "MISS",
+            "the cache holds a good copy of this page"
+        );
+        tokio::time::sleep(PAST_SHORT_GOOD).await;
+        let leader = tokio::spawn(fetch(&edge));
+        // `cut_head_api` holds the leader inside the origin, so the flight is open
+        // and unsettled while the follower joins it.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let follower = tokio::time::timeout(Duration::from_secs(5), fetch(&edge))
+            .await
+            .expect("the leader's flight answers the follower");
+        let died = leader.await.expect_err("the leader unwinds with the body");
+        assert!(died.is_panic(), "the body panics its reader: {died}");
+        assert_eq!(
+            follower.status(),
+            StatusCode::BAD_GATEWAY,
+            "the 502 the leader's head was worth"
+        );
+        assert_ne!(
+            follower
+                .headers()
+                .get("x-pokoin-edge-cache")
+                .and_then(|value| value.to_str().ok()),
+            Some("STALE-ERROR"),
+            "and not the copy that head refused"
+        );
+        assert_eq!(
+            follower.headers()["cache-control"],
+            "no-store",
+            "and nothing downstream may keep it"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "one fetch, and it died");
+        assert_eq!(
+            edge.inner.stats.stale_error.load(Ordering::Relaxed),
+            0,
+            "no copy was answered to either of them"
         );
     }
 
