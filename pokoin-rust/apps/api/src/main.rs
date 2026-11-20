@@ -44,6 +44,9 @@ pub(crate) struct AppState {
     pub(crate) meili_ms: Arc<AtomicU64>,
     pub(crate) sql_ms: Arc<AtomicU64>,
     pub(crate) errors: Arc<AtomicU64>,
+    /// How much of the catalogue pool search-page may hold at once, and what it
+    /// counted while waiting (`search_page::default_slots`).
+    pub(crate) search_page_gate: Arc<pokoin_db::Gate>,
     pub(crate) booted: Instant,
 }
 
@@ -174,7 +177,73 @@ async fn serve_listener(
     }
 }
 
+/// The longest a search-page request waits for a gate slot. Past this the gate
+/// is not shedding anything: callers queue behind a saturated pool instead of
+/// being told to come back, which is the only thing it can do for them.
+const MAX_SEARCH_PAGE_WAIT_MS: u64 = 10_000;
+
+/// The search-page gate's (slots, wait ms) as the settings ask for them, bounded
+/// by what the pool can carry.
+///
+/// The ceiling on slots is [`search_page::default_slots`] — the derived number
+/// itself, the pool's reserve divided by the statements one search-page request
+/// runs at once. A setting may only LOWER it: `POKOIN_RUST_SEARCH_PAGE_SLOTS=8` on
+/// the Pi's pool of 16 asks for 8 requests of four statements each, which is the
+/// whole pool, and the shed then arrives only after the pool is gone — the failure
+/// this gate exists to prevent, with the setting pointed at it. So a larger
+/// setting is clamped to the derived value and said once. 0 still means "derive
+/// it". `POKOIN_RUST_SEARCH_PAGE_WAIT_MS` is clamped to
+/// 0..=[`MAX_SEARCH_PAGE_WAIT_MS`] for the same reason.
+///
+/// A value that does not parse at all is not a huge one: [`Config::from_env`]
+/// falls back to the default and keeps the variable's name, and
+/// [`new_state`] says that line too.
+fn bounded_gate(pool_max: u32, asked_slots: u32, asked_wait_ms: u64) -> (u32, u64) {
+    let ceiling = search_page::default_slots(pool_max);
+    let slots = if asked_slots == 0 {
+        ceiling
+    } else {
+        asked_slots.min(ceiling)
+    };
+    if asked_slots > ceiling {
+        tracing::warn!(
+            asked_slots,
+            slots,
+            pool_max,
+            "search-page gate slots above the reserve derived from the catalogue pool are clamped to it"
+        );
+    }
+    let wait_ms = asked_wait_ms.min(MAX_SEARCH_PAGE_WAIT_MS);
+    if asked_wait_ms > MAX_SEARCH_PAGE_WAIT_MS {
+        tracing::warn!(
+            asked_wait_ms,
+            wait_ms,
+            "search-page gate wait above ten seconds queues callers instead of shedding them, so it is clamped"
+        );
+    }
+    (slots, wait_ms)
+}
+
 fn new_state(config: Config, booted: Instant) -> anyhow::Result<AppState> {
+    // A `POKOIN_RUST_SEARCH_PAGE_*` variable that does not parse leaves its
+    // default standing, which is the right fallback and the wrong silence: the
+    // operator believes they moved a knob that never moved. The name is what the
+    // line carries, never the value — that belongs to their file, not to the log.
+    for variable in &config.gate_settings_ignored {
+        tracing::warn!(
+            variable = *variable,
+            "search-page gate setting does not parse, so its default stands"
+        );
+    }
+    // 0 in the setting means "derive it": the catalogue pool's reserve divided by
+    // the statements one search-page request runs at once. What the settings do
+    // ask for is bounded by that derivation ([`bounded_gate`]).
+    let (slots, wait_ms) = bounded_gate(
+        config.db_pool_max,
+        config.search_page_slots,
+        config.search_page_wait_ms,
+    );
+    let wait = Duration::from_millis(wait_ms);
     Ok(AppState {
         config,
         commerce: Arc::new(RwLock::new(None)),
@@ -188,6 +257,7 @@ fn new_state(config: Config, booted: Instant) -> anyhow::Result<AppState> {
         meili_ms: Arc::new(AtomicU64::new(0)),
         sql_ms: Arc::new(AtomicU64::new(0)),
         errors: Arc::new(AtomicU64::new(0)),
+        search_page_gate: Arc::new(pokoin_db::Gate::new(slots, wait)),
         booted,
     })
 }
@@ -337,6 +407,9 @@ async fn metrics(State(state): State<AppState>) -> Json<Value> {
         "gameDbPoolSize": game_size,
         "gameDbPoolIdle": game_idle,
         "gameDbPoolMax": pokoin_db::satellite_budget().max_connections,
+        "searchPageSlots": state.search_page_gate.slots(),
+        "searchPageWaited": state.search_page_gate.waited(),
+        "searchPageShed": state.search_page_gate.shed(),
     }))
 }
 
@@ -788,6 +861,246 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 
+    /// The core router over a catalogue pool that cannot be reached: every
+    /// database route fails on its own, so a 503 that answers at once and
+    /// carries `retry-after` can only have come from the gate.
+    async fn dead_pool_router(slots: u32) -> (Router, AppState) {
+        let mut state = new_state(Config::from_env(), Instant::now()).unwrap();
+        state.search_page_gate = Arc::new(pokoin_db::Gate::new(slots, Duration::from_millis(50)));
+        *state.db.write().await = Some(lazy_pool("postgres://test@127.0.0.1:1/test", 1).unwrap());
+        (router(state.clone()), state)
+    }
+
+    async fn send_get(app: &Router, path: &str) -> axum::response::Response {
+        use axum::body::Body;
+        use axum::extract::Request;
+        use tower::ServiceExt;
+        app.clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+    }
+
+    /// The gate sheds search-page only, and says so in a way the other routes
+    /// never answer with.
+    #[tokio::test]
+    async fn a_full_gate_sheds_search_page_and_touches_nothing_else() {
+        let (app, state) = dead_pool_router(1).await;
+        let held = state.search_page_gate.hold().await;
+        let shed = send_get(&app, "/api/marketplace-search-page?query=charizard&limit=3").await;
+        assert_eq!(shed.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(shed.headers()["retry-after"], "2");
+        assert_eq!(shed.headers()["cache-control"], "no-store");
+        let body = axum::body::to_bytes(shed.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert!(body["error"].is_string(), "{body}");
+        // Card-page is not the gate's to answer: it reaches its own handler,
+        // which reports what the dead pool said without a `retry-after`.
+        for path in [
+            "/api/marketplace-card-page?cardId=12",
+            "/api/marketplace-card-tiles?ids=12",
+            "/api/marketplace-list?kind=set&key=base-set",
+        ] {
+            let response = send_get(&app, path).await;
+            assert!(
+                response.headers().get("retry-after").is_none(),
+                "{path} answered {status} with a gate retry-after",
+                status = response.status(),
+            );
+        }
+        // One shed request, waited for one slot, counted once on /metrics.
+        assert_eq!(state.search_page_gate.shed(), 1);
+        assert_eq!(state.search_page_gate.waited(), 1);
+        let metrics = send_get(&app, "/metrics").await;
+        let body = axum::body::to_bytes(metrics.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let metrics: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(metrics["searchPageSlots"], 1);
+        assert_eq!(metrics["searchPageWaited"], 1);
+        assert_eq!(metrics["searchPageShed"], 1);
+        drop(held);
+        // The gate admits again as soon as the slot comes back.
+        let again = send_get(&app, "/api/marketplace-search-page?query=charizard&limit=3").await;
+        assert!(
+            again.headers().get("retry-after").is_none(),
+            "{}",
+            again.status()
+        );
+    }
+
+    /// The shed's other half: a 503 that answers at the gate must leave nothing
+    /// behind in the read cache that wraps the route, or the request that came
+    /// after a momentary flood would be answered by the flood. Tested through the
+    /// real middleware over a handler that sheds once and then answers, because
+    /// the shed itself is a response the handler produces before it reaches a
+    /// database: an end-to-end shed-then-200 over the route needs a live catalogue
+    /// pool (`game_pool` answers the request, and the gate is inside it).
+    #[tokio::test]
+    async fn a_shed_answer_leaves_the_read_cache_with_nothing_to_answer() {
+        let state = new_state(Config::from_env(), Instant::now()).unwrap();
+        // No Valkey: the only tier this can write is the in-flight snapshot, and
+        // that is what a non-200 must not reach.
+        *state.redis.write().await = None;
+        let calls = Arc::new(AtomicU64::new(0));
+        let counted = calls.clone();
+        let app = Router::new()
+            .route(
+                "/api/marketplace-search-page",
+                get(move || {
+                    let calls = counted.clone();
+                    async move {
+                        if calls.fetch_add(1, Ordering::SeqCst) > 0 {
+                            return catalog_api::response(
+                                StatusCode::OK,
+                                json!({"cards": [], "total": 0}),
+                                "public, max-age=60",
+                            );
+                        }
+                        // Exactly what the gate answers when it is full.
+                        let mut response = catalog_api::response(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            json!({"error":"Marketplace search temporarily unavailable."}),
+                            "no-store",
+                        );
+                        response
+                            .headers_mut()
+                            .insert(header::RETRY_AFTER, HeaderValue::from_static("2"));
+                        response
+                    }
+                }),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                read_cache::read_cache,
+            ));
+        let first = send_get(&app, "/api/marketplace-search-page?query=charizard&limit=3").await;
+        assert_eq!(first.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(first.headers()["retry-after"], "2");
+        assert_eq!(first.headers()["cache-control"], "no-store");
+        assert!(
+            first.headers().get("x-pokoin-read-cache").is_none(),
+            "the cache passed the shed through, it did not answer with it",
+        );
+        drop(first);
+        let second = send_get(&app, "/api/marketplace-search-page?query=charizard&limit=3").await;
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "the next identical request reached the handler: a shed is not stored",
+        );
+        assert_eq!(second.status(), StatusCode::OK, "and was answered by it");
+        drop(second);
+    }
+
+    #[test]
+    fn only_search_page_holds_a_gate_slot() {
+        // The gate is the search-page route's own door: no other read path may
+        // take or shed on it, or a slow search would hide behind someone
+        // else's 503.
+        for (file, gated) in [
+            ("src/search_page.rs", true),
+            ("src/catalog_api.rs", false),
+            ("src/lists.rs", false),
+            ("src/suggest.rs", false),
+            ("src/read_cache.rs", false),
+            ("src/rails.rs", false),
+        ] {
+            let path = format!("{}/{}", env!("CARGO_MANIFEST_DIR"), file);
+            let text =
+                std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{path}: {error}"));
+            assert_eq!(
+                text.contains("search_page_gate"),
+                gated,
+                "{file} gate reference"
+            );
+        }
+    }
+
+    #[test]
+    fn half_the_pool_per_parallel_statement_is_the_gate() {
+        assert_eq!(search_page::default_slots(16), 2, "the Pi's catalogue pool");
+        assert_eq!(search_page::default_slots(6), 1, "an overflow pod");
+        assert_eq!(
+            search_page::default_slots(0),
+            1,
+            "never a gate that admits nothing"
+        );
+        assert_eq!(search_page::default_slots(32), 4);
+        // What those slots are worth against the pool, which is the sentence the
+        // `default_slots` comment is allowed to make: from a pool of 8 the floor
+        // of one is also a share of at most half, and below it the floor is one
+        // request of four statements, which is more than half of six.
+        for pool in [8, 9, 12, 16, 32] {
+            assert!(
+                search_page::default_slots(pool) * search_page::PARALLEL_STATEMENTS <= pool / 2,
+                "a pool of {pool} keeps half of it in reserve"
+            );
+        }
+        for pool in [1, 2, 3, 4, 6, 7] {
+            assert_eq!(search_page::default_slots(pool), 1, "the floor of one");
+            assert!(
+                search_page::PARALLEL_STATEMENTS * search_page::default_slots(pool) > pool / 2,
+                "a pool of {pool} has more than half of it held by the request the floor admits"
+            );
+        }
+    }
+
+    /// A setting cannot widen the door the derivation opened: the ceiling is the
+    /// derived reserve itself, so a setting only lowers it. A wait long enough to
+    /// become a queue is bounded too.
+    #[test]
+    fn a_gate_setting_is_bounded_by_the_pool_it_shares() {
+        assert_eq!(
+            bounded_gate(16, 4_294_967_295, 1_500),
+            (2, 1_500),
+            "the Pi's pool of 16 derives 2 slots, and the derived number is the ceiling"
+        );
+        assert_eq!(
+            bounded_gate(16, 3, 1_500),
+            (2, 1_500),
+            "one above the ceiling is clamped to it"
+        );
+        assert_eq!(
+            bounded_gate(16, 2, 1_500),
+            (2, 1_500),
+            "at the ceiling it stays"
+        );
+        assert_eq!(
+            bounded_gate(16, 1, 1_500),
+            (1, 1_500),
+            "below the ceiling the setting is honoured: it may only lower the gate"
+        );
+        assert_eq!(
+            bounded_gate(1, 64, 1_500),
+            (1, 1_500),
+            "a pool of 1 has the floor of one slot, and 64 cannot raise it"
+        );
+        assert_eq!(bounded_gate(16, 0, 1_500), (2, 1_500), "0 stays derived");
+        // The ceiling IS the derivation, at every pool: no setting reaches past
+        // what the reserve was computed to be.
+        for pool in [1, 2, 3, 4, 6, 7, 8, 12, 16, 32, 64, 128] {
+            assert_eq!(
+                bounded_gate(pool, u32::MAX, 1_500).0,
+                search_page::default_slots(pool),
+                "a pool of {pool} is bounded by its own derived reserve"
+            );
+        }
+        assert_eq!(
+            bounded_gate(16, 2, 600_000),
+            (2, 10_000),
+            "a wait that queues callers instead of shedding them"
+        );
+        assert_eq!(
+            bounded_gate(16, 2, 10_000),
+            (2, 10_000),
+            "the bound is allowed"
+        );
+        assert_eq!(bounded_gate(16, 2, 0), (2, 0), "and so is no wait at all");
+    }
+
     #[tokio::test]
     async fn full_router_builds() {
         let read = lazy_pool("postgres://test@127.0.0.1:1/test", 6).unwrap();
@@ -815,6 +1128,10 @@ mod tests {
             meili_ms: Arc::new(AtomicU64::new(0)),
             sql_ms: Arc::new(AtomicU64::new(0)),
             errors: Arc::new(AtomicU64::new(0)),
+            search_page_gate: Arc::new(pokoin_db::Gate::new(
+                search_page::default_slots(Config::from_env().db_pool_max),
+                Duration::from_millis(1500),
+            )),
             booted: Instant::now(),
         })
         .merge(pokoin_accounts::router(

@@ -5,6 +5,10 @@ use std::time::Duration;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 
+pub mod gate;
+
+pub use gate::{Busy, Gate, Held};
+
 /// How long the eager main pool connect may take. It must cover TLS
 /// verify-full + SCRAM to the writer; at 200 ms a busy or full writer turned
 /// every pod restart into a tight retry loop (sqlx retries SQLSTATE 53300
