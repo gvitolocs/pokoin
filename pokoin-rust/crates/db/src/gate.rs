@@ -264,4 +264,61 @@ mod tests {
         assert_eq!(Gate::new(0, Duration::ZERO).slots(), 1);
         assert_eq!(Gate::new(2, Duration::ZERO).wait_limit(), Duration::ZERO);
     }
+
+    /// Every slot is free exactly when `hold` — which takes all of them — returns.
+    /// Asked with a deadline, so a leaked permit fails the test instead of hanging
+    /// it.
+    async fn all_free(gate: &Gate) -> bool {
+        tokio::time::timeout(Duration::from_millis(2_000), gate.hold())
+            .await
+            .is_ok()
+    }
+
+    /// A request that goes away is not a refused request. The client hanging up
+    /// drops `run`'s future wherever it stands — while it waits for a slot, or
+    /// mid-work holding one — and both cases must leave the gate as it found it:
+    /// the permit is a local of `run`, so its destructor runs on cancellation, and
+    /// the shed counter counts only callers that actually timed out. Measured
+    /// against a live gate rather than an internal count, because a slot that is
+    /// never handed back is invisible from the outside until the route wedges.
+    #[tokio::test]
+    async fn a_dropped_caller_gives_its_slot_back_and_sheds_nothing() {
+        let gate = Arc::new(Gate::new(1, Duration::from_millis(500)));
+
+        // Mid-work: a caller inside its slot, aborted before the future finished.
+        let watch = Watch::new();
+        let working = {
+            let (gate, watch) = (gate.clone(), watch.clone());
+            tokio::spawn(async move { gate.run(watch.sleep_200ms()).await })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(
+            watch.inside.load(Ordering::SeqCst),
+            1,
+            "the caller is inside its slot"
+        );
+        working.abort();
+        let _ = working.await;
+        assert!(all_free(&gate).await, "an aborted holder returns its slot");
+        assert_eq!(gate.shed(), 0, "a caller that left was never refused");
+
+        // While waiting: a caller queued behind a held slot, dropped before its
+        // wait limit expires.
+        let held = gate.hold().await;
+        let waiting = {
+            let gate = gate.clone();
+            tokio::spawn(async move { gate.run(std::future::ready(())).await })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        waiting.abort();
+        let _ = waiting.await;
+        assert_eq!(
+            gate.waited(),
+            1,
+            "the queued caller did wait — it was never refused"
+        );
+        assert_eq!(gate.shed(), 0, "dropping a wait is not a shed");
+        drop(held);
+        assert!(all_free(&gate).await, "the gate is whole again");
+    }
 }

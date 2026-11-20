@@ -927,6 +927,70 @@ mod tests {
         );
     }
 
+    /// The shed's other half: a 503 that answers at the gate must leave nothing
+    /// behind in the read cache that wraps the route, or the request that came
+    /// after a momentary flood would be answered by the flood. Tested through the
+    /// real middleware over a handler that sheds once and then answers, because
+    /// the shed itself is a response the handler produces before it reaches a
+    /// database: an end-to-end shed-then-200 over the route needs a live catalogue
+    /// pool (`game_pool` answers the request, and the gate is inside it).
+    #[tokio::test]
+    async fn a_shed_answer_leaves_the_read_cache_with_nothing_to_answer() {
+        let mut state = new_state(Config::from_env(), Instant::now()).unwrap();
+        // No Valkey: the only tier this can write is the in-flight snapshot, and
+        // that is what a non-200 must not reach.
+        *state.redis.write().await = None;
+        let calls = Arc::new(AtomicU64::new(0));
+        let counted = calls.clone();
+        let app = Router::new()
+            .route(
+                "/api/marketplace-search-page",
+                get(move || {
+                    let calls = counted.clone();
+                    async move {
+                        if calls.fetch_add(1, Ordering::SeqCst) > 0 {
+                            return catalog_api::response(
+                                StatusCode::OK,
+                                json!({"cards": [], "total": 0}),
+                                "public, max-age=60",
+                            );
+                        }
+                        // Exactly what the gate answers when it is full.
+                        let mut response = catalog_api::response(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            json!({"error":"Marketplace search temporarily unavailable."}),
+                            "no-store",
+                        );
+                        response
+                            .headers_mut()
+                            .insert(header::RETRY_AFTER, HeaderValue::from_static("2"));
+                        response
+                    }
+                }),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                read_cache::read_cache,
+            ));
+        let first = send_get(&app, "/api/marketplace-search-page?query=charizard&limit=3").await;
+        assert_eq!(first.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(first.headers()["retry-after"], "2");
+        assert_eq!(first.headers()["cache-control"], "no-store");
+        assert!(
+            first.headers().get("x-pokoin-read-cache").is_none(),
+            "the cache passed the shed through, it did not answer with it",
+        );
+        drop(first);
+        let second = send_get(&app, "/api/marketplace-search-page?query=charizard&limit=3").await;
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "the next identical request reached the handler: a shed is not stored",
+        );
+        assert_eq!(second.status(), StatusCode::OK, "and was answered by it");
+        drop(second);
+    }
+
     #[test]
     fn only_search_page_holds_a_gate_slot() {
         // The gate is the search-page route's own door: no other read path may

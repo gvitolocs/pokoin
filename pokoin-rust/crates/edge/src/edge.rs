@@ -2216,6 +2216,46 @@ mod tests {
         }
     }
 
+    /// The other half of the same bound, one status at a time: a 502 and a 504 are a
+    /// failing origin too, and each is answered from the copy exactly as a 500 and a
+    /// 503 are. These are the two a proxy in front of the API answers when the API
+    /// stops mid-request, so they are the common ones in production, not the rare.
+    #[tokio::test]
+    async fn a_bad_gateway_and_a_gateway_timeout_are_answered_from_the_copy() {
+        for status in [StatusCode::BAD_GATEWAY, StatusCode::GATEWAY_TIMEOUT] {
+            let dir = tempfile::tempdir().unwrap();
+            let edge = Edge::new(
+                config(dir.path().to_path_buf(), Duration::from_secs(30)),
+                fails_with_api("/api/marketplace-card-page", status),
+                Router::new(),
+            );
+            let get = |edge: &Edge| {
+                let edge = edge.clone();
+                async move { proxy(State(edge), req("GET", "/api/marketplace-card-page", &[])).await }
+            };
+            assert_eq!(
+                get(&edge).await.headers()["x-pokoin-edge-cache"],
+                "MISS",
+                "the first fetch stores the copy: {status}"
+            );
+            tokio::time::sleep(PAST_SHORT_GOOD).await;
+            let answer = get(&edge).await;
+            assert_eq!(answer.status(), StatusCode::OK, "the copy, not a {status}");
+            assert_eq!(
+                answer.headers()["x-pokoin-edge-cache"],
+                "STALE-ERROR",
+                "{status}"
+            );
+            let body = to_bytes(answer.into_body(), 1 << 16).await.unwrap();
+            assert_eq!(&body[..], GOOD_BODY.as_bytes(), "{status}");
+            assert_eq!(
+                edge.inner.stats.stale_error.load(Ordering::Relaxed),
+                1,
+                "and the replay counted once: {status}"
+            );
+        }
+    }
+
     /// Point 3: a `Set-Cookie` on the failing answer belongs to this request. The
     /// copy would answer the page, and quietly drop the cookie the client was
     /// being given, so an error that carries one is returned as it is.
