@@ -62,20 +62,18 @@ pub async fn search_page(
     // behind `read_cache`, so a Redis hit or a coalesced follower never reaches
     // it. Satellite games are not gated: they search their own small pool
     // (`catalog_api::game_pool`), not the catalogue pool the gate protects.
-    let work = database_work(
-        &state,
-        &pool,
-        wanted,
-        &query,
-        &game,
-        &product_type,
-        product_search_only,
-        &lang,
+    let params = SearchParams {
+        query: query.as_str(),
+        game: game.as_str(),
+        product_type: product_type.as_str(),
+        product_only: product_search_only,
+        lang: lang.as_str(),
         limit,
         offset,
         include_facets,
-        &print_language,
-    );
+        print_language: print_language.as_str(),
+    };
+    let work = database_work(&state, &pool, wanted, &params);
     if game != "pokemon" {
         return work.await;
     }
@@ -139,6 +137,23 @@ fn shed(waited_ms: u64, slots: u32) -> Response {
     response
 }
 
+/// The request's own search parameters, as the database section needs them. The
+/// gate runs that section as one function so a request holds one slot, and a
+/// function needs the whole request to do it; gathering the parameters here keeps
+/// the handover four arguments instead of a list the linter refuses.
+#[derive(Clone, Copy)]
+pub(crate) struct SearchParams<'a> {
+    pub query: &'a str,
+    pub game: &'a str,
+    pub product_type: &'a str,
+    pub product_only: bool,
+    pub lang: &'a str,
+    pub limit: i64,
+    pub offset: i64,
+    pub include_facets: bool,
+    pub print_language: &'a str,
+}
+
 /// Everything after the pool is chosen: the SQL-only path, then the Redis
 /// candidate fetch and every statement that follows it. One function so the gate
 /// takes one slot per request and two slots are never held by the same request.
@@ -146,16 +161,19 @@ async fn database_work(
     state: &AppState,
     pool: &sqlx::PgPool,
     wanted: pokoin_api_common::compact::Wanted,
-    query: &str,
-    game: &str,
-    product_type: &str,
-    product_only: bool,
-    lang: &str,
-    limit: i64,
-    offset: i64,
-    include_facets: bool,
-    print_language: &str,
+    params: &SearchParams<'_>,
 ) -> Response {
+    let SearchParams {
+        query,
+        game,
+        product_type,
+        product_only,
+        lang,
+        limit,
+        offset,
+        include_facets,
+        print_language,
+    } = *params;
     if game != "pokemon" || product_only || product_type == "jumbo" || query.is_empty() {
         return sql_search_page(
             wanted,
