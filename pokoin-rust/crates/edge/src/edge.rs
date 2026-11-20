@@ -403,9 +403,6 @@ enum Flight {
     /// The leader's answer came from the cache's last good copy while the
     /// origin failed: a follower of the same game replays that copy, and one of
     /// another game is answered by `status` — the failure the leader met.
-    /// The leader's answer came from the cache's last good copy while the
-    /// origin failed: a follower of the same game replays that copy, and one of
-    /// another game is answered by `status` — the failure the leader met.
     StaleError {
         copy: Arc<CacheEntry>,
         status: StatusCode,
@@ -414,8 +411,16 @@ enum Flight {
     Uncacheable,
     /// The leader went away without an answer (client disconnect): elect a new one.
     Abandoned,
-    /// No upstream answer (timeout, unreadable body, edge panic): followers send this status.
+    /// No upstream answer (timeout, unreadable body, edge panic) from a request
+    /// whose head allowed the swap, or that never saw a head at all: followers
+    /// send this status, and the cache's last good copy answers the one it can.
     Failed(StatusCode),
+    /// The same failure under a head that refused the swap — a `Set-Cookie` meant
+    /// for this client, or a status that is not one of [`answers_error`]'s four.
+    /// The decision is the leader's and the followers obey it: a response whose
+    /// own headers said no is never replaced by a copy for anyone, and every
+    /// follower gets the status the leader was given.
+    FailedWithoutCopy(StatusCode),
 }
 
 /// The leader's claim on a key in `flights`. Every way out of the leader —
@@ -665,8 +670,15 @@ impl Edge {
                 });
                 self.send_last_good(&entry)
             }
-            None => {
+            None if replaceable => {
                 flight.finish(Flight::Failed(status));
+                gateway_error(status)
+            }
+            None => {
+                // The head's decision travels with the failure: the followers of a
+                // head that refused the swap get this status too, never the copy
+                // that head refused.
+                flight.finish(Flight::FailedWithoutCopy(status));
                 gateway_error(status)
             }
         }
@@ -734,6 +746,10 @@ impl Edge {
                 Some(entry) => self.send_last_good(&entry),
                 None => gateway_error(status),
             },
+            // The leader's head refused the swap, so this follower answers with the
+            // same synthetic status the leader was given — a copy that head said no
+            // to is not served to the next client either.
+            Flight::FailedWithoutCopy(status) => gateway_error(status),
             Flight::Uncacheable | Flight::Pending | Flight::Abandoned => self.forward_api(req, target).await,
         }
     }
@@ -876,6 +892,8 @@ async fn follow(mut rx: watch::Receiver<Flight>, deadline: tokio::time::Instant)
         Ok(Ok(outcome)) => outcome.clone(),
         // The sender is gone without an outcome (cannot happen with FlightGuard): fetch it yourself.
         Ok(Err(_)) => Flight::Uncacheable,
+        // Its own deadline, so it never saw a head and no decision to obey: this
+        // failure stays one a last good copy may answer.
         Err(_) => Flight::Failed(StatusCode::GATEWAY_TIMEOUT),
     }
 }
@@ -2374,7 +2392,171 @@ mod tests {
         assert_eq!(
             edge.inner.stats.stale_error.load(Ordering::Relaxed),
             0,
-            "no copy was sent, and none was queued for a follower either"
+            "this request was not answered from a copy"
+        );
+    }
+
+    /// A head that arrives and a body that does not. `head` names which head:
+    /// `cookie` the 503 that also hands the client a `Set-Cookie`, `cacheable` a
+    /// 200 with a real lifetime, and `plain` a 503 with nothing about the client
+    /// in it.
+    fn cut_body(head: &str) -> Response {
+        let (status, extra): (StatusCode, &[(&'static str, &'static str)]) = match head {
+            "cookie" => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                &[
+                    ("cache-control", "no-store"),
+                    ("set-cookie", "pokoin_test=1; Path=/"),
+                ],
+            ),
+            "cacheable" => (StatusCode::OK, &[("cache-control", SHORT_GOOD)]),
+            _ => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                &[("cache-control", "no-store")],
+            ),
+        };
+        let mut builder = Response::builder()
+            .status(status)
+            .header(header::CONTENT_TYPE, "application/json");
+        for (name, value) in extra {
+            builder = builder.header(*name, *value);
+        }
+        builder
+            .body(Body::from_stream(futures_util::stream::once(async {
+                Err::<Bytes, std::io::Error>(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "body cut mid-flight",
+                ))
+            })))
+            .unwrap()
+    }
+
+    /// The origin of the follower round: `/api/marketplace-card-page` answers one
+    /// cacheable 200 — the copy both requests of a pair could be answered from —
+    /// and then, after [`SLOW_ORIGIN`] so a second request joins the first one's
+    /// flight, the head of [`cut_body`] whose body is cut off mid-read. That head
+    /// is all the edge ever learns about the answer, so it is what the followers
+    /// of the request that fetched it must be governed by.
+    fn cut_head_api(head: &'static str, calls: Arc<AtomicU64>) -> Router {
+        Router::new().route(
+            "/api/marketplace-card-page",
+            get(move || {
+                let (head, calls) = (head, calls.clone());
+                async move {
+                    if calls.fetch_add(1, Ordering::SeqCst) > 0 {
+                        tokio::time::sleep(SLOW_ORIGIN).await;
+                        return cut_body(head);
+                    }
+                    good_page()
+                }
+            }),
+        )
+    }
+
+    /// A pair of requests on one flight, warmed and then left past its copy's life:
+    /// the leader fetches, the follower waits for it.
+    async fn a_leader_and_its_follower(edge: &Edge) -> (Response, Response) {
+        let get = |edge: &Edge| {
+            let edge = edge.clone();
+            async move { proxy(State(edge), req("GET", "/api/marketplace-card-page", &[])).await }
+        };
+        assert_eq!(
+            get(edge).await.headers()["x-pokoin-edge-cache"],
+            "MISS",
+            "the cache holds a good copy of this page"
+        );
+        tokio::time::sleep(PAST_SHORT_GOOD).await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(get(edge), get(edge))
+        })
+        .await
+        .expect("the flight settles")
+    }
+
+    /// The leader's decision about the copy is its head's decision, and it has to
+    /// reach the followers: under a `Set-Cookie` error, and under a cacheable head
+    /// whose body never arrived, both clients get the synthetic 502 and neither is
+    /// answered with the page this very response refused.
+    #[tokio::test]
+    async fn the_followers_of_a_refused_head_answer_the_refusal() {
+        for head in ["cookie", "cacheable"] {
+            let calls = Arc::new(AtomicU64::new(0));
+            let dir = tempfile::tempdir().unwrap();
+            let edge = Edge::new(
+                config(dir.path().to_path_buf(), Duration::from_secs(30)),
+                cut_head_api(head, calls.clone()),
+                Router::new(),
+            );
+            let (leader, follower) = a_leader_and_its_follower(&edge).await;
+            for (who, answer) in [("leader", leader), ("follower", follower)] {
+                assert_eq!(
+                    answer.status(),
+                    StatusCode::BAD_GATEWAY,
+                    "{head}/{who}: the 502 the leader was given"
+                );
+                assert_ne!(
+                    answer
+                        .headers()
+                        .get("x-pokoin-edge-cache")
+                        .and_then(|value| value.to_str().ok()),
+                    Some("STALE-ERROR"),
+                    "{head}/{who}: not the copy this head refused"
+                );
+                assert_eq!(
+                    answer.headers()["cache-control"],
+                    "no-store",
+                    "{head}/{who}: and nothing downstream may keep it"
+                );
+            }
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                2,
+                "{head}: the pair is one fetch, the warm and it"
+            );
+            assert_eq!(
+                edge.inner.stats.stale_error.load(Ordering::Relaxed),
+                0,
+                "{head}: no copy was answered to either of them"
+            );
+        }
+    }
+
+    /// The other half of that decision: a head with nothing personal on it still
+    /// allows the swap, and the pair is answered from the copy — the leader and,
+    /// through the flight it published, the follower that never fetched.
+    #[tokio::test]
+    async fn the_followers_of_a_plain_head_answer_the_copy() {
+        let calls = Arc::new(AtomicU64::new(0));
+        let dir = tempfile::tempdir().unwrap();
+        let edge = Edge::new(
+            config(dir.path().to_path_buf(), Duration::from_secs(30)),
+            cut_head_api("plain", calls.clone()),
+            Router::new(),
+        );
+        let (leader, follower) = a_leader_and_its_follower(&edge).await;
+        for (who, answer) in [("leader", leader), ("follower", follower)] {
+            assert_eq!(
+                answer.status(),
+                StatusCode::OK,
+                "{who}: the copy's own status, not the 503"
+            );
+            assert_eq!(
+                answer.headers()["x-pokoin-edge-cache"],
+                "STALE-ERROR",
+                "{who}: and says where it came from"
+            );
+            let body = to_bytes(answer.into_body(), 1024).await.unwrap();
+            assert_eq!(&body[..], GOOD_BODY.as_bytes(), "{who}: the page itself");
+        }
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "the pair is one fetch, and it failed"
+        );
+        assert_eq!(
+            edge.inner.stats.stale_error.load(Ordering::Relaxed),
+            2,
+            "leader and follower both counted"
         );
     }
 
