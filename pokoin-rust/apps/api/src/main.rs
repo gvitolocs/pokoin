@@ -200,7 +200,11 @@ const MAX_SEARCH_PAGE_WAIT_MS: u64 = 10_000;
 /// [`new_state`] says that line too.
 fn bounded_gate(pool_max: u32, asked_slots: u32, asked_wait_ms: u64) -> (u32, u64) {
     let ceiling = search_page::default_slots(pool_max);
-    let slots = if asked_slots == 0 { ceiling } else { asked_slots.min(ceiling) };
+    let slots = if asked_slots == 0 {
+        ceiling
+    } else {
+        asked_slots.min(ceiling)
+    };
     if asked_slots > ceiling {
         tracing::warn!(
             asked_slots,
@@ -936,7 +940,7 @@ mod tests {
     /// pool (`game_pool` answers the request, and the gate is inside it).
     #[tokio::test]
     async fn a_shed_answer_leaves_the_read_cache_with_nothing_to_answer() {
-        let mut state = new_state(Config::from_env(), Instant::now()).unwrap();
+        let state = new_state(Config::from_env(), Instant::now()).unwrap();
         // No Valkey: the only tier this can write is the in-flight snapshot, and
         // that is what a non-200 must not reach.
         *state.redis.write().await = None;
