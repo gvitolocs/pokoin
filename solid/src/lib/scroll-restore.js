@@ -125,9 +125,22 @@ export function restoredView(href) {
   return isPopArrival(href) ? restoredPageView('POP', entryKey(), href) : null;
 }
 
+/**
+ * The newest view write per href. A write parked by `whenCommitted` keeps its
+ * token; once a newer call replaced it, the parked one no longer writes, so
+ * the entry never settles on a view older than the one on screen.
+ */
+const pendingViews = new Map();
+
 /** Merge `view` into this page's history entry (once committed). */
 export function rememberView(href, view) {
-  whenCommitted(href, (key) => rememberPageView(key, view));
+  const token = {};
+  pendingViews.set(href, token);
+  whenCommitted(href, (key) => {
+    if (pendingViews.get(href) !== token) return;
+    pendingViews.delete(href);
+    rememberPageView(key, view);
+  });
 }
 
 const snapshots = new Map();
