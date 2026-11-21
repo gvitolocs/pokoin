@@ -90,6 +90,17 @@ fn pool_game(game: &str) -> String {
     }
 }
 
+/// The two names one list request carries: the game `kind=seller` matches
+/// against `marketplace_seller_books.game`, which stays what
+/// [`crate::suggest::game_from`] returned (`onepiece` is its own token there),
+/// and the database the snapshot kinds read, where an alias is followed to the
+/// canonical id (`onepiece` → `one_piece`).
+fn request_games(headers: &HeaderMap, query_game: Option<&str>) -> (String, String) {
+    let requested = crate::suggest::game_from(headers, query_game);
+    let pool = pool_game(&requested);
+    (requested, pool)
+}
+
 /// `GET /api/marketplace-list?kind=set|artist|name|species&key=<slug or dex>[&game=][&format=c1]`
 /// (`kind=seller` is served from `marketplace_seller_books`, see `seller_list`).
 pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -> Response {
@@ -105,9 +116,9 @@ pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -
     let Some(key) = clean_key(q.first("key")) else {
         return catalog_api::response(StatusCode::BAD_REQUEST, json!({"error": "key is required."}), "no-store");
     };
-    let game = pool_game(&crate::suggest::game_from(&headers, q.first("game")));
+    let (seller_game, game) = request_games(&headers, q.first("game"));
     if kind == "seller" {
-        return seller_list(&state, &headers, &uri, &key, &game).await;
+        return seller_list(&state, &headers, &uri, &key, &seller_game).await;
     }
     let Some(pool) = catalog_api::game_pool(&state, &game).await else {
         return catalog_api::response(StatusCode::SERVICE_UNAVAILABLE, json!({"error": "Marketplace database unavailable."}), "no-store");
@@ -1836,22 +1847,28 @@ insert into public.marketplace_card_urls (card_id, canonical_path, language)
     }
 }
 
-/// The game a list is served from — [`pool_game`] composed exactly as the
-/// handler composes it. Needs no database: it pins which database name a request
-/// asks for, which is the whole of PH-C038 (`game=onepiece` answered 503 because
-/// only the canonical id has a database URL).
+/// The two game names a list request carries — [`request_games`] composed exactly
+/// as the handler composes it. Needs no database: it pins which database name a
+/// request asks for, which is PH-C038 (`game=onepiece` answered 503 because only
+/// the canonical id has a database URL), and that the seller read still matches
+/// on the token the request carried.
 #[cfg(test)]
 mod game_scope {
     use super::*;
 
     /// The handler's own chain: the query `game`, else the `x-pokoin-game`
-    /// header, then the pool key.
-    fn served_as(query_game: Option<&str>, header_game: Option<&str>) -> String {
+    /// header, then the two names [`request_games`] gives the route.
+    fn games_for(query_game: Option<&str>, header_game: Option<&str>) -> (String, String) {
         let mut headers = HeaderMap::new();
         if let Some(value) = header_game {
             headers.insert("x-pokoin-game", HeaderValue::from_str(value).unwrap());
         }
-        pool_game(&crate::suggest::game_from(&headers, query_game))
+        request_games(&headers, query_game)
+    }
+
+    /// The database the snapshot kinds read for that request: the second name.
+    fn served_as(query_game: Option<&str>, header_game: Option<&str>) -> String {
+        games_for(query_game, header_game).1
     }
 
     #[test]
@@ -1877,7 +1894,9 @@ mod game_scope {
 
     #[test]
     fn pokemon_and_unnamed_games_keep_the_pool_they_have_today() {
-        // What `game_from` already answered is exactly what is asked for now.
+        // No `game`, `""`, `poke` and `default` name the Pokémon pool. A name the
+        // game table does not know stays that name, and no
+        // `<GAME>_MARKETPLACE_DATABASE_URL` matches it, so it answers 503.
         for (query, expected) in [
             (None, "pokemon"),
             (Some(""), "pokemon"),
@@ -1892,6 +1911,30 @@ mod game_scope {
         ] {
             assert_eq!(served_as(query, None), expected, "{query:?}");
         }
+    }
+
+    #[test]
+    fn the_seller_branch_reads_the_token_the_request_carried_not_the_canonical_id() {
+        // The first name is what `kind=seller` matches against
+        // `marketplace_seller_books.game`, exactly as before this route learned
+        // aliases: an alias stays an alias there.
+        for (query, expected) in [
+            (Some("onepiece"), "onepiece"),
+            (Some("one-piece"), "one_piece"),
+            (Some("op"), "op"),
+            (Some("mtg"), "mtg"),
+            (Some("nonsense"), "nonsense"),
+            (None, "pokemon"),
+        ] {
+            assert_eq!(games_for(query, None).0, expected, "seller game {query:?}");
+        }
+        // The second name is the one that follows an alias to its database.
+        assert_eq!(games_for(Some("onepiece"), None).1, "one_piece");
+        assert_eq!(
+            games_for(Some("pokemon"), None),
+            ("pokemon".to_owned(), "pokemon".to_owned()),
+            "a Pokémon request carries one name twice"
+        );
     }
 }
 
