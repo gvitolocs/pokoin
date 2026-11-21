@@ -1,6 +1,7 @@
 # shellcheck shell=bash
 # Sourced by the publish and operator scripts: loads the Cloudflare deploy credentials from
-# ${HOME}/.config/pokoin/cloudflare.env into the environment when the calling shell did not already have them.
+# ${HOME}/.config/pokoin/cloudflare.env into the environment whenever that file is readable and LANE_WORKER is unset;
+# a value in the file replaces one the calling shell already exported.
 #
 # - does nothing when LANE_WORKER is set, or when the file is not a readable regular file
 # - POKOIN_CF_ENV_FILE only changes which file is read
