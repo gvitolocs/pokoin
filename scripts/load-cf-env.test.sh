@@ -15,6 +15,7 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 t="$(mktemp -d "${TMPDIR:-/tmp}/load-cf-env-test.XXXXXX")"
 trap 'rm -rf "$t"' EXIT
+export POKOIN_CF_ENV_FILE="$t/no-such-cloudflare.env"
 
 DUMMY=dummy-token-for-test
 fail() {
@@ -239,6 +240,8 @@ no_dummy_in "$t/err" "install-hypemeter-a1"
 ok "install-hypemeter-a1, file present: passes the check and reaches its tool check"
 
 # ---- (d) with-cf-env --------------------------------------------------------------------------------------
+[ -x "$here/with-cf-env" ] || fail "with-cf-env is not executable"
+ok "with-cf-env is executable"
 out="$(env -i PATH="$STUBPATH" HOME="$t/home-with" "$here/with-cf-env" sh -c '[ -n "$CLOUDFLARE_API_TOKEN" ] && echo token-set' 2> "$t/err")"
 [ "$out" = token-set ] || fail "with-cf-env: did not run the command with the token set"
 [ ! -s "$t/err" ] || fail "with-cf-env: printed on stderr"

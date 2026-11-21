@@ -16,6 +16,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 real="$here/testdata/check-runs/main-b757cc1a.json"
 t="$(mktemp -d)"
 trap 'rm -rf "$t"' EXIT
+export POKOIN_CF_ENV_FILE="$t/no-such-cloudflare.env"
 
 fail() {
   echo "FAIL: $*" >&2
