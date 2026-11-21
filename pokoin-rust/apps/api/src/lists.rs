@@ -74,6 +74,22 @@ fn clean_key(raw: Option<&str>) -> Option<String> {
     ok.then_some(key)
 }
 
+/// The database a list is read from, whatever named the game.
+/// [`crate::suggest::game_from`] only lowercases and turns `-` into `_`, so an
+/// alias of a configured game (`onepiece`, `op`) looked up
+/// `ONEPIECE_MARKETPLACE_DATABASE_URL`, found nothing and answered 503 while
+/// `game=one_piece` answered that game's list. Only a token the game table knows
+/// becomes its canonical id: Pokémon keeps its pool for every spelling, and a
+/// name the table does not know stays itself, so it still answers 503 rather than
+/// silently reading Pokémon.
+fn pool_game(game: &str) -> String {
+    let resolved = pokoin_api_common::game::normalize_game(game);
+    match pokoin_api_common::game::ingest_game_config(&resolved) {
+        Some(config) => config.id.to_owned(),
+        None => game.to_owned(),
+    }
+}
+
 /// `GET /api/marketplace-list?kind=set|artist|name|species&key=<slug or dex>[&game=][&format=c1]`
 /// (`kind=seller` is served from `marketplace_seller_books`, see `seller_list`).
 pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -> Response {
@@ -89,7 +105,7 @@ pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -
     let Some(key) = clean_key(q.first("key")) else {
         return catalog_api::response(StatusCode::BAD_REQUEST, json!({"error": "key is required."}), "no-store");
     };
-    let game = crate::suggest::game_from(&headers, q.first("game"));
+    let game = pool_game(&crate::suggest::game_from(&headers, q.first("game")));
     if kind == "seller" {
         return seller_list(&state, &headers, &uri, &key, &game).await;
     }
