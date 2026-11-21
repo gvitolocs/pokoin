@@ -281,6 +281,28 @@ if [ "$need_cargo" = 1 ]; then
     fi
 fi
 
+# The target is shared by every worktree, and cargo judges a crate fresh from file mtimes. Touch this tree's crate roots
+# (tracked src/lib.rs, src/main.rs and build.rs under the Rust workspace) so cargo rebuilds this tree's own crates
+# whatever the target last saw, and note which worktree used the target last. Content is never edited.
+touch_crate_roots() {
+    local marker=$CARGO_TARGET_DIR/.check-fast-last-worktree last f
+    local -a roots=()
+    while IFS= read -r -d '' f; do
+        case "$f" in
+            */src/lib.rs | */src/main.rs | */build.rs) [ -f "$f" ] && roots+=("$f") ;;
+        esac
+    done < <(git ls-files -z -- "$rust_dir")
+    if [ "${#roots[@]}" -gt 0 ]; then touch -- "${roots[@]}"; fi
+    if [ -f "$marker" ]; then
+        last=$(head -n1 "$marker" 2>/dev/null || true)
+        if [ -n "$last" ] && [ "$last" != "$root" ]; then
+            echo "check-fast: the target was last used by $last; rebuilding this tree's crates" >&2
+        fi
+    fi
+    printf '%s\n' "$root" >"$marker"
+}
+[ "$need_cargo" = 1 ] && touch_crate_roots
+
 use_scope=0
 if command -v systemd-run >/dev/null 2>&1 && systemd-run --user --scope --quiet true >/dev/null 2>&1; then use_scope=1; fi
 capped() {
