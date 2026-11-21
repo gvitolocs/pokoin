@@ -1901,6 +1901,15 @@ export async function readSnapshotUrls(urls, read) {
   return null;
 }
 
+/** How long a `missing` answer is kept: the window the API itself gives it
+ * (`public, max-age=60`, lists.rs:319), and at most one builder pass. */
+const LIST_MISS_MS = 60_000;
+/** Remembered misses, oldest dropped past this many. */
+const LIST_MISS_ROWS = 500;
+/** `kind`+`key` the API answered `{"missing":true}` for, mapped to when.
+ * In memory only, like the snapshot memory beside it, and never in IndexedDB. */
+const listSnapshotMisses = new Map();
+
 /**
  * Prebuilt list snapshot (`kind` set, artist, name or species): the whole desk
  * with prices, built on nezopt every 15 min / daily and served from one key read
@@ -1909,19 +1918,33 @@ export async function readSnapshotUrls(urls, read) {
  * Null when that list is not built yet; callers then use the live routes.
  * With the dictionary flag on, Chromium tries `&dict=<id>` first and, if that
  * fetch fails for a dictionary reason, once more without it. An answer of
- * `{"missing":true}` is the list itself being absent, so it is not asked twice.
+ * `{"missing":true}` is the list itself being absent, so it is not asked twice:
+ * the key is remembered for `LIST_MISS_MS` and a read inside that window
+ * answers null here, without a request. Two reads of one key in flight at the
+ * same time share the one request `local-read.js` already keys by URL.
  */
 export function fetchListSnapshot(kind, key, options = {}) {
   const urls = listSnapshotUrls(kind, key);
   if (!urls.length) {
     return Promise.resolve(null);
   }
+  const missKey = `${kind}\n${key}`;
+  const missedAt = listSnapshotMisses.get(missKey);
+  if (missedAt !== undefined && Date.now() - missedAt <= LIST_MISS_MS) {
+    return Promise.resolve(null);
+  }
   return readSnapshotUrls(urls, (url) => getJsonLocal(url, options))
     .then((payload) => {
       primeListDictionary();
       return payload;
-    })
-    .catch(() => null);
+    }, (err) => {
+      // Only the answer that says the list does not exist is remembered; a
+      // network failure says nothing about it.
+      if (err?.body?.missing === true) {
+        rememberMap(listSnapshotMisses, missKey, Date.now(), LIST_MISS_ROWS);
+      }
+      return null;
+    });
 }
 
 /** The list keys the API stores (`[a-z0-9._-]`): any other handle has no snapshot. */
