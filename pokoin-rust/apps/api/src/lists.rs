@@ -74,6 +74,33 @@ fn clean_key(raw: Option<&str>) -> Option<String> {
     ok.then_some(key)
 }
 
+/// The database a list is read from, whatever named the game.
+/// [`crate::suggest::game_from`] only lowercases and turns `-` into `_`, so an
+/// alias of a configured game (`onepiece`, `op`) looked up
+/// `ONEPIECE_MARKETPLACE_DATABASE_URL`, found nothing and answered 503 while
+/// `game=one_piece` answered that game's list. Only a token the game table knows
+/// becomes its canonical id: Pokémon keeps its pool for every spelling, and a
+/// name the table does not know stays itself, so it still answers 503 rather than
+/// silently reading Pokémon.
+fn pool_game(game: &str) -> String {
+    let resolved = pokoin_api_common::game::normalize_game(game);
+    match pokoin_api_common::game::ingest_game_config(&resolved) {
+        Some(config) => config.id.to_owned(),
+        None => game.to_owned(),
+    }
+}
+
+/// The two names one list request carries: the game `kind=seller` matches
+/// against `marketplace_seller_books.game`, which stays what
+/// [`crate::suggest::game_from`] returned (`onepiece` is its own token there),
+/// and the database the snapshot kinds read, where an alias is followed to the
+/// canonical id (`onepiece` → `one_piece`).
+fn request_games(headers: &HeaderMap, query_game: Option<&str>) -> (String, String) {
+    let requested = crate::suggest::game_from(headers, query_game);
+    let pool = pool_game(&requested);
+    (requested, pool)
+}
+
 /// `GET /api/marketplace-list?kind=set|artist|name|species&key=<slug or dex>[&game=][&format=c1]`
 /// (`kind=seller` is served from `marketplace_seller_books`, see `seller_list`).
 pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -> Response {
@@ -89,9 +116,9 @@ pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -
     let Some(key) = clean_key(q.first("key")) else {
         return catalog_api::response(StatusCode::BAD_REQUEST, json!({"error": "key is required."}), "no-store");
     };
-    let game = crate::suggest::game_from(&headers, q.first("game"));
+    let (seller_game, game) = request_games(&headers, q.first("game"));
     if kind == "seller" {
-        return seller_list(&state, &headers, &uri, &key, &game).await;
+        return seller_list(&state, &headers, &uri, &key, &seller_game).await;
     }
     let Some(pool) = catalog_api::game_pool(&state, &game).await else {
         return catalog_api::response(StatusCode::SERVICE_UNAVAILABLE, json!({"error": "Marketplace database unavailable."}), "no-store");
@@ -1812,6 +1839,241 @@ insert into public.marketplace_card_urls (card_id, canonical_path, language)
             StatusCode::OK,
             "an empty read deleted nothing either"
         );
+        pool.close().await;
+        sqlx::query(&format!("drop database if exists {name} with (force)"))
+            .execute(&admin)
+            .await
+            .unwrap();
+    }
+}
+
+/// The two game names a list request carries — [`request_games`] composed exactly
+/// as the handler composes it. Needs no database: it pins which database name a
+/// request asks for, which is PH-C038 (`game=onepiece` answered 503 because only
+/// the canonical id has a database URL), and that the seller read still matches
+/// on the token the request carried.
+#[cfg(test)]
+mod game_scope {
+    use super::*;
+
+    /// The handler's own chain: the query `game`, else the `x-pokoin-game`
+    /// header, then the two names [`request_games`] gives the route.
+    fn games_for(query_game: Option<&str>, header_game: Option<&str>) -> (String, String) {
+        let mut headers = HeaderMap::new();
+        if let Some(value) = header_game {
+            headers.insert("x-pokoin-game", HeaderValue::from_str(value).unwrap());
+        }
+        request_games(&headers, query_game)
+    }
+
+    /// The database the snapshot kinds read for that request: the second name.
+    fn served_as(query_game: Option<&str>, header_game: Option<&str>) -> String {
+        games_for(query_game, header_game).1
+    }
+
+    #[test]
+    fn every_name_of_a_configured_game_asks_for_one_pool() {
+        // The spelling the defect report carried, and the ones beside it.
+        for name in ["onepiece", "one-piece", "one_piece", "One Piece", "op"] {
+            assert_eq!(served_as(Some(name), None), "one_piece", "{name}");
+        }
+        for game in pokoin_api_common::game::INGEST_GAMES {
+            for name in [game.id, game.slug, game.display_name]
+                .into_iter()
+                .chain(game.aliases.iter().copied())
+            {
+                assert_eq!(served_as(Some(name), None), game.id, "query game={name}");
+                assert_eq!(
+                    served_as(None, Some(name)),
+                    game.id,
+                    "x-pokoin-game: {name}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pokemon_and_unnamed_games_keep_the_pool_they_have_today() {
+        // No `game`, `""`, `poke` and `default` name the Pokémon pool. A name the
+        // game table does not know stays that name, and no
+        // `<GAME>_MARKETPLACE_DATABASE_URL` matches it, so it answers 503.
+        for (query, expected) in [
+            (None, "pokemon"),
+            (Some(""), "pokemon"),
+            (Some("pokemon"), "pokemon"),
+            (Some("poke"), "pokemon"),
+            (Some("default"), "pokemon"),
+            // Not game-table names: untouched, so they still miss and answer 503
+            // instead of quietly reading the Pokémon catalog.
+            (Some("nonsense"), "nonsense"),
+            (Some("onepieces"), "onepieces"),
+            (Some("mtgg"), "mtgg"),
+        ] {
+            assert_eq!(served_as(query, None), expected, "{query:?}");
+        }
+    }
+
+    #[test]
+    fn the_seller_branch_reads_the_token_the_request_carried_not_the_canonical_id() {
+        // The first name is what `kind=seller` matches against
+        // `marketplace_seller_books.game`, exactly as before this route learned
+        // aliases: an alias stays an alias there.
+        for (query, expected) in [
+            (Some("onepiece"), "onepiece"),
+            (Some("one-piece"), "one_piece"),
+            (Some("op"), "op"),
+            (Some("mtg"), "mtg"),
+            (Some("nonsense"), "nonsense"),
+            (None, "pokemon"),
+        ] {
+            assert_eq!(games_for(query, None).0, expected, "seller game {query:?}");
+        }
+        // The second name is the one that follows an alias to its database.
+        assert_eq!(games_for(Some("onepiece"), None).1, "one_piece");
+        assert_eq!(
+            games_for(Some("pokemon"), None),
+            ("pokemon".to_owned(), "pokemon".to_owned()),
+            "a Pokémon request carries one name twice"
+        );
+    }
+}
+
+/// `game=<alias>` through the real route against a satellite database. Needs
+/// `POKOIN_TEST_DATABASE_URL` (the Pokémon pool, created and dropped here) and a
+/// reachable `ONE_PIECE_MARKETPLACE_DATABASE_URL` (the satellite); without either
+/// it skips itself, like every other database-backed test here.
+#[cfg(test)]
+mod game_scoped_lists {
+    use super::*;
+    use axum::routing::get;
+
+    /// A name key no builder can write, so the read always misses.
+    const MISSING_KEY: &str = "0000000000000000";
+
+    async fn scratch_database() -> Option<(PgPool, PgPool, String)> {
+        let Ok(url) = std::env::var("POKOIN_TEST_DATABASE_URL") else {
+            eprintln!("skipped: POKOIN_TEST_DATABASE_URL is not set");
+            return None;
+        };
+        if catalog_api::game_db_url("one_piece").is_none() {
+            eprintln!("skipped: ONE_PIECE_MARKETPLACE_DATABASE_URL is not set");
+            return None;
+        }
+        let admin = PgPool::connect(&url)
+            .await
+            .expect("connect POKOIN_TEST_DATABASE_URL");
+        let name = format!("pokoin_list_game_{}", std::process::id());
+        sqlx::query(&format!("drop database if exists {name}"))
+            .execute(&admin)
+            .await
+            .unwrap();
+        sqlx::query(&format!("create database {name}"))
+            .execute(&admin)
+            .await
+            .unwrap();
+        let (base, _) = url.rsplit_once('/').expect("database url");
+        let pool = PgPool::connect(&format!("{base}/{name}")).await.unwrap();
+        Some((admin, pool, name))
+    }
+
+    /// Status, `cache-control` and the raw body of one read; `game_header` asks
+    /// for the game the way the extension does instead of in the query.
+    async fn read(
+        app: &Router,
+        path: &str,
+        game_header: Option<&str>,
+    ) -> (StatusCode, String, Vec<u8>) {
+        let mut request = Request::builder().uri(path.to_owned());
+        if let Some(game) = game_header {
+            request = request.header("x-pokoin-game", game);
+        }
+        let response = app
+            .clone()
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = response.status();
+        let cache = response.headers()["cache-control"]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec();
+        (status, cache, body)
+    }
+
+    #[tokio::test]
+    async fn an_alias_of_a_configured_game_answers_like_that_games_canonical_id() {
+        let Some((admin, pool, name)) = scratch_database().await else {
+            return;
+        };
+        // 112 + 121: the snapshot table, left empty as a game database whose
+        // lists the builder has not reached.
+        sqlx::raw_sql(include_str!(
+            "../../../../scripts/sql/112_marketplace_list_snapshots.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::raw_sql(include_str!(
+            "../../../../scripts/sql/121_list_snapshot_formats.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        let state =
+            crate::new_state(pokoin_config::Config::from_env(), std::time::Instant::now()).unwrap();
+        *state.db.write().await = Some(pool.clone());
+        let app = Router::new()
+            .route("/api/marketplace-list", get(list))
+            .with_state(state);
+        let path =
+            |game: &str| format!("/api/marketplace-list?kind=name&key={MISSING_KEY}&game={game}");
+
+        // The defect: the alias answered 503 `no-store` while the id it names was
+        // served from its database.
+        let alias = read(&app, &path("onepiece"), None).await;
+        assert_eq!(
+            alias.0,
+            StatusCode::NOT_FOUND,
+            "an alias of a configured game is not an unavailable database: {alias:?}"
+        );
+        assert_eq!(
+            alias,
+            read(&app, &path("one_piece"), None).await,
+            "onepiece and one_piece are one answer"
+        );
+        assert_eq!(
+            alias,
+            read(
+                &app,
+                &format!("/api/marketplace-list?kind=name&key={MISSING_KEY}"),
+                Some("onepiece")
+            )
+            .await,
+            "the header names the game the same way"
+        );
+        // A list that is not there answers like a missing Pokémon list: the same
+        // status, the same public cache, the same bytes.
+        let pokemon = read(&app, &path("pokemon"), None).await;
+        assert_eq!(
+            (alias.0, alias.1.clone()),
+            (pokemon.0, pokemon.1),
+            "the same miss as Pokémon"
+        );
+        assert_eq!(
+            alias.2, pokemon.2,
+            "the miss body is byte for byte the Pokémon one"
+        );
+
+        // A game nobody configured keeps today's 503 rather than falling through
+        // to the Pokémon pool.
+        let unknown = read(&app, &path("nonsense"), None).await;
+        assert_eq!(unknown.0, StatusCode::SERVICE_UNAVAILABLE, "{unknown:?}");
+        assert_eq!(unknown.1, "no-store");
+
         pool.close().await;
         sqlx::query(&format!("drop database if exists {name} with (force)"))
             .execute(&admin)
