@@ -313,7 +313,7 @@ values (2076, '2026-10-17', 'Near Mint', 'en', 500, 450, 550, 2);
 /// The set table and wordmark table `readExpansionBySlug` reads for every
 /// game. `marketplace_card_versions` is deliberately NOT created: it exists in
 /// the Pokémon catalog only, and reading it is what made an unknown satellite
-/// set answer 500 (CARD-03).
+/// set answer 500 instead of 404.
 const EXPANSION_SCHEMA: &str = r#"
 create extension if not exists unaccent;
 create table public.marketplace_set_card_counts (set_name text primary key, slug text not null default '',
@@ -362,7 +362,7 @@ impl Drop for ScratchDbs {
     }
 }
 
-/// CARD-03: a satellite set the game's catalog does not have is a 404, not the
+/// A satellite set the game's catalog does not have is a 404, not the
 /// 500 the Pokémon-only version-set fallback used to answer. A satellite whose
 /// lookup cannot run at all stays a 500, so a database failure is not a 404.
 #[tokio::test]
