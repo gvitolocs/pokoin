@@ -419,8 +419,12 @@ export async function fetchExactNameCards(name, {
   if (!query) {
     return [];
   }
-  // Every exact-name printing is prebuilt (English titles); one read.
-  if (!lang || lang === 'en') {
+  // Every exact-name printing is prebuilt (English titles); one read. Name
+  // lists are built for the Pokémon catalogue only (`build_names` runs for
+  // `game == "pokemon"`, pokoin-rust/apps/api/src/lists.rs:441), so a satellite
+  // TCG's card has no key that could ever answer: it goes to the live search,
+  // which is what a miss does today.
+  if ((!lang || lang === 'en') && isPokemonGame()) {
     const snapshot = await fetchListSnapshot('name', nameListKey(name));
     if (snapshot?.cards?.length) {
       return filterExactNameRows(snapshot.cards, name, { excludeId })
@@ -1886,17 +1890,29 @@ export function listSnapshotUrls(kind, key, options = {}) {
   return [listSnapshotPath(kind, key, dictId), plain];
 }
 
-/** First URL that resolves. An abort does not fall through. */
+/** First URL that resolves. An abort does not fall through, and neither does a
+ * `{"missing":true}` answer: the plain URL is the same key, so it is not there
+ * either. A dictionary failure is a different answer and does retry. */
 export async function readSnapshotUrls(urls, read) {
   for (let i = 0; i < urls.length; i += 1) {
     try {
       return await read(urls[i]);
     } catch (err) {
       if (err?.name === 'AbortError' || i + 1 >= urls.length) throw err;
+      if (err?.body?.missing === true) throw err;
     }
   }
   return null;
 }
+
+/** How long a `missing` answer is kept: the window the API itself gives it
+ * (`public, max-age=60`, lists.rs:319), and at most one builder pass. */
+const LIST_MISS_MS = 60_000;
+/** Remembered misses, oldest dropped past this many. */
+const LIST_MISS_ROWS = 500;
+/** `kind`+`key` the API answered `{"missing":true}` for, mapped to when.
+ * In memory only, like the snapshot memory beside it, and never in IndexedDB. */
+const listSnapshotMisses = new Map();
 
 /**
  * Prebuilt list snapshot (`kind` set, artist, name or species): the whole desk
@@ -1905,19 +1921,34 @@ export async function readSnapshotUrls(urls, read) {
  * pre-compressed with brotli 11. Read local-first (getJsonLocal options).
  * Null when that list is not built yet; callers then use the live routes.
  * With the dictionary flag on, Chromium tries `&dict=<id>` first and, if that
- * fetch fails, once more without it.
+ * fetch fails for a dictionary reason, once more without it. An answer of
+ * `{"missing":true}` is the list itself being absent, so it is not asked twice:
+ * the key is remembered for `LIST_MISS_MS` and a read inside that window
+ * answers null here, without a request. Two reads of one key in flight at the
+ * same time share the one request `local-read.js` already keys by URL.
  */
 export function fetchListSnapshot(kind, key, options = {}) {
   const urls = listSnapshotUrls(kind, key);
   if (!urls.length) {
     return Promise.resolve(null);
   }
+  const missKey = `${kind}\n${key}`;
+  const missedAt = listSnapshotMisses.get(missKey);
+  if (missedAt !== undefined && Date.now() - missedAt <= LIST_MISS_MS) {
+    return Promise.resolve(null);
+  }
   return readSnapshotUrls(urls, (url) => getJsonLocal(url, options))
     .then((payload) => {
       primeListDictionary();
       return payload;
-    })
-    .catch(() => null);
+    }, (err) => {
+      // Only the answer that says the list does not exist is remembered; a
+      // network failure says nothing about it.
+      if (err?.body?.missing === true) {
+        rememberMap(listSnapshotMisses, missKey, Date.now(), LIST_MISS_ROWS);
+      }
+      return null;
+    });
 }
 
 /** The list keys the API stores (`[a-z0-9._-]`): any other handle has no snapshot. */
@@ -2322,7 +2353,12 @@ export function prefetchCardDesk(card, {
     const name = String(data?.card?.name || card?.name || '').trim();
     const rest = [];
     if (names && name) {
-      rest.push(fetchListSnapshot('name', nameListKey(name), { prefetch: true, signal }).catch(() => {}));
+      // A satellite TCG's card has no name list to warm (lists.rs:441 builds
+      // Pokémon only), so this read is not asked; its desk searches live, as
+      // it does when a list is missing.
+      if (isPokemonGame()) {
+        rest.push(fetchListSnapshot('name', nameListKey(name), { prefetch: true, signal }).catch(() => {}));
+      }
     }
     if (native) {
       // Stored like the sales beside it: the panel paints from this device's copy,
