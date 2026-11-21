@@ -419,8 +419,12 @@ export async function fetchExactNameCards(name, {
   if (!query) {
     return [];
   }
-  // Every exact-name printing is prebuilt (English titles); one read.
-  if (!lang || lang === 'en') {
+  // Every exact-name printing is prebuilt (English titles); one read. Name
+  // lists are built for the Pokémon catalogue only (`build_names` runs for
+  // `game == "pokemon"`, pokoin-rust/apps/api/src/lists.rs:441), so a satellite
+  // TCG's card has no key that could ever answer: it goes to the live search,
+  // which is what a miss does today.
+  if ((!lang || lang === 'en') && isPokemonGame()) {
     const snapshot = await fetchListSnapshot('name', nameListKey(name));
     if (snapshot?.cards?.length) {
       return filterExactNameRows(snapshot.cards, name, { excludeId })
@@ -2349,7 +2353,12 @@ export function prefetchCardDesk(card, {
     const name = String(data?.card?.name || card?.name || '').trim();
     const rest = [];
     if (names && name) {
-      rest.push(fetchListSnapshot('name', nameListKey(name), { prefetch: true, signal }).catch(() => {}));
+      // A satellite TCG's card has no name list to warm (lists.rs:441 builds
+      // Pokémon only), so this read is not asked; its desk searches live, as
+      // it does when a list is missing.
+      if (isPokemonGame()) {
+        rest.push(fetchListSnapshot('name', nameListKey(name), { prefetch: true, signal }).catch(() => {}));
+      }
     }
     if (native) {
       // Stored like the sales beside it: the panel paints from this device's copy,
