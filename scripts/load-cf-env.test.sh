@@ -100,11 +100,11 @@ ok "helper: file absent, the four names stay unset"
 rc=0
 env -i PATH="$STUBPATH" HOME="$t/home-without" bash -c '. "$1"' _ "$helper" > "$t/a.out" 2> "$t/a.err" || rc=$?
 [ "$rc" = 0 ] || fail "helper: file absent returned $rc"
-[ ! -s "$t/a.out" ] && [ ! -s "$t/a.err" ] || fail "helper: file absent printed output"
+if ! { [ ! -s "$t/a.out" ] && [ ! -s "$t/a.err" ]; }; then fail "helper: file absent printed output"; fi
 rc=0
 env -i PATH="$STUBPATH" HOME="$t/home-with" bash -c '. "$1"' _ "$helper" > "$t/a.out" 2> "$t/a.err" || rc=$?
 [ "$rc" = 0 ] || fail "helper: file present returned $rc"
-[ ! -s "$t/a.out" ] && [ ! -s "$t/a.err" ] || fail "helper: file present printed output"
+if ! { [ ! -s "$t/a.out" ] && [ ! -s "$t/a.err" ]; }; then fail "helper: file present printed output"; fi
 ok "helper: returns 0 and prints nothing, file absent and present"
 
 for opts in "set -eu" "set +eu" "set -eua" "set -e; set +u"; do
@@ -133,7 +133,7 @@ env -i PATH="$STUBPATH" HOME="$t/home-broken" bash -c '
   echo caller-continued > "$2"' _ "$helper" "$t/continued" > "$t/a.out" 2> "$t/a.err" || rc=$?
 [ "$rc" = 0 ] || fail "helper: a syntax error in the file made the caller exit $rc"
 [ "$(cat "$t/continued" 2> /dev/null)" = caller-continued ] || fail "helper: the caller did not continue after a syntax error"
-[ ! -s "$t/a.out" ] && [ ! -s "$t/a.err" ] || fail "helper: a syntax error in the file printed output"
+if ! { [ ! -s "$t/a.out" ] && [ ! -s "$t/a.err" ]; }; then fail "helper: a syntax error in the file printed output"; fi
 ok "helper: syntax error in the file, returns 0, prints nothing, caller continues with its options unchanged"
 
 # ---- fixtures: a bare origin and clones holding copies of the scripts -------------------------------------

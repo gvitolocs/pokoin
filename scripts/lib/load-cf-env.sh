@@ -4,7 +4,7 @@
 # a value in the file replaces one the calling shell already exported.
 #
 # - does nothing when LANE_WORKER is set, or when the file is not a readable regular file
-# - POKOIN_CF_ENV_FILE only changes which file is read
+# - POKOIN_CF_ENV_FILE is for tests: it picks which file is read, and nothing else
 # - prints nothing, returns 0 in every case, and leaves the caller's set -e, set -u and set -a state as it found it
 
 load_cf_env() {
