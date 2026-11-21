@@ -9,9 +9,10 @@ description = "Postgres pool construction and the shared satellite-game pool bud
 # pokoin-accounts depends on this and must compile standalone (see its Cargo.toml).
 [dependencies]
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres"] }
+tokio = { version = "1", features = ["sync", "time"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 
 [lints.rust]
 unsafe_code = "forbid"
