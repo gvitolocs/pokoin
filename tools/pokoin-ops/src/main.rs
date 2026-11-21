@@ -7,6 +7,7 @@ mod env;
 mod hc;
 mod health;
 mod mail;
+mod mailcheck;
 mod nezopt;
 mod notify;
 mod pi;
@@ -73,6 +74,13 @@ enum Cmd {
         #[arg(long)]
         end_maintenance: bool,
     },
+    /// Exit non-zero unless the alert sender and recipient are configured (prints no values).
+    MailConfigCheck {
+        /// Test only: REPLACES the host's default env file list, so on a host it changes what is
+        /// checked. Never pass it from an install script or unit. Repeatable.
+        #[arg(long = "env-file", value_name = "PATH")]
+        env_files: Vec<PathBuf>,
+    },
     #[command(subcommand)]
     Backup(BackupCmd),
     #[command(subcommand)]
@@ -120,8 +128,14 @@ enum WalCmd {
 }
 
 fn main() {
-    env::load(&env::default_files());
-    if let Err(err) = run(Cli::parse()) {
+    let cli = Cli::parse();
+    // `mail-config-check --env-file` replaces the default file list (tests only); every other
+    // invocation reads the host's default files.
+    match &cli.cmd {
+        Cmd::MailConfigCheck { env_files } if !env_files.is_empty() => env::load(env_files),
+        _ => env::load(&env::default_files()),
+    }
+    if let Err(err) = run(cli) {
         eprintln!("pokoin-ops: {err:#}");
         std::process::exit(1);
     }
@@ -142,6 +156,7 @@ fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::MailConfigCheck { env_files } => mailcheck::run(&env_files),
         Cmd::Digest { dry_run } => digest::run(dry_run),
         Cmd::HcProvision => hc::provision(),
         Cmd::Sentinel { role, dry_run } => sentinel::run(role, dry_run),

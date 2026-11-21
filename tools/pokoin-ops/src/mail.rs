@@ -1,12 +1,14 @@
 //! Same delivery path as scripts/pokoin-uptime-mail.sh: Resend HTTP API with the key
-//! from the uptime-mail env file, to the same inbox.
+//! from the uptime-mail env file. The recipient and the sender come from configuration only.
 
 use crate::env;
 use anyhow::{anyhow, Result};
 use std::time::Duration;
 
-pub const DEFAULT_TO: &str = "vitologiuseppe17@gmail.com";
-pub const DEFAULT_FROM: &str = "Pokoin alerts <no-reply@pokoin.com>";
+pub const FROM_KEY: &str = "POKOIN_ALERT_MAIL_FROM";
+pub const TO_KEY: &str = "POKOIN_ALERT_MAIL_TO";
+pub const TO_FALLBACK_KEY: &str = "POKOIN_UPTIME_MAIL_TO";
+
 // Resend sits behind Cloudflare; the uptime mailer sends a browser-like UA for the same reason.
 const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) pokoin-ops/1";
 
@@ -15,11 +17,22 @@ pub fn subject(text: &str) -> String {
         .split_whitespace().collect::<Vec<_>>().join(" ").chars().take(200).collect()
 }
 
+/// The recipient comes only from configuration; there is no built-in address.
+fn recipient() -> Result<String> {
+    env::get(TO_KEY)
+        .or_else(|| env::get(TO_FALLBACK_KEY))
+        .ok_or_else(|| anyhow!("mail recipient not configured: set POKOIN_ALERT_MAIL_TO (or POKOIN_UPTIME_MAIL_TO)"))
+}
+
+/// The sender comes only from configuration; there is no built-in address.
+fn sender() -> Result<String> {
+    env::get(FROM_KEY)
+        .ok_or_else(|| anyhow!("mail sender not configured: set POKOIN_ALERT_MAIL_FROM"))
+}
+
 pub fn send(subject: &str, body: &str) -> Result<()> {
-    let to = env::get("POKOIN_ALERT_MAIL_TO")
-        .or_else(|| env::get("POKOIN_UPTIME_MAIL_TO"))
-        .unwrap_or_else(|| DEFAULT_TO.into());
-    let from = env::get_or("POKOIN_ALERT_MAIL_FROM", DEFAULT_FROM);
+    let to = recipient()?;
+    let from = sender()?;
     if env::get("POKOIN_OPS_DRY_RUN").is_some() {
         eprintln!("[dry-run mail] to={to} subject={subject}\n{body}");
         return Ok(());
@@ -81,5 +94,37 @@ mod tests {
         let s = subject(&"é".repeat(300));
         assert_eq!(s.chars().count(), 200);
         assert!(s.ends_with('é'));
+    }
+
+    // One test owns every mail key: tests share the process environment.
+    #[test]
+    fn recipient_and_sender_come_only_from_configuration() {
+        for k in [TO_KEY, TO_FALLBACK_KEY, FROM_KEY, "POKOIN_OPS_DRY_RUN"] {
+            std::env::remove_var(k);
+        }
+        let err = recipient().unwrap_err().to_string();
+        assert!(err.contains("not configured"), "{err}");
+        assert!(err.contains(TO_KEY), "{err}");
+        assert!(!err.contains('@'), "error must not name an address: {err}");
+        let err = sender().unwrap_err().to_string();
+        assert!(err.contains("not configured"), "{err}");
+        assert!(err.contains(FROM_KEY), "{err}");
+        assert!(!err.contains('@'), "error must not name an address: {err}");
+
+        std::env::set_var(TO_FALLBACK_KEY, "alerts@example.invalid");
+        assert_eq!(recipient().unwrap(), "alerts@example.invalid");
+        std::env::remove_var(TO_FALLBACK_KEY);
+        std::env::set_var(TO_KEY, "alerts@example.invalid");
+        assert_eq!(recipient().unwrap(), "alerts@example.invalid");
+        std::env::set_var(FROM_KEY, "Alerts <alerts@example.invalid>");
+        assert_eq!(sender().unwrap(), "Alerts <alerts@example.invalid>");
+
+        // The only send() call: dry-run returns before any network access.
+        std::env::set_var("POKOIN_OPS_DRY_RUN", "1");
+        assert!(send("s", "b").is_ok());
+
+        for k in [TO_KEY, FROM_KEY, "POKOIN_OPS_DRY_RUN"] {
+            std::env::remove_var(k);
+        }
     }
 }
