@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Runs a command with the Cloudflare deploy credentials loaded: scripts/with-cf-env <command> [args...]
+set -euo pipefail
+if [ "$#" -eq 0 ]; then
+  echo "usage: with-cf-env <command> [args...]" >&2
+  exit 2
+fi
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/lib/load-cf-env.sh"
+exec "$@"
