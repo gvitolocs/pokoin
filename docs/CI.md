@@ -54,6 +54,11 @@ nezopt's disk also holds production (`docs/RUST_RUNTIME.md`, "Build disk on nezo
 - builds in one shared target, `$POKOIN_CHECK_TARGET` (default `~/.cache/pokoin-check-target`), never `pokoin-rust/target` in the worktree
 - refuses to start (exit 2) with less than `POKOIN_CHECK_MIN_FREE_GB` (default 50) free where that target lives
 - runs each cargo step in `systemd-run --user --scope -p MemoryMax=8G -p CPUQuota=400%` when systemd is available
+- shares that target between worktrees without mixing their builds: before the cargo steps it touches the tracked crate roots
+  (`src/lib.rs`, `src/main.rs`, `build.rs`) of this tree, so cargo rebuilds this tree's workspace crates whatever the target last
+  saw (a warm run is slower than a run that reused another tree's build). The worktree that used the target last is recorded in
+  `.check-fast-last-worktree` inside it, and one line is printed when that was another worktree. A lock file, `.check-fast.lock`,
+  held for the cargo portion of the run makes an overlapping run wait (`POKOIN_CHECK_LOCK_WAIT` seconds, default 900, then exit 2)
 
 Delete the shared target when it grows past about 40 GB. Do not run `cargo test --workspace` on nezopt by hand; check single crates.
 
