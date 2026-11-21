@@ -286,6 +286,7 @@ if command -v flock >/dev/null 2>&1; then
     (
         exec 9>"$share/.check-fast.lock"
         flock 9
+        printf '%s\n' /held/by/another/worktree >"$share/.check-fast.lock"
         : >"$ready"
         sleep 4
     ) &
@@ -296,7 +297,20 @@ if command -v flock >/dev/null 2>&1; then
     wait "$holder" || true
     expect_rc 2 "lock wait timeout"
     if grep -q 'gave up after 1s waiting for the target lock' "$out"; then ok "lock wait timeout message"; else bad "no lock wait timeout message"; fi
+    if grep -q 'held by /held/by/another/worktree; re-run later' "$out"; then ok "lock wait timeout names the holder"; else bad "lock wait timeout does not name the holder"; fi
     if grep -q '^step ' "$out"; then bad "lock wait timeout: a step table was printed"; else ok "lock wait timeout: no step table"; fi
+
+    # 16. A step that leaves a detached child running does not keep the lock: once check-fast has exited, another process
+    # can take the lock at once. The cargo stub starts a detached sleeper that would inherit the lock descriptor.
+    share=$tmp/shared-target-detached
+    det=$tmp/detachedcargo
+    mkdir -p "$det"
+    printf '#!/usr/bin/env bash\nsetsid sleep 8 </dev/null >/dev/null 2>&1 &\nexec "%s" "$@"\n' "$(command -v cargo)" >"$det/cargo"
+    chmod +x "$det/cargo"
+    rc=0
+    (cd "$wta" && PATH=$det:$PATH POKOIN_CHECK_TARGET=$share bash scripts/check-fast --base HEAD) >"$out" 2>&1 || rc=$?
+    expect_rc 0 "detached child: run ends normally"
+    if flock -n "$share/.check-fast.lock" true; then ok "detached child: the lock is free after the run"; else bad "detached child: the lock is still held after the run"; fi
 else
     echo "skip - flock is not installed: target lock untested"
 fi

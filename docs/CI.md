@@ -58,7 +58,8 @@ nezopt's disk also holds production (`docs/RUST_RUNTIME.md`, "Build disk on nezo
   (`src/lib.rs`, `src/main.rs`, `build.rs`) of this tree, so cargo rebuilds this tree's workspace crates whatever the target last
   saw (a warm run is slower than a run that reused another tree's build). The worktree that used the target last is recorded in
   `.check-fast-last-worktree` inside it, and one line is printed when that was another worktree. A lock file, `.check-fast.lock`,
-  held for the cargo portion of the run makes an overlapping run wait (`POKOIN_CHECK_LOCK_WAIT` seconds, default 900, then exit 2)
+  held from just before the first cargo step to the end of the last one (and recording the holder's worktree) makes an overlapping run
+  wait (`POKOIN_CHECK_LOCK_WAIT` seconds, default 3600, then exit 2 naming the holder)
 
 Delete the shared target when it grows past about 40 GB. Do not run `cargo test --workspace` on nezopt by hand; check single crates.
 
