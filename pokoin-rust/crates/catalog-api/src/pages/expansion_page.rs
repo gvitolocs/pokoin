@@ -131,9 +131,15 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
     }
 
     let mut expansion = if !slug.is_empty() {
-        // try/catch around readExpansionBySlug -> null on failure.
+        // try/catch around readExpansionBySlug -> null on failure. A satellite cannot
+        // fall through, so a failing lookup is the 500 the reference catch answers,
+        // not a 404 that tells a crawler the set is gone.
         match react_sql::read_expansion_by_slug(&pool, is_pokemon, &slug).await {
             Ok(expansion) => expansion,
+            Err(error) if !is_pokemon => {
+                tracing::error!(route = "expansion-page", step = "expansion-by-slug", game = %game, slug = %slug, %error, "marketplace-expansion-page failed");
+                return support::node_error_response(&error, "Marketplace expansion page failed.");
+            }
             Err(error) => {
                 tracing::warn!(route = "expansion-page", step = "expansion-by-slug", game = %game, slug = %slug, %error, "marketplace-expansion-page fell back to the version-set lookup");
                 None

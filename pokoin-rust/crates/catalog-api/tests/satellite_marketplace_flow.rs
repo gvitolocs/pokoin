@@ -325,6 +325,7 @@ create table public.pokoin_pokemon_expansions (name text primary key, symbol_ima
 
 const C036_POKEMON_DB: &str = "sat_c036_pokemon";
 const C036_ONEPIECE_DB: &str = "sat_c036_onepiece";
+const C036_LORCANA_DB: &str = "sat_c036_lorcana";
 
 /// Drops the databases of one test, also while a failed assertion unwinds.
 /// The drops run on a thread of their own: `block_on` inside the runtime of
@@ -362,7 +363,8 @@ impl Drop for ScratchDbs {
 }
 
 /// CARD-03: a satellite set the game's catalog does not have is a 404, not the
-/// 500 the Pokémon-only version-set fallback used to answer.
+/// 500 the Pokémon-only version-set fallback used to answer. A satellite whose
+/// lookup cannot run at all stays a 500, so a database failure is not a 404.
 #[tokio::test]
 async fn satellite_expansion_page_answers_404_for_an_unknown_set() {
     let Ok(base) = std::env::var("POKOIN_TEST_DATABASE_URL") else {
@@ -376,16 +378,20 @@ async fn satellite_expansion_page_answers_404_for_an_unknown_set() {
         .unwrap();
     let scratch = ScratchDbs {
         base: base.clone(),
-        names: &[C036_POKEMON_DB, C036_ONEPIECE_DB],
+        names: &[C036_POKEMON_DB, C036_ONEPIECE_DB, C036_LORCANA_DB],
     };
 
     // The Pokémon pool only has to exist: RouteState takes one. Neither request
     // below reads it.
     let (_, pokemon) = fresh_db(&admin, &base, C036_POKEMON_DB).await;
     let (onepiece_url, onepiece) = fresh_db(&admin, &base, C036_ONEPIECE_DB).await;
+    let (lorcana_url, lorcana) = fresh_db(&admin, &base, C036_LORCANA_DB).await;
     exec_all(&pokemon, POKEMON_SCHEMA).await;
     exec_all(&onepiece, SATELLITE_SCHEMA).await;
     exec_all(&onepiece, EXPANSION_SCHEMA).await;
+    // A satellite that was never given the expansion tables: here even the by-slug
+    // lookup of a known set cannot run, and a database failure is not a missing set.
+    exec_all(&lorcana, SATELLITE_SCHEMA).await;
     exec_all(
         &onepiece,
         r#"
@@ -399,6 +405,7 @@ insert into public.marketplace_search_candidates (card_id, ct_id, name, set_name
     .await;
 
     std::env::set_var("ONE_PIECE_MARKETPLACE_DATABASE_URL", &onepiece_url);
+    std::env::set_var("LORCANA_MARKETPLACE_DATABASE_URL", &lorcana_url);
     let state = pokoin_api_common::RouteState::new(
         pokoin_api_common::ApiState::new(pokemon.clone(), pokemon.clone(), None, 1),
         pokoin_accounts::DomainState::default(),
@@ -431,8 +438,21 @@ insert into public.marketplace_search_candidates (card_id, ct_id, name, set_name
     assert_eq!(body["expansion"]["name"], "Romance Dawn");
     assert_eq!(body["expansion"]["slug"], "romance-dawn");
 
+    // The by-slug lookup itself failing: a server error that the edge may serve
+    // stale, never the 404 that tells a crawler the set is gone for good.
+    let (status, body) = get(
+        &app,
+        "/api/marketplace-expansion-page?game=lorcana&slug=the-ones-you-will-never-meet",
+        None,
+    )
+    .await;
+    println!("lorcana expansion-page failing lookup body: {body}");
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "body: {body}");
+    assert_ne!(status, StatusCode::NOT_FOUND);
+
     admin.close().await;
     pokemon.close().await;
     onepiece.close().await;
+    lorcana.close().await;
     drop(scratch);
 }
