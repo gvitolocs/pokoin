@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, Match, onSettled, Show, Switch, untrack } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, Match, onCleanup, onSettled, Show, Switch, untrack } from 'solid-js';
 import { useLocation, useParams } from '@solidjs/router';
 import { cardHref, fetchPortfolio, formatPkn, imageSrc } from '@market/api.js';
 import { game, gameHref } from '@market/game.js';
@@ -6,7 +6,7 @@ import { bindRailControls, stepRail } from '@market/rail-scroll.js';
 import CardArt from '../components/CardArt.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
 import DumpNav from '../components/DumpNav.jsx';
-import { rememberView, restoredView } from '../lib/scroll-restore.js';
+import { rememberView, registerViewWriter, restoreScroll, restoredView } from '../lib/scroll-restore.js';
 
 const PAGE = 40;
 
@@ -92,15 +92,25 @@ function PortfolioList() {
   const [query, setQuery] = createSignal(String(restored?.query || ''));
   const [shown, setShown] = createSignal(Number(restored?.shown) > PAGE ? Number(restored.shown) : PAGE);
   let sentinel;
+  let stopRestore = () => {};
   const displayed = createCountUp(() => catalog()?.totals?.pkn || 0);
   document.title = 'Portfolio · Pokoin';
 
   onSettled(() => {
     let cancelled = false;
     fetchPortfolio()
-      .then((data) => { if (!cancelled) setCatalog(() => data); })
+      .then((data) => {
+        if (cancelled) return;
+        setCatalog(() => data);
+        queueMicrotask(() => {
+          if (!cancelled) stopRestore = restoreScroll(href);
+        });
+      })
       .catch((err) => { if (!cancelled) setError(err.message || 'Portfolio failed.'); });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      stopRestore();
+    };
   });
 
   const ranked = createMemo(() => {
@@ -124,6 +134,8 @@ function PortfolioList() {
   createEffect(() => ({ shown: shown(), query: query() }), (view) => {
     rememberView(href, view);
   });
+  // A view that changed during the leaving navigation still reaches this entry.
+  onCleanup(registerViewWriter(href, () => ({ shown: shown(), query: query() })));
 
   createEffect(
     () => (catalog() ? [ranked().holdings.length, query()] : null),

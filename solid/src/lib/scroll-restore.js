@@ -56,8 +56,30 @@ let pop = null;
 /** Y of the entry on screen, kept in memory and flushed when it is left. */
 let live = null;
 
+/**
+ * The view getter of a page that opted in, by href. `rememberView` writes only
+ * once the URL is committed, so a view that changed during the leaving
+ * navigation would otherwise never reach the entry being left; the leave-time
+ * flush reads it here (keyed by href, so another page cannot inherit it).
+ */
+const viewWriters = new Map();
+
+export function registerViewWriter(href, get) {
+  viewWriters.set(href, get);
+  return () => {
+    if (viewWriters.get(href) === get) viewWriters.delete(href);
+  };
+}
+
+function currentView(path) {
+  return viewWriters.get(path)?.() || null;
+}
+
 function flushLive() {
-  if (live?.key) rememberScroll(live.key, { y: live.y, path: live.path });
+  if (!live?.key) return;
+  const patch = { y: live.y, path: live.path };
+  if (live.view) patch.view = live.view;
+  rememberScroll(live.key, patch);
 }
 
 function track() {
@@ -65,7 +87,7 @@ function track() {
   if (!key) return;
   const path = windowHref();
   if (live && (live.key !== key || live.path !== path)) flushLive();
-  live = { key, path, y: readWindowY() };
+  live = { key, path, y: readWindowY(), view: currentView(path) };
 }
 
 if (browser) {
@@ -125,9 +147,22 @@ export function restoredView(href) {
   return isPopArrival(href) ? restoredPageView('POP', entryKey(), href) : null;
 }
 
+/**
+ * The newest view write per href. A write parked by `whenCommitted` keeps its
+ * token; once a newer call replaced it, the parked one no longer writes, so
+ * the entry never settles on a view older than the one on screen.
+ */
+const pendingViews = new Map();
+
 /** Merge `view` into this page's history entry (once committed). */
 export function rememberView(href, view) {
-  whenCommitted(href, (key) => rememberPageView(key, view));
+  const token = {};
+  pendingViews.set(href, token);
+  whenCommitted(href, (key) => {
+    if (pendingViews.get(href) !== token) return;
+    pendingViews.delete(href);
+    rememberPageView(key, view);
+  });
 }
 
 const snapshots = new Map();
