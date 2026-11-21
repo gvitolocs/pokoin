@@ -1017,6 +1017,15 @@
   "purpose": "Stored daily collection value: wallet on the days it moved, plus the homepage minimum of 1-Day Ready cards summed once per UTC day."
  },
  {
+  "path": "/api/marketplace-portfolio-collections",
+  "methods": [
+   "GET",
+   "POST"
+  ],
+  "file": "new (native Rust: crates/accounts/src/handlers/portfolio_collections.rs; no Node origin)",
+  "purpose": "A signed-in seller's own named card lists and each one's value series: GET reads them, POST ?action=save and ?action=delete write one in a single Firestore transaction; HEAD reads like GET. Every card is priced server-side by its own game's catalog, never by a client-named blueprint."
+ },
+ {
   "path": "/api/poko-market",
   "methods": [
    "POST"

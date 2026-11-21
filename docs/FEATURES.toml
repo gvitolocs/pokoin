@@ -405,6 +405,14 @@ proof = ["pokoin-rust/crates/accounts/tests/portfolio_segments_flow.rs", "pokoin
 status = "proved"
 
 [[flow]]
+id = "dashboard-custom-collections"
+name = "Seller keeps custom card collections and sees their value over time"
+money = false
+entry = ["solid/src/pages/SellerHome.jsx", "solid/src/components/dashboard/SegmentTable.jsx", "solid/src/components/dashboard/CollectionEditor.jsx"]
+proof = ["pokoin-rust/crates/accounts/tests/portfolio_collections_flow.rs", "market/src/portfolio-collections.test.js", "market/src/portfolio-collections-store.test.js", "market/src/portfolio-collections-preview.test.js", "market/src/portfolio-segments.test.js", "solid/src/pages/SellerHome.collections.test.js", "solid/src/pages/SellerHome.segments.test.js"]
+status = "proved"
+
+[[flow]]
 id = "signup-email"
 name = "Visitor registers with an emailed code"
 money = false

@@ -182,3 +182,142 @@ frozen but which has no stored segments gets segments priced from today's holdin
 under that frozen total** — for those days the segments need not add up to
 `cardsValuePkn`. That is intended: rebuilding the totals of past days is what must
 never happen.
+
+## Custom collections
+
+A seller names lists of cards — a wishlist, a tournament bound, "what I would buy
+back" — and sees each one valued per day as if they had held it all along. Storage
+and maths live in `domain/portfolio_collections.rs`, the HTTP hop and the catalog
+reads in `handlers/portfolio_collections.rs`.
+
+```
+GET  /api/marketplace-portfolio-collections
+POST /api/marketplace-portfolio-collections?action=save    { "id"?, "name", "items": [...] }
+POST /api/marketplace-portfolio-collections?action=delete  { "id" }
+```
+
+All three answer one body — the lists with each card priced as of the last day of
+its series, `segmentDefs` in creation order, and `days` — and a `POST` answers it
+*after* its write, so a save returns the list as it now is. `saved` names the id a
+save wrote and is absent otherwise. `OPTIONS` and any other method are answered as
+the history route answers them; the body of every answer is `private, no-store`,
+which is what makes one read safe to answer from.
+
+The lists are **Firestore only** (`portfolio_collections`, one document per list:
+`uid`, `name`, `items`, `createdAt`, `updatedAt`) — no table, no migration, because
+nothing here is a fact about the market. Limits are what one seller's browser can be
+trusted with: 20 lists, 300 items per list, quantity ≤999, name ≤40 characters, all
+four echoed in `limits`. A write's `id` is a list this seller already has or the read
+of it is a 404, a name another of their lists carries is a 409, a missing name or an
+over-budget list is a 400 that says which limit it hit, and an item whose `cardId` is
+not a positive integer or whose quantity is out of range is a 400 naming its index.
+The read asks for more documents than it answers — 64, because a write's check has to
+count every list it would overwrite or evict — and the answer then values and names
+only the 20 oldest of what it got: pricing a seller's whole stored history on every
+request is not a thing this route does, and what falls past the ceiling is the newest,
+never a hole in the middle.
+A `cardId` is canonicalised before anything else reads it: the leading zeros come
+off, so `0012` is stored, answered, merged and looked up as `12` rather than
+becoming two lines of one card that each price. The read of a stored list merges by
+the same rule a write uses: a document written before some rule existed still
+answers one line per slice, with the copies added.
+`?action=` outside those two writes is a 400 too: there is no third verb. An unknown
+id and someone else's id answer byte-identically, so no read of the store can tell a
+list that exists from one that does not. A name the store reserves for its own
+markers — `__` on both ends, as `__namespace__` is spelled — is refused by that same
+404 out of the id shape, before the store is asked about it at all.
+
+A write's body is read strictly: JSON that cannot be parsed, or that parses to
+anything but an object, is the 400 the rest of this API answers unreadable input with
+— `Invalid JSON request body.`, no `code` — because `{"name":` is not a save that
+forgot its name and a body of garbage is not a delete of a list that does not exist.
+An absent body is not malformed input: it is the empty object, which each write then
+refuses for what it actually is. Every answer of the route, refusals included, is
+`private, no-store`.
+
+**A write is one Firestore transaction.** Its reads — the document being replaced
+and every other list of this seller — its checks (ownership, the name, the cap) and
+its write commit together, so two saves that would each be legal alone cannot both
+land: whichever commits second either reads the other's document or has its commit
+aborted for having read a collection that has since moved, and retries from its
+reads. That is also why a replace cannot bring back a list someone deleted in
+between: the read that proved it existed belongs to the transaction that is aborted,
+so the retry reads nothing and answers 404. The answer of a committed save is that
+same read with the write applied in memory — never a second listing read after the
+commit — so a store that fails one call later cannot turn a write that did happen
+into an error the client would retry.
+
+`priceBasis` is `"ct-last-sold"`, the same as `SERIES_REVISION`'s basis: the last
+CardTrader sold median of the exact slice, carried forward, with the 20× outlier
+filter already applied by the book. Nothing is computed twice. A collection's items
+become holdings rows with an empty `since`, and `value_holdings_on` prices them out
+of the one sold query the request makes. Which blueprint a `cardId` is gets resolved
+**server-side only** — Pokémon through `marketplace_card_versions`, every other game
+through its own catalog and its own sold book — so a client cannot name a blueprint
+and price its graph off a card it does not hold, and a Riftbound card whose public
+id collides with a pricey Pokémon one still answers its own game's price.
+
+An item's facets are keys into that book, so they are stored as the book is filed.
+Condition is answered and stored as one of the five the listing forms and the sold
+rows use — `NM`, `SP`, `MP`, `PL`, `Poor` — and the spellings `condition_key` already
+understands map onto them, so `Near Mint`, `nm`, `NM`, `mint` are one slice and
+`poor`, `PO`, `damaged`, `Poor` one more. The slice key still goes through
+`condition_key`, so the stored name and the sold row reach the same slice either way.
+Language is answered as the code the sold rows carry: `English`, `english`, `en` and
+`EN` are the one `EN` slice, `ja` and `Japanese` the one `JP`, `zh-tw` the one `ZHT`.
+A `game` may be written as its id or the display name the marketplace uses. Absent
+means `NM` / `EN`, Pokémon.
+
+The two vocabularies are closed: a `condition` outside those five, a `language` that
+does not come back as the two or three ASCII letters of a code, and either written
+past 24 characters — counted before anything is normalised — is a
+`collection_item_invalid` that names the card and the facet, because such a slice has
+no sales to carry a series and a save that quietly stored it would draw a line that
+can only ever read zero. The language rule is the *shape* of a code, not membership in
+`normalize_language`'s own list of fourteen: the seller's picker offers `TH` and `VI`
+and the sold writer files a Thai or Vietnamese listing under exactly those codes, so a
+vocabulary closed to the normalizer's list would refuse a card the marketplace prices
+and lock a list that already stored one out of ever being saved again. A `game` the
+platform's own game table does not list is a 400 on the save for the same reason: it
+has no database to price from. A list that stored
+any of these before the rule existed keeps the line — held at nothing, and with a game
+no longer listed the row reads as `unknown`, so it is never looked up in the Pokémon
+tables by a card id that only looks alike.
+
+**The series is not stored.** It is a question about a list, not a fact: the day a
+card last sold changes under it, the seller renames or re-orders the list, and a
+stored answer would need a revision bump and a rebuild per collection. So a read
+walks the days itself, from the earliest priced day of any of its slices (never more
+than the 400 days the main graph draws) to today; a card whose slice has never sold
+counts as held, not priced, and shows no `pricePkn`. With no price anywhere in the
+book the series is today alone. An empty collection keeps its `segmentDefs` entry and
+appears in no day's `segments`, exactly as an empty era does.
+
+**A price read that did not happen is reported, not drawn.** The market is down, the
+query ran out its window or there is no read model at all: the answer is still a 200 with
+the seller's own lists — those are Firestore data, and an outage is no reason to tell
+someone their collection is gone — but it draws no series and carries
+`"seriesError": "prices_unavailable"`. A line drawn beneath cards this request never
+priced would be read as the seller's worth having collapsed to zero, and a client that
+keeps the last good graph is the correct response to a market it cannot see. `days: []`
+*without* that key still means what it always meant: nothing is held.
+
+Half a market is not a market. When one game answered its sales and the Pokémon did not,
+the rows that came back are dropped rather than used: the book prices a Riftbound card
+from a Riftbound sale and a Pokémon card from nothing, which is the same collapsed line
+in one colour instead of the whole list. So `seriesError` and `pricePkn` are mutually
+exclusive — with the key present every card of every game answers unpriced, whatever the
+request did manage to read. The same answer covers the maths dying rather than the read:
+the series is computed on the blocking pool, and a task that goes down there after the
+write committed would otherwise turn a save that *did* happen into a 500 the client
+retries into a duplicate. It is logged, and the lists are answered without prices.
+
+**What the reads may cost.** The two Pokémon queries of one request share a single
+eight-second deadline; the other games are asked **beside them**, never between them, each
+inside its own four-second window, so a seller who collects several games waits on their
+slowest card server rather than on all of them and the whole market read costs at most
+those eight seconds. A game that runs out keeps its cards held and unpriced,
+its rows losing the blueprint the Pokémon join matched on their card ids. The day-by-day
+maths — every list against every day of the window, at the full allowance of 20 lists and
+300 cards — runs on the blocking pool, and a slice key, being a fact about a row rather
+than about a day, is built once per collection instead of once per day.
