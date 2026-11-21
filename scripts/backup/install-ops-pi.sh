@@ -13,33 +13,67 @@ bin="${POKOIN_OPS_DIST:-$HOME/pokoin-deploy/pokoin-ops}/aarch64/pokoin-ops"
 SSH=(ssh -o BatchMode=yes -o ConnectTimeout=20 "$HOST")
 die() { echo "install-ops-pi: $*" >&2; exit 1; }
 say() { echo "== $*"; }
-put() { scp -q -o BatchMode=yes "$1" "$HOST:$2"; }
+
+# Files go to a private directory (mktemp -d, mode 0700) under the ssh user's home, removed when the script ends.
+# The sha256 of every staged file is computed here and passed to the privileged step, which compares it and
+# installs only from the staged copy. The staged binary is never executed.
+stage=""
+digests=()
+stage_close() { [[ -z "$stage" ]] || "${SSH[@]}" "rm -rf -- $stage" >/dev/null 2>&1 || true; }
+stage_open() {
+  local dir
+  # shellcheck disable=SC2016  # the remote shell expands $HOME
+  dir="$("${SSH[@]}" 'mktemp -d "$HOME/.pokoin-stage.XXXXXXXX"')" || die "cannot create a staging directory on $HOST"
+  [[ "$dir" =~ ^/[A-Za-z0-9._/-]+$ ]] || die "unexpected staging path from $HOST"
+  stage="$dir"
+  trap stage_close EXIT
+}
+stage_put() { # <local file> [name in the staging directory]
+  local name="${2:-$(basename "$1")}"
+  scp -q -o BatchMode=yes "$1" "$HOST:$stage/$name"
+  digests+=("$name=$(sha256sum "$1" | cut -d' ' -f1)")
+}
+# run_remote: stdin is the step's script; it runs after install-ops-lib.sh in a bash on the Pi, with the
+# staging directory and the digests as arguments.
+run_remote() { { cat "$repo/scripts/backup/install-ops-lib.sh"; cat; } | "${SSH[@]}" "bash -s -- $stage ${digests[*]}"; }
 
 alerts() {
   [[ -x "$bin" ]] || die "build first: scripts/backup/build-pokoin-ops.sh"
   say "pokoin-ops → $HOST:/usr/local/bin"
-  put "$bin" /tmp/pokoin-ops.new
-  "${SSH[@]}" 'install -o root -g root -m 755 /tmp/pokoin-ops.new /usr/local/bin/pokoin-ops && rm /tmp/pokoin-ops.new && pokoin-ops --version'
+  stage_open
+  stage_put "$bin" pokoin-ops
+  for f in pokoin-notify@.service pokoin-sentinel.service pokoin-sentinel.timer pokoin-digest.service pokoin-digest.timer; do stage_put "$ops/$f"; done
+  stage_put "$ops/pokoin-rust-job@.service.d-alerts.conf" rust-job-alerts.conf
+  stage_put "$ops/pokoin-pi-watchdog.service.d-alerts.conf" watchdog-alerts.conf
+  # Verify the digests, check the mail keys in the host's alert configuration files, then install the binary.
+  run_remote <<'REMOTE' || die "install refused (see above); nothing was installed"
+set -euo pipefail
+stage="$1"; shift
+verify_staged "$stage" "$@"
+mail_keys_check
+install -o root -g root -m 755 "$stage/pokoin-ops" /usr/local/bin/pokoin-ops
+pokoin-ops --version
+REMOTE
   if ! "${SSH[@]}" test -f /etc/pokoin/alerts.env; then
     say "/etc/pokoin/alerts.env (Resend key from ~/.config/pokoin/uptime-mail.env)"
     key="$(grep -E '^(POKOIN_UPTIME_RESEND_API_KEY|RESEND_API_KEY)=' "$HOME/.config/pokoin/uptime-mail.env" | head -1 | cut -d= -f2- | tr -d "\"'")"
     [[ -n "$key" ]] || die "no Resend key in ~/.config/pokoin/uptime-mail.env"
     hc="$(grep -E '^POKOIN_HC_PING_KEY=' "$HOME/.config/pokoin/alerts.env" 2>/dev/null | cut -d= -f2- || true)"
-    printf 'RESEND_API_KEY=%s\nPOKOIN_HC_PING_KEY=%s\nPOKOIN_HC_SLUG_PREFIX=pi-\n' "$key" "$hc" \
+    # The two mail keys are written as comments, so they define nothing and cannot shadow a later file: the owner
+    # removes the # and fills them in (the install check refuses until then).
+    printf 'RESEND_API_KEY=%s\nPOKOIN_HC_PING_KEY=%s\nPOKOIN_HC_SLUG_PREFIX=pi-\n# Required: the only place the alert recipient comes from. Without it pokoin-ops refuses to send mail.\n# POKOIN_ALERT_MAIL_TO=\n# Required: the sender shown on alert mail (a verified sender for the mail provider).\n# POKOIN_ALERT_MAIL_FROM=\n' "$key" "$hc" \
       | "${SSH[@]}" 'umask 077; mkdir -p /etc/pokoin && cat > /etc/pokoin/alerts.env'
   fi
   say "units"
-  for f in pokoin-notify@.service pokoin-sentinel.service pokoin-sentinel.timer pokoin-digest.service pokoin-digest.timer; do put "$ops/$f" "/tmp/$f"; done
-  put "$ops/pokoin-rust-job@.service.d-alerts.conf" /tmp/rust-job-alerts.conf
-  put "$ops/pokoin-pi-watchdog.service.d-alerts.conf" /tmp/watchdog-alerts.conf
-  "${SSH[@]}" 'bash -s' <<'REMOTE'
+  run_remote <<'REMOTE' || die "install refused (see above); the units were not installed"
 set -euo pipefail
+stage="$1"; shift
+verify_staged "$stage" "$@"
 for f in pokoin-notify@.service pokoin-sentinel.service pokoin-sentinel.timer pokoin-digest.service pokoin-digest.timer; do
-  install -m 644 "/tmp/$f" "/etc/systemd/system/$f" && rm "/tmp/$f"
+  install -m 644 "$stage/$f" "/etc/systemd/system/$f"
 done
-install -D -m 644 /tmp/rust-job-alerts.conf /etc/systemd/system/pokoin-rust-job@.service.d/alerts.conf
-install -D -m 644 /tmp/watchdog-alerts.conf /etc/systemd/system/pokoin-pi-watchdog.service.d/alerts.conf
-rm /tmp/rust-job-alerts.conf /tmp/watchdog-alerts.conf
+install -D -m 644 "$stage/rust-job-alerts.conf" /etc/systemd/system/pokoin-rust-job@.service.d/alerts.conf
+install -D -m 644 "$stage/watchdog-alerts.conf" /etc/systemd/system/pokoin-pi-watchdog.service.d/alerts.conf
 systemctl daemon-reload
 pokoin-ops sentinel --role pi --dry-run
 systemctl enable --now pokoin-sentinel.timer pokoin-digest.timer
@@ -54,20 +88,22 @@ walg() {
   file "$walg_bin" | grep -q 'ARM aarch64' || die "$walg_bin is not an aarch64 binary"
   "${SSH[@]}" test -f /etc/pokoin/walg.env || die "create /etc/pokoin/walg.env on $HOST first (deploy/ops/pi/walg.env.example)"
   say "wal-g, spool and timers on $HOST"
-  put "$walg_bin" /tmp/wal-g.new
-  put "$repo/scripts/backup/walspool-archive.sh" /tmp/walspool-archive.sh
-  for f in pokoin-wal-push.service pokoin-wal-push.timer pokoin-basebackup.service pokoin-basebackup.timer; do put "$ops/$f" "/tmp/$f"; done
-  "${SSH[@]}" 'bash -s' <<'REMOTE'
+  stage_open
+  stage_put "$walg_bin" wal-g
+  stage_put "$repo/scripts/backup/walspool-archive.sh"
+  for f in pokoin-wal-push.service pokoin-wal-push.timer pokoin-basebackup.service pokoin-basebackup.timer; do stage_put "$ops/$f"; done
+  run_remote <<'REMOTE' || die "install refused (see above); nothing was installed"
 set -euo pipefail
-install -o root -g root -m 755 /tmp/wal-g.new /usr/local/bin/wal-g && rm /tmp/wal-g.new
+stage="$1"; shift
+verify_staged "$stage" "$@"
+install -o root -g root -m 755 "$stage/wal-g" /usr/local/bin/wal-g
 chmod 600 /etc/pokoin/walg.env
 # Spool next to PGDATA, on /srv/pokoin; written by the container's postgres (uid 70).
 install -d -o 70 -g 70 -m 750 /srv/pokoin/postgres/wal-spool
 install -d -o root -g root -m 755 /srv/pokoin/postgres/wal-spool-bin
-install -o root -g root -m 755 /tmp/walspool-archive.sh /srv/pokoin/postgres/wal-spool-bin/walspool-archive.sh
-rm /tmp/walspool-archive.sh
+install -o root -g root -m 755 "$stage/walspool-archive.sh" /srv/pokoin/postgres/wal-spool-bin/walspool-archive.sh
 for f in pokoin-wal-push.service pokoin-wal-push.timer pokoin-basebackup.service pokoin-basebackup.timer; do
-  install -m 644 "/tmp/$f" "/etc/systemd/system/$f" && rm "/tmp/$f"
+  install -m 644 "$stage/$f" "/etc/systemd/system/$f"
 done
 systemctl daemon-reload
 set -a; . /etc/pokoin/walg.env; set +a

@@ -16,14 +16,53 @@ cfg="$HOME/.config/pokoin"
 die() { echo "install-ops-nezopt: $*" >&2; exit 1; }
 say() { echo "== $*"; }
 
+# shellcheck source=scripts/backup/install-ops-lib.sh
+source "$repo/scripts/backup/install-ops-lib.sh"
+
+# Every installed file goes through a private staging directory (mktemp -d, mode 0700, under $HOME, removed
+# when the script ends): its sha256 is taken from the source, the copy is verified against it, and install
+# runs only on the verified copy. Staged files are never executed.
+stage=""
+stage_n=0
+stage_close() { [[ -z "$stage" ]] || rm -rf -- "$stage"; }
+stage_open() {
+  stage="$(mktemp -d "$HOME/.pokoin-stage.XXXXXXXX")"
+  trap stage_close EXIT
+}
+vinstall() { # the arguments of install(1): [-D] -m MODE SOURCE... DEST
+  local -a opts=() files=() staged=()
+  local dest d f want
+  while [[ $# -gt 1 ]]; do
+    case "$1" in
+      -D) opts+=("$1"); shift ;;
+      -m) opts+=("$1" "$2"); shift 2 ;;
+      *) files+=("$1"); shift ;;
+    esac
+  done
+  dest="$1"
+  [[ -n "$stage" ]] || stage_open
+  stage_n=$((stage_n + 1))
+  d="$stage/$stage_n"
+  mkdir -p "$d"
+  for f in "${files[@]}"; do
+    want="$(sha256sum "$f" | cut -d' ' -f1)"
+    cp "$f" "$d/$(basename "$f")"
+    verify_staged "$d" "$(basename "$f")=$want" || die "install refused (see above); $(basename "$f") was not installed"
+    staged+=("$d/$(basename "$f")")
+  done
+  install "${opts[@]}" "${staged[@]}" "$dest"
+}
+
 install_bin() {
   [[ -x "$bin" ]] || die "build first: scripts/backup/build-pokoin-ops.sh"
-  install -D -m 755 "$bin" "$HOME/.local/bin/pokoin-ops"
+  # The host must have a mail sender and recipient configured (shell test of the key names; no value is printed).
+  mail_keys_check || die "install refused: the mail config is incomplete (see above); nothing was installed"
+  vinstall -D -m 755 "$bin" "$HOME/.local/bin/pokoin-ops"
   "$HOME/.local/bin/pokoin-ops" --version
 }
 
 dropin() { # unit
-  install -D -m 644 "$ops/$1.d-alerts.conf" "$units/$1.d/alerts.conf"
+  vinstall -D -m 644 "$ops/$1.d-alerts.conf" "$units/$1.d/alerts.conf"
 }
 
 alerts() {
@@ -33,14 +72,14 @@ alerts() {
     ( umask 077; printf 'POKOIN_HC_PING_KEY=\nPOKOIN_HC_SLUG_PREFIX=nezopt-\n' >"$cfg/alerts.env" )
     say "wrote $cfg/alerts.env; add the healthchecks ping key when the project exists"
   fi
-  install -m 644 "$ops/pokoin-notify@.service" "$ops/pokoin-sentinel.service" "$ops/pokoin-sentinel.timer" "$ops/pokoin-digest.service" "$ops/pokoin-digest.timer" "$units/"
+  vinstall -m 644 "$ops/pokoin-notify@.service" "$ops/pokoin-sentinel.service" "$ops/pokoin-sentinel.timer" "$ops/pokoin-digest.service" "$ops/pokoin-digest.timer" "$units/"
   # OnFailure for every user service, the notifier's recursion guard, and the uptime-mail opt-out.
-  install -D -m 644 "$ops/service.d-90-alert.conf" "$units/service.d/90-alert.conf"
-  install -D -m 644 "$ops/pokoin-notify@.service.d-90-alert.conf" "$units/pokoin-notify@.service.d/90-alert.conf"
-  install -D -m 644 "$ops/pokoin-uptime-mail.service.d-90-alert.conf" "$units/pokoin-uptime-mail.service.d/90-alert.conf"
-  install -D -m 644 "$ops/pokoin-digest.service.d-90-alert.conf" "$units/pokoin-digest.service.d/90-alert.conf"
+  vinstall -D -m 644 "$ops/service.d-90-alert.conf" "$units/service.d/90-alert.conf"
+  vinstall -D -m 644 "$ops/pokoin-notify@.service.d-90-alert.conf" "$units/pokoin-notify@.service.d/90-alert.conf"
+  vinstall -D -m 644 "$ops/pokoin-uptime-mail.service.d-90-alert.conf" "$units/pokoin-uptime-mail.service.d/90-alert.conf"
+  vinstall -D -m 644 "$ops/pokoin-digest.service.d-90-alert.conf" "$units/pokoin-digest.service.d/90-alert.conf"
   if [[ ! -f "$cfg/expected-active.txt" ]]; then
-    install -m 644 "$ops/expected-active.txt.example" "$cfg/expected-active.txt"
+    vinstall -m 644 "$ops/expected-active.txt.example" "$cfg/expected-active.txt"
     say "wrote $cfg/expected-active.txt (units/containers the sentinel expects to be running)"
   fi
   for u in pokoin-all-cardtrader-daily.service pokoin-site-map-refresh.service pokoin-overflow-sync.service \
@@ -75,7 +114,7 @@ backups() {
   ssh -o BatchMode=yes pi-home true || die "nezopt cannot ssh to pi-home"
   for f in pokoin-pgdump.service pokoin-pgdump.timer pokoin-backup-mirror.service pokoin-backup-mirror.timer \
            pokoin-restore-test.service pokoin-restore-test.timer; do
-    install -m 644 "$ops/$f" "$units/"
+    vinstall -m 644 "$ops/$f" "$units/"
   done
   systemctl --user daemon-reload
   systemctl --user enable --now pokoin-pgdump.timer
@@ -95,12 +134,12 @@ PI_UNITS=(pokoin-overflow-sync.service poko-video-mirror.service pokoin-scan-pi-
 
 pi_follow() {
   install_bin
-  install -m 755 "$ops/pokoin-pi-up" "$ops/pokoin-pi-hook" "$HOME/.local/bin/"
-  install -m 644 "$ops/pokoin-pi-health.service" "$ops/pokoin-pi-health.timer" "$ops/pokoin-pi-cdn-tunnel.service" \
+  vinstall -m 755 "$ops/pokoin-pi-up" "$ops/pokoin-pi-hook" "$HOME/.local/bin/"
+  vinstall -m 644 "$ops/pokoin-pi-health.service" "$ops/pokoin-pi-health.timer" "$ops/pokoin-pi-cdn-tunnel.service" \
     "$ops/poko-video-mirror.service" "$ops/poko-video-mirror.timer" "$units/"
   for u in "${PI_UNITS[@]}"; do
-    install -D -m 644 "$ops/pi-dependent.d-60-pi-up.conf" "$units/$u.d/60-pi-up.conf"
-    install -D -m 644 "$ops/pi-dependent.d-70-backoff.conf" "$units/$u.d/70-backoff.conf"
+    vinstall -D -m 644 "$ops/pi-dependent.d-60-pi-up.conf" "$units/$u.d/60-pi-up.conf"
+    vinstall -D -m 644 "$ops/pi-dependent.d-70-backoff.conf" "$units/$u.d/70-backoff.conf"
   done
   # The sync script and manifest copies the units run (also rewrites the sync unit and timer).
   "$repo/scripts/nezopt-k3s.sh" install
@@ -114,7 +153,7 @@ pi_follow() {
 pi_hooks_live() {
   local t
   for t in pokoin-overflow-sync.timer poko-video-mirror.timer; do
-    install -D -m 644 "$ops/pi-hooks-live.timer.d-50-backstop.conf" "$units/$t.d/50-backstop.conf"
+    vinstall -D -m 644 "$ops/pi-hooks-live.timer.d-50-backstop.conf" "$units/$t.d/50-backstop.conf"
   done
   systemctl --user daemon-reload
   systemctl --user restart pokoin-overflow-sync.timer poko-video-mirror.timer
