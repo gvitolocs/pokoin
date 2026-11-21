@@ -120,6 +120,22 @@ env -i PATH="$STUBPATH" HOME="$t/home-with" POKOIN_CF_ENV_FILE="$t/home-without/
 [ "$rc" = 0 ] || fail "helper: POKOIN_CF_ENV_FILE did not change which file is read"
 ok "helper: POKOIN_CF_ENV_FILE picks the file"
 
+# a credentials file with a syntax error (unterminated quote): the helper still returns 0, prints nothing, the
+# caller keeps running, and its shell options are as before
+mkdir -p "$t/home-broken/.config/pokoin"
+printf 'CLOUDFLARE_API_TOKEN="%s\n' "$DUMMY" > "$t/home-broken/.config/pokoin/cloudflare.env"
+rc=0
+env -i PATH="$STUBPATH" HOME="$t/home-broken" bash -c '
+  set -eu
+  before="$-"
+  . "$1"
+  [ "$-" = "$before" ] || exit 11
+  echo caller-continued > "$2"' _ "$helper" "$t/continued" > "$t/a.out" 2> "$t/a.err" || rc=$?
+[ "$rc" = 0 ] || fail "helper: a syntax error in the file made the caller exit $rc"
+[ "$(cat "$t/continued" 2> /dev/null)" = caller-continued ] || fail "helper: the caller did not continue after a syntax error"
+[ ! -s "$t/a.out" ] && [ ! -s "$t/a.err" ] || fail "helper: a syntax error in the file printed output"
+ok "helper: syntax error in the file, returns 0, prints nothing, caller continues with its options unchanged"
+
 # ---- fixtures: a bare origin and clones holding copies of the scripts -------------------------------------
 make_origin() { # make_origin <name>: bare origin with `main` holding the files staged in $t/seed-<name>
   gitq init -q --bare -b main "$t/$1-origin.git"
@@ -209,6 +225,13 @@ for h in with without; do
   no_dummy_in "$t/err" "refresh-site-map.sh ($h file)"
   ok "env -i refresh-site-map.sh, file $h: wrangler saw $want"
 done
+
+run_in web "$t/home-with" LANE_WORKER=1 -- bash scripts/publish-web.sh --promote 99999999-8888-7777-6666-555555555555
+[ "$rc" = 0 ] || fail "publish-web.sh (LANE_WORKER set): exit $rc: $(cat "$t/err")"
+[ "$(first_token)" = token-unset ] || fail "publish-web.sh (LANE_WORKER set): first wrangler call saw $(first_token), wanted token-unset"
+no_dummy_in "$t/out" "publish-web.sh (LANE_WORKER set)"
+no_dummy_in "$t/err" "publish-web.sh (LANE_WORKER set)"
+ok "env -i publish-web.sh --promote, file with, LANE_WORKER set: wrangler saw token-unset"
 
 # ---- (c) the two scripts that read the names in inline python ---------------------------------------------
 for s in create-pokoin-news-tunnel install-hypemeter-a1; do
