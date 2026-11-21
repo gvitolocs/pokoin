@@ -48,6 +48,8 @@ mkdir -p "$t/clone/scripts"
 for f in publish-web.sh deploy-web.sh deploy-pokoin-rust.sh build-pokoin-rust-release.sh require-ci-green.sh require-free-space.sh ci-required-checks; do
   cp "$here/$f" "$t/clone/scripts/$f"
 done
+mkdir -p "$t/clone/scripts/lib"
+cp "$here/lib/load-cf-env.sh" "$t/clone/scripts/lib/load-cf-env.sh"
 # stubs for what the scripts run next
 cat > "$t/clone/scripts/build-web.sh" << 'STUB'
 #!/usr/bin/env bash

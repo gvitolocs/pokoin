@@ -21,6 +21,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/lib/load-cf-env.sh"
 
 if [ -n "${WRANGLER:-}" ]; then
   WRANGLER_CMD=("$WRANGLER")
