@@ -136,6 +136,48 @@ env -i PATH="$STUBPATH" HOME="$t/home-broken" bash -c '
 if ! { [ ! -s "$t/a.out" ] && [ ! -s "$t/a.err" ]; }; then fail "helper: a syntax error in the file printed output"; fi
 ok "helper: syntax error in the file, returns 0, prints nothing, caller continues with its options unchanged"
 
+# credentials files that change shell options: the helper puts every `set -o` option and every `shopt` option back,
+# and the caller sees no trace output afterwards. Each file is tried against several caller start states.
+# opt_case <name> <line of the credentials file...>
+opt_case() {
+  local name="$1" start rc
+  shift
+  mkdir -p "$t/home-opt-$name/.config/pokoin"
+  {
+    printf '%s\n' "$@"
+    printf 'CLOUDFLARE_API_TOKEN=%s\n' "$DUMMY"
+    printf 'CLOUDFLARE_ACCOUNT_ID=dummy-account-for-test\n'
+  } > "$t/home-opt-$name/.config/pokoin/cloudflare.env"
+  for start in "" "set -e" "set -eu" "set -euo pipefail" "shopt -s extglob"; do
+    rc=0
+    env -i PATH="$STUBPATH" HOME="$t/home-opt-$name" bash -c "$start"'
+      snap() { { set +o; shopt -p; } | md5sum; }
+      flags_before="$-"
+      before="$(snap)"
+      . "$1"
+      [ "$-" = "$flags_before" ] || exit 11
+      [ "$(snap)" = "$before" ] || exit 12
+      : probe-line-after-the-helper
+      [ -n "${CLOUDFLARE_API_TOKEN:-}" ] || exit 13' _ "$helper" > "$t/a.out" 2> "$t/a.err" || rc=$?
+    [ "$rc" = 0 ] || fail "helper: file with '$name', start '${start:-none}': exit $rc (11 flags, 12 options, 13 token)"
+    if ! { [ ! -s "$t/a.out" ] && [ ! -s "$t/a.err" ]; }; then fail "helper: file with '$name', start '${start:-none}': printed output"; fi
+  done
+  ok "helper: file with '$name': options as found, nothing printed, over five start states"
+}
+opt_case set-plus-e 'set +e'
+opt_case set-x 'set -x'
+opt_case set-x-ps4 "PS4='>>'" 'set -x'
+opt_case set-v 'set -v'
+opt_case pipefail-off 'set +o pipefail'
+opt_case shopt-on 'shopt -s nullglob extglob'
+
+# the stated limits: umask and the working directory the file sets stay set
+mkdir -p "$t/home-limits/.config/pokoin"
+printf 'umask 077\ncd /\nCLOUDFLARE_API_TOKEN=%s\n' "$DUMMY" > "$t/home-limits/.config/pokoin/cloudflare.env"
+out="$(cd "$t" && env -i PATH="$STUBPATH" HOME="$t/home-limits" bash -c 'umask 022; . "$1"; echo "$(umask) $PWD"' _ "$helper" 2> /dev/null)"
+[ "$out" = "0077 /" ] || fail "helper: umask and cd in the file were not left as the file set them: $out"
+ok "helper: umask and the working directory set by the file are not restored"
+
 # ---- fixtures: a bare origin and clones holding copies of the scripts -------------------------------------
 make_origin() { # make_origin <name>: bare origin with `main` holding the files staged in $t/seed-<name>
   gitq init -q --bare -b main "$t/$1-origin.git"
