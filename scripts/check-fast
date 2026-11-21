@@ -274,7 +274,7 @@ min_free=${POKOIN_CHECK_MIN_FREE_GB:-50}
 need_cargo=0
 if [ "$no_build" = 0 ] && [ "${#crates[@]}" -gt 0 ]; then need_cargo=1; fi
 if [ "$need_cargo" = 1 ]; then
-    mkdir -p "$CARGO_TARGET_DIR"
+    mkdir -p "$CARGO_TARGET_DIR" || die "cannot create the cargo target $CARGO_TARGET_DIR"
     free=$(df -BG --output=avail "$CARGO_TARGET_DIR" | tail -1 | tr -dc 0-9)
     if [ "$free" -lt "$min_free" ]; then
         die "only ${free} GB free where the cargo target lives ($CARGO_TARGET_DIR), the floor is ${min_free} GB (POKOIN_CHECK_MIN_FREE_GB): refusing to build. nezopt also holds production; see docs/RUST_RUNTIME.md, Build disk on nezopt."

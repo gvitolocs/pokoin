@@ -203,6 +203,8 @@ expect_row clippy SKIPPED "no crate touched: clippy SKIPPED"
 # 12. Two worktrees share one cargo target: each check builds its own sources, not what the other left behind.
 # Staleness is made deterministic with old mtimes: both worktrees' sources get `touch -d 2001-01-01`, older than the first
 # build, so without the crate-root touch cargo calls the shared build fresh and answers the second worktree from the first.
+# Replacing the `touch -- "${roots[@]}"` line in check-fast with `:` makes "failing change in the second worktree" and
+# "second worktree test FAIL" fail (deleting the line alone leaves an empty `then` and does not parse).
 reset
 share=$tmp/shared-target
 wta=$tmp/wt-a
@@ -248,6 +250,13 @@ mkdir -p "$share/.check-fast-last-worktree"
 run_wt "$wta"
 expect_rc 0 "unwritable marker: run still ends normally"
 expect_row test PASS "unwritable marker: step table printed, test PASS"
+
+# 13b. A cargo target that cannot be created is refused with a message (exit 2), not a silent exit 1.
+printf 'x\n' >"$tmp/not-a-dir"
+rc=0
+(cd "$wta" && POKOIN_CHECK_TARGET=$tmp/not-a-dir/target bash scripts/check-fast --base HEAD) >"$out" 2>&1 || rc=$?
+expect_rc 2 "uncreatable target refuses to build"
+if grep -q 'cannot create the cargo target' "$out"; then ok "uncreatable target message"; else bad "no uncreatable target message"; fi
 
 # 14. Two runs started together on one target are serialized by the target lock: exactly one of them waits, both end
 # correctly. A cargo stub that sleeps keeps the lock holder busy long enough that the other run always finds it taken.
