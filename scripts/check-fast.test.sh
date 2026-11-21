@@ -249,6 +249,49 @@ run_wt "$wta"
 expect_rc 0 "unwritable marker: run still ends normally"
 expect_row test PASS "unwritable marker: step table printed, test PASS"
 
+# 14. Two runs started together on one target are serialized by the target lock: exactly one of them waits, both end
+# correctly. A cargo stub that sleeps keeps the lock holder busy long enough that the other run always finds it taken.
+if command -v flock >/dev/null 2>&1; then
+    share=$tmp/shared-target-lock
+    slow=$tmp/slowcargo
+    mkdir -p "$slow"
+    printf '#!/usr/bin/env bash\nsleep 2\nexec "%s" "$@"\n' "$(command -v cargo)" >"$slow/cargo"
+    chmod +x "$slow/cargo"
+    outa=$tmp/out-a.txt
+    outb=$tmp/out-b.txt
+    rca=0
+    rcb=0
+    (cd "$wta" && PATH=$slow:$PATH POKOIN_CHECK_TARGET=$share bash scripts/check-fast --base HEAD) >"$outa" 2>&1 &
+    pida=$!
+    (cd "$wtb" && PATH=$slow:$PATH POKOIN_CHECK_TARGET=$share bash scripts/check-fast --base HEAD) >"$outb" 2>&1 &
+    pidb=$!
+    wait "$pida" || rca=$?
+    wait "$pidb" || rcb=$?
+    waits=$(cat "$outa" "$outb" | grep -c 'waiting for the target lock' || true)
+    if [ "$rca" = 0 ] && [ "$rcb" = 0 ]; then ok "overlapping runs: both exit 0"; else bad "overlapping runs: exits $rca and $rcb"; fi
+    if [ "$waits" = 1 ]; then ok "overlapping runs: exactly one waits for the target lock"; else out=$outa; bad "overlapping runs: $waits waiting lines"; fi
+    if grep -Eq '^test +PASS' "$outa" && grep -Eq '^test +PASS' "$outb"; then ok "overlapping runs: both test steps PASS"; else out=$outa; bad "overlapping runs: a test step did not PASS"; fi
+
+    # 15. A run that cannot get the lock in time exits 2 with a message and prints no step table.
+    ready=$tmp/lock-ready
+    (
+        exec 9>"$share/.check-fast.lock"
+        flock 9
+        : >"$ready"
+        sleep 4
+    ) &
+    holder=$!
+    for _ in $(seq 1 50); do [ -e "$ready" ] && break; sleep 0.1; done
+    rc=0
+    (cd "$wta" && POKOIN_CHECK_LOCK_WAIT=1 POKOIN_CHECK_TARGET=$share bash scripts/check-fast --base HEAD) >"$out" 2>&1 || rc=$?
+    wait "$holder" || true
+    expect_rc 2 "lock wait timeout"
+    if grep -q 'gave up after 1s waiting for the target lock' "$out"; then ok "lock wait timeout message"; else bad "no lock wait timeout message"; fi
+    if grep -q '^step ' "$out"; then bad "lock wait timeout: a step table was printed"; else ok "lock wait timeout: no step table"; fi
+else
+    echo "skip - flock is not installed: target lock untested"
+fi
+
 echo
 echo "check-fast.test: $pass passed, $fail failed"
 [ "$fail" = 0 ]

@@ -281,6 +281,32 @@ if [ "$need_cargo" = 1 ]; then
     fi
 fi
 
+# The touch closes the sequential case: a run after another run on the same target rebuilds its own crates. It does not
+# close the overlapping case, because cargo takes and releases the target lock once per invocation and a later invocation
+# of one run could see the other run's newer artifacts. So hold one lock on the target from here to the end of the last
+# cargo step; a second run waits for it.
+lockfd=""
+acquire_target_lock() {
+    local lock=$CARGO_TARGET_DIR/.check-fast.lock wait=${POKOIN_CHECK_LOCK_WAIT:-900}
+    if ! command -v flock >/dev/null 2>&1; then
+        echo "check-fast: flock is not installed; overlapping runs on this target are not serialized" >&2
+        return 0
+    fi
+    if ! { exec {lockfd}>"$lock"; } 2>/dev/null; then
+        lockfd=""
+        echo "check-fast: cannot open $lock; overlapping runs on this target are not serialized" >&2
+        return 0
+    fi
+    if ! flock -n "$lockfd"; then
+        echo "check-fast: waiting for the target lock ($lock), held by another run" >&2
+        flock -w "$wait" "$lockfd" || die "gave up after ${wait}s waiting for the target lock ($lock)"
+    fi
+}
+release_target_lock() {
+    if [ -n "$lockfd" ]; then exec {lockfd}>&-; lockfd=""; fi
+}
+if [ "$need_cargo" = 1 ] && command -v cargo >/dev/null 2>&1; then acquire_target_lock; fi
+
 # The target is shared by every worktree, and cargo judges a crate fresh from file mtimes. Touch this tree's crate roots
 # (tracked src/lib.rs, src/main.rs and build.rs of every crate under the Rust workspace) so cargo rebuilds this tree's
 # own crates whatever the target last saw, and note which worktree used the target last. Content is never edited. This
@@ -444,6 +470,7 @@ if [ "$do_db" = 1 ]; then
 fi
 run_step clippy step_clippy
 run_step test step_test
+release_target_lock
 run_step shellcheck step_shellcheck
 run_step actionlint step_actionlint
 run_step gitleaks step_gitleaks
