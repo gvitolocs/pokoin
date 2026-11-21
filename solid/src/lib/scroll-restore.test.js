@@ -106,3 +106,23 @@ test('parked writes of two different pages do not replace each other', async () 
     assert.equal(entry('solid:3').view.shown, 120);
   });
 });
+
+test('leaving the page stores the view that was on screen, not the last committed one', async () => {
+  const { win, commit } = fakeBrowser('/marketplace/portfolio', 4);
+  await inBrowser(win, async () => {
+    const { registerViewWriter } = await freshRestore();
+    let view = { shown: 40, query: '' };
+    const done = registerViewWriter('/marketplace/portfolio', () => view);
+    win.scrollY = 1500;
+    win.fire('scroll');
+    view = { shown: 200, query: '' };
+    win.fire('pointerdown');
+    assert.equal(entry('solid:4').view?.shown, 200);
+    assert.equal(entry('solid:4').y, 1500);
+    // The next page has no writer of its own: it must not inherit this one's.
+    commit('/marketplace/explore', 5);
+    win.fire('scroll');
+    assert.equal(entry('solid:5')?.view, undefined);
+    done();
+  });
+});

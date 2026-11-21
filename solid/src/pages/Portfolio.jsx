@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, Match, onSettled, Show, Switch, untrack } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, Match, onCleanup, onSettled, Show, Switch, untrack } from 'solid-js';
 import { useLocation, useParams } from '@solidjs/router';
 import { cardHref, fetchPortfolio, formatPkn, imageSrc } from '@market/api.js';
 import { game, gameHref } from '@market/game.js';
@@ -134,6 +134,8 @@ function PortfolioList() {
   createEffect(() => ({ shown: shown(), query: query() }), (view) => {
     rememberView(href, view);
   });
+  // A view that changed during the leaving navigation still reaches this entry.
+  onCleanup(registerViewWriter(href, () => ({ shown: shown(), query: query() })));
 
   createEffect(
     () => (catalog() ? [ranked().holdings.length, query()] : null),
