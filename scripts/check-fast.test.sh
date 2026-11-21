@@ -200,6 +200,47 @@ run_check
 expect_rc 0 "change outside pokoin-rust"
 expect_row clippy SKIPPED "no crate touched: clippy SKIPPED"
 
+# 12. Two worktrees share one cargo target: each check builds its own sources, not what the other left behind.
+# Source mtimes in both worktrees are set older than the first build (touch -d), so without the crate-root touch cargo
+# would call the shared build fresh and answer the second worktree from the first one's artifacts.
+reset
+share=$tmp/shared-target
+wta=$tmp/wt-a
+wtb=$tmp/wt-b
+(cd "$repo" && git worktree add -q -b wt-a "$wta" HEAD && git worktree add -q -b wt-b "$wtb" HEAD)
+old_lib=pokoin-rust/crates/demo/src/lib.rs
+touch -d '2001-01-01 00:00:00' "$wta/$old_lib" "$wtb/$old_lib"
+# run_wt DIR [args...]: check-fast of the copy in worktree DIR against the shared target.
+run_wt() {
+    rc=0
+    (cd "$1" && POKOIN_CHECK_TARGET=$share bash scripts/check-fast --base HEAD "${@:2}") >"$out" 2>&1 || rc=$?
+}
+notice='the target was last used by'
+printf '// touched\n' >>"$wta/$old_lib"
+touch -d '2001-01-01 00:00:00' "$wta/$old_lib"
+run_wt "$wta"
+expect_rc 0 "shared target: first worktree"
+expect_row test PASS "shared target: first worktree test PASS"
+if [ -d "$share/debug" ]; then ok "shared target: populated by the first run"; else bad "shared target: not populated"; fi
+if grep -q "$notice" "$out"; then bad "shared target: notice on a fresh target"; else ok "shared target: no notice on a fresh target"; fi
+run_wt "$wta"
+expect_rc 0 "shared target: same worktree again"
+if grep -q "$notice" "$out"; then bad "shared target: notice for the same worktree"; else ok "shared target: no notice for the same worktree"; fi
+# Second worktree, failing source change with an old mtime.
+sed -i 's/^    1$/    9/' "$wtb/$old_lib"
+touch -d '2001-01-01 00:00:00' "$wtb/$old_lib"
+run_wt "$wtb"
+expect_rc 1 "shared target: failing change in the second worktree"
+expect_row test FAIL "shared target: second worktree test FAIL"
+if grep -qF "$notice $(git -C "$wta" rev-parse --show-toplevel);" "$out"; then ok "shared target: notice names the previous worktree"; else bad "shared target: no notice naming the previous worktree"; fi
+if [ "$(grep -c "$notice" "$out")" = 1 ]; then ok "shared target: exactly one notice line"; else bad "shared target: notice is not a single line"; fi
+sed -i 's/^    9$/    1/' "$wtb/$old_lib"
+printf '// touched\n' >>"$wtb/$old_lib"
+touch -d '2001-01-01 00:00:00' "$wtb/$old_lib"
+run_wt "$wtb"
+expect_rc 0 "shared target: change reverted in the second worktree"
+if grep -q "$notice" "$out"; then bad "shared target: notice for the same worktree after revert"; else ok "shared target: no notice for the same worktree after revert"; fi
+
 echo
 echo "check-fast.test: $pass passed, $fail failed"
 [ "$fail" = 0 ]
