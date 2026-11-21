@@ -107,7 +107,7 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
         {
             Ok(expansions) => expansions,
             Err(error) => {
-                tracing::error!(route = "expansion-page", step = "expansion-list", %error, "marketplace-expansion-page failed");
+                tracing::error!(route = "expansion-page", step = "expansion-list", game = %game, slug = %slug, %error, "marketplace-expansion-page failed");
                 return support::node_error_response(&error, "Marketplace expansion page failed.");
             }
         };
@@ -135,18 +135,19 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
         match react_sql::read_expansion_by_slug(&pool, is_pokemon, &slug).await {
             Ok(expansion) => expansion,
             Err(error) => {
-                tracing::warn!(route = "expansion-page", step = "expansion-by-slug", %error, "marketplace-expansion-page fell back to the version-set lookup");
+                tracing::warn!(route = "expansion-page", step = "expansion-by-slug", game = %game, slug = %slug, %error, "marketplace-expansion-page fell back to the version-set lookup");
                 None
             }
         }
     } else {
         None
     };
-    if expansion.is_none() {
+    if expansion.is_none() && is_pokemon {
+        // marketplace_card_versions exists in the Pokémon catalog only, so a satellite must not fall back to it.
         let listed = match expansions::rows_for_expansions(&pool, Some(&slug), 1).await {
             Ok(listed) => listed,
             Err(error) => {
-                tracing::error!(route = "expansion-page", step = "expansion-lookup", %error, "marketplace-expansion-page failed");
+                tracing::error!(route = "expansion-page", step = "expansion-lookup", game = %game, slug = %slug, %error, "marketplace-expansion-page failed");
                 return support::node_error_response(&error, "Marketplace expansion page failed.");
             }
         };
@@ -180,7 +181,7 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
         match read_set_cards(&pool, is_pokemon, &expansion_name_value, limit + 1, offset).await {
             Ok(rows) => rows,
             Err(error) => {
-                tracing::error!(route = "expansion-page", step = "set-cards", %error, "marketplace-expansion-page failed");
+                tracing::error!(route = "expansion-page", step = "set-cards", game = %game, slug = %slug, %error, "marketplace-expansion-page failed");
                 return support::node_error_response(&error, "Marketplace expansion page failed.");
             }
         }
@@ -194,7 +195,7 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
         match card_versions::rows_for_versions(&pool, &args).await {
             Ok(rows) => rows,
             Err(error) => {
-                tracing::error!(route = "expansion-page", step = "product-cards", %error, "marketplace-expansion-page failed");
+                tracing::error!(route = "expansion-page", step = "product-cards", game = %game, slug = %slug, %error, "marketplace-expansion-page failed");
                 return support::node_error_response(&error, "Marketplace expansion page failed.");
             }
         }
@@ -238,7 +239,7 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
             Ok(stored) if stored >= 0 => total = stored as f64,
             Ok(_unknown) => {}
             Err(error) => {
-                tracing::warn!(route = "expansion-page", step = "catalog-card-count", %error, "marketplace-expansion-page kept the expansion's own cardCount");
+                tracing::warn!(route = "expansion-page", step = "catalog-card-count", game = %game, slug = %slug, %error, "marketplace-expansion-page kept the expansion's own cardCount");
             }
         }
     }
