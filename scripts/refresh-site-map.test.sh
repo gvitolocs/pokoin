@@ -2,6 +2,9 @@
 # Run: bash scripts/refresh-site-map.test.sh
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
+t="$(mktemp -d "${TMPDIR:-/tmp}/refresh-site-map-test.XXXXXX")"
+trap 'rm -rf "$t"' EXIT
+export POKOIN_CF_ENV_FILE="$t/no-such-cloudflare.env"
 # shellcheck source=/dev/null
 source "$here/refresh-site-map.sh"
 

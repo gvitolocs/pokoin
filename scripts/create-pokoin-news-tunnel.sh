@@ -2,6 +2,13 @@
 # Create or reuse the named Cloudflare tunnel pokoin-news. Writes id+token under
 # ~/secrets/deploy/hypemeter (not git). Does not change news.pokoin.com DNS.
 set -euo pipefail
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/lib/load-cf-env.sh"
+if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ] \
+  || { [ -z "${CLOUDFLARE_API_TOKEN:-}" ] && { [ -z "${CLOUDFLARE_EMAIL:-}" ] || [ -z "${CLOUDFLARE_API_KEY:-}" ]; }; }; then
+  echo "create-pokoin-news-tunnel: set CLOUDFLARE_ACCOUNT_ID and either CLOUDFLARE_API_TOKEN or both CLOUDFLARE_EMAIL and CLOUDFLARE_API_KEY (looked in ${POKOIN_CF_ENV_FILE:-${HOME:-~}/.config/pokoin/cloudflare.env})" >&2
+  exit 1
+fi
 python3 - <<'PY'
 import json, os, pathlib, urllib.error, urllib.request
 

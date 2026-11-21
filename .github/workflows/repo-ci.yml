@@ -29,6 +29,8 @@ jobs:
         run: bash scripts/require-ci-green.test.sh
       - name: deploy entry points refuse on red CI
         run: bash scripts/deploy-gate-callers.test.sh
+      - name: Cloudflare credential loader tests
+        run: bash scripts/load-cf-env.test.sh
       - name: gitleaks for the pre-push hook tests
         # scripts/pre-push-hook.test.sh runs the hook's secret scan with real gitleaks and exits 2 without it: a scan
         # that silently skipped itself is never a pass. The same pinned 8.30.1 as .github/workflows/secrets-ci.yml.
@@ -119,7 +121,7 @@ jobs:
           fi
           bash scripts/check-features.sh --base "$base"
       - name: shellcheck
-        run: shellcheck scripts/require-ci-green.sh scripts/require-ci-green.test.sh scripts/deploy-gate-callers.test.sh scripts/run-flow-tests.sh scripts/run-flow-tests.test.sh scripts/rust-lints-check.sh scripts/rust-lints-check.test.sh scripts/flow-test-workers-check.sh scripts/flow-test-workers-check.test.sh scripts/check-features.sh scripts/check-features.test.sh scripts/check-migrations.sh scripts/check-migrations.test.sh scripts/k3s-manifest-check.sh scripts/k3s-manifest-check.test.sh .githooks/pre-push scripts/pre-push-hook.test.sh scripts/marketplace-home-purge.sh scripts/marketplace-home-purge.test.sh
+        run: shellcheck scripts/require-ci-green.sh scripts/require-ci-green.test.sh scripts/deploy-gate-callers.test.sh scripts/run-flow-tests.sh scripts/run-flow-tests.test.sh scripts/rust-lints-check.sh scripts/rust-lints-check.test.sh scripts/flow-test-workers-check.sh scripts/flow-test-workers-check.test.sh scripts/check-features.sh scripts/check-features.test.sh scripts/check-migrations.sh scripts/check-migrations.test.sh scripts/k3s-manifest-check.sh scripts/k3s-manifest-check.test.sh .githooks/pre-push scripts/pre-push-hook.test.sh scripts/marketplace-home-purge.sh scripts/marketplace-home-purge.test.sh scripts/lib/load-cf-env.sh scripts/with-cf-env scripts/load-cf-env.test.sh
 
   repo-gate:
     # Add later jobs to `needs`; the loop below checks every job listed there.

@@ -20,6 +20,8 @@ flock 9
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/lib/load-cf-env.sh"
 
 # The newsroom service and SSH sessions have no global wrangler on PATH; a
 # bare `wrangler` call failed there with "command not found". Prefer an

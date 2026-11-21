@@ -16,6 +16,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 real="$here/testdata/check-runs/main-b757cc1a.json"
 t="$(mktemp -d)"
 trap 'rm -rf "$t"' EXIT
+export POKOIN_CF_ENV_FILE="$t/no-such-cloudflare.env"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -48,6 +49,8 @@ mkdir -p "$t/clone/scripts"
 for f in publish-web.sh deploy-web.sh deploy-pokoin-rust.sh build-pokoin-rust-release.sh require-ci-green.sh require-free-space.sh ci-required-checks; do
   cp "$here/$f" "$t/clone/scripts/$f"
 done
+mkdir -p "$t/clone/scripts/lib"
+cp "$here/lib/load-cf-env.sh" "$t/clone/scripts/lib/load-cf-env.sh"
 # stubs for what the scripts run next
 cat > "$t/clone/scripts/build-web.sh" << 'STUB'
 #!/usr/bin/env bash

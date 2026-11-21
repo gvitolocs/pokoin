@@ -4,6 +4,9 @@
 # Does not terminate the old VM or delete volumes.
 set -euo pipefail
 
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/lib/load-cf-env.sh"
+
 TEN='ocid1.tenancy.oc1..aaaaaaaak3zcl33wj3lazht44cwa5rhm7uazxlqok22tfdfngrwtkoni67ia'
 CF_ZONE='c34b54f800c8dce5511d47c552a33e46'
 CF_RECORD='5b9cb6224aeb351dafc0a87f7e8c99ba'

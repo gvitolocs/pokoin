@@ -10,6 +10,9 @@
 # refuses to run in the canonical checkout or any other worktree.
 set -euo pipefail
 
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/lib/load-cf-env.sh"
+
 die() { echo "refresh-site-map: $*" >&2; exit 1; }
 say() { echo "== $(date -u +%FT%TZ) $*"; }
 

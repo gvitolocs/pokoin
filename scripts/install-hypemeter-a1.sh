@@ -2,6 +2,14 @@
 # Install Hypemeter + cloudflared on RUNNING pokoin-a1. Does not migrate marketplace.
 set -euo pipefail
 
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/lib/load-cf-env.sh"
+if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ] \
+  || { [ -z "${CLOUDFLARE_API_TOKEN:-}" ] && { [ -z "${CLOUDFLARE_EMAIL:-}" ] || [ -z "${CLOUDFLARE_API_KEY:-}" ]; }; }; then
+  echo "install-hypemeter-a1: set CLOUDFLARE_ACCOUNT_ID and either CLOUDFLARE_API_TOKEN or both CLOUDFLARE_EMAIL and CLOUDFLARE_API_KEY (looked in ${POKOIN_CF_ENV_FILE:-${HOME:-~}/.config/pokoin/cloudflare.env})" >&2
+  exit 1
+fi
+
 TEN='ocid1.tenancy.oc1..aaaaaaaak3zcl33wj3lazht44cwa5rhm7uazxlqok22tfdfngrwtkoni67ia'
 VCN='ocid1.vcn.oc1.eu-frankfurt-1.amaaaaaaswfd3oiat73cnguklj4frboo6u76htuixsiwyypgap6hwschmfna'
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
