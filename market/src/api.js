@@ -1886,13 +1886,16 @@ export function listSnapshotUrls(kind, key, options = {}) {
   return [listSnapshotPath(kind, key, dictId), plain];
 }
 
-/** First URL that resolves. An abort does not fall through. */
+/** First URL that resolves. An abort does not fall through, and neither does a
+ * `{"missing":true}` answer: the plain URL is the same key, so it is not there
+ * either. A dictionary failure is a different answer and does retry. */
 export async function readSnapshotUrls(urls, read) {
   for (let i = 0; i < urls.length; i += 1) {
     try {
       return await read(urls[i]);
     } catch (err) {
       if (err?.name === 'AbortError' || i + 1 >= urls.length) throw err;
+      if (err?.body?.missing === true) throw err;
     }
   }
   return null;
@@ -1905,7 +1908,8 @@ export async function readSnapshotUrls(urls, read) {
  * pre-compressed with brotli 11. Read local-first (getJsonLocal options).
  * Null when that list is not built yet; callers then use the live routes.
  * With the dictionary flag on, Chromium tries `&dict=<id>` first and, if that
- * fetch fails, once more without it.
+ * fetch fails for a dictionary reason, once more without it. An answer of
+ * `{"missing":true}` is the list itself being absent, so it is not asked twice.
  */
 export function fetchListSnapshot(kind, key, options = {}) {
   const urls = listSnapshotUrls(kind, key);
