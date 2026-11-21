@@ -6,7 +6,7 @@ import { bindRailControls, stepRail } from '@market/rail-scroll.js';
 import CardArt from '../components/CardArt.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
 import DumpNav from '../components/DumpNav.jsx';
-import { rememberView, restoredView } from '../lib/scroll-restore.js';
+import { rememberView, restoreScroll, restoredView } from '../lib/scroll-restore.js';
 
 const PAGE = 40;
 
@@ -92,15 +92,25 @@ function PortfolioList() {
   const [query, setQuery] = createSignal(String(restored?.query || ''));
   const [shown, setShown] = createSignal(Number(restored?.shown) > PAGE ? Number(restored.shown) : PAGE);
   let sentinel;
+  let stopRestore = () => {};
   const displayed = createCountUp(() => catalog()?.totals?.pkn || 0);
   document.title = 'Portfolio · Pokoin';
 
   onSettled(() => {
     let cancelled = false;
     fetchPortfolio()
-      .then((data) => { if (!cancelled) setCatalog(() => data); })
+      .then((data) => {
+        if (cancelled) return;
+        setCatalog(() => data);
+        queueMicrotask(() => {
+          if (!cancelled) stopRestore = restoreScroll(href);
+        });
+      })
       .catch((err) => { if (!cancelled) setError(err.message || 'Portfolio failed.'); });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      stopRestore();
+    };
   });
 
   const ranked = createMemo(() => {
