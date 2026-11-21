@@ -155,7 +155,7 @@ expect_row test FAIL "failing test: test FAIL"
 reset
 stub=$tmp/stubbin
 mkdir -p "$stub"
-for t in git bash python3 awk sed head grep cat dirname mktemp rm df tail tr seq sleep diff tar mkdir cp env; do
+for t in git bash python3 awk sed head grep cat dirname mktemp rm df tail tr seq sleep diff tar mkdir cp env touch; do
     ln -sf "$(command -v "$t")" "$stub/$t"
 done
 printf '#!/usr/bin/env bash\necho hi\n' >"$repo/scripts/new.sh"
@@ -199,6 +199,121 @@ echo note >"$repo/NOTE.md"
 run_check
 expect_rc 0 "change outside pokoin-rust"
 expect_row clippy SKIPPED "no crate touched: clippy SKIPPED"
+
+# 12. Two worktrees share one cargo target: each check builds its own sources, not what the other left behind.
+# Staleness is made deterministic with old mtimes: both worktrees' sources get `touch -d 2001-01-01`, older than the first
+# build, so without the crate-root touch cargo calls the shared build fresh and answers the second worktree from the first.
+# Replacing the `touch -- "${roots[@]}"` line in check-fast with `:` makes "failing change in the second worktree" and
+# "second worktree test FAIL" fail (deleting the line alone leaves an empty `then` and does not parse).
+reset
+share=$tmp/shared-target
+wta=$tmp/wt-a
+wtb=$tmp/wt-b
+(cd "$repo" && git worktree add -q -b wt-a "$wta" HEAD && git worktree add -q -b wt-b "$wtb" HEAD)
+old_lib=pokoin-rust/crates/demo/src/lib.rs
+touch -d '2001-01-01 00:00:00' "$wta/$old_lib" "$wtb/$old_lib"
+# run_wt DIR [args...]: check-fast of the copy in worktree DIR against the shared target.
+run_wt() {
+    rc=0
+    (cd "$1" && POKOIN_CHECK_TARGET=$share bash scripts/check-fast --base HEAD "${@:2}") >"$out" 2>&1 || rc=$?
+}
+notice='the target was last used by'
+printf '// touched\n' >>"$wta/$old_lib"
+touch -d '2001-01-01 00:00:00' "$wta/$old_lib"
+run_wt "$wta"
+expect_rc 0 "shared target: first worktree"
+expect_row test PASS "shared target: first worktree test PASS"
+if [ -d "$share/debug" ]; then ok "shared target: populated by the first run"; else bad "shared target: not populated"; fi
+if grep -q "$notice" "$out"; then bad "shared target: notice on a fresh target"; else ok "shared target: no notice on a fresh target"; fi
+run_wt "$wta"
+expect_rc 0 "shared target: same worktree again"
+if grep -q "$notice" "$out"; then bad "shared target: notice for the same worktree"; else ok "shared target: no notice for the same worktree"; fi
+# Second worktree, failing source change with an old mtime.
+sed -i 's/^    1$/    9/' "$wtb/$old_lib"
+touch -d '2001-01-01 00:00:00' "$wtb/$old_lib"
+run_wt "$wtb"
+expect_rc 1 "shared target: failing change in the second worktree"
+expect_row test FAIL "shared target: second worktree test FAIL"
+if grep -qF "$notice $(git -C "$wta" rev-parse --show-toplevel);" "$out"; then ok "shared target: notice names the previous worktree"; else bad "shared target: no notice naming the previous worktree"; fi
+if [ "$(grep -c "$notice" "$out")" = 1 ]; then ok "shared target: exactly one notice line"; else bad "shared target: notice is not a single line"; fi
+sed -i 's/^    9$/    1/' "$wtb/$old_lib"
+printf '// touched\n' >>"$wtb/$old_lib"
+touch -d '2001-01-01 00:00:00' "$wtb/$old_lib"
+run_wt "$wtb"
+expect_rc 0 "shared target: change reverted in the second worktree"
+if grep -q "$notice" "$out"; then bad "shared target: notice for the same worktree after revert"; else ok "shared target: no notice for the same worktree after revert"; fi
+
+
+# 13. A marker that cannot be written (here: a directory in its place) never stops the run: the step table still prints.
+share=$tmp/shared-target-marker
+mkdir -p "$share/.check-fast-last-worktree"
+run_wt "$wta"
+expect_rc 0 "unwritable marker: run still ends normally"
+expect_row test PASS "unwritable marker: step table printed, test PASS"
+
+# 13b. A cargo target that cannot be created is refused with a message (exit 2), not a silent exit 1.
+printf 'x\n' >"$tmp/not-a-dir"
+rc=0
+(cd "$wta" && POKOIN_CHECK_TARGET=$tmp/not-a-dir/target bash scripts/check-fast --base HEAD) >"$out" 2>&1 || rc=$?
+expect_rc 2 "uncreatable target refuses to build"
+if grep -q 'cannot create the cargo target' "$out"; then ok "uncreatable target message"; else bad "no uncreatable target message"; fi
+
+# 14. Two runs started together on one target are serialized by the target lock: exactly one of them waits, both end
+# correctly. A cargo stub that sleeps keeps the lock holder busy long enough that the other run always finds it taken.
+if command -v flock >/dev/null 2>&1; then
+    share=$tmp/shared-target-lock
+    slow=$tmp/slowcargo
+    mkdir -p "$slow"
+    printf '#!/usr/bin/env bash\nsleep 2\nexec "%s" "$@"\n' "$(command -v cargo)" >"$slow/cargo"
+    chmod +x "$slow/cargo"
+    outa=$tmp/out-a.txt
+    outb=$tmp/out-b.txt
+    rca=0
+    rcb=0
+    (cd "$wta" && PATH=$slow:$PATH POKOIN_CHECK_TARGET=$share bash scripts/check-fast --base HEAD) >"$outa" 2>&1 &
+    pida=$!
+    (cd "$wtb" && PATH=$slow:$PATH POKOIN_CHECK_TARGET=$share bash scripts/check-fast --base HEAD) >"$outb" 2>&1 &
+    pidb=$!
+    wait "$pida" || rca=$?
+    wait "$pidb" || rcb=$?
+    waits=$(cat "$outa" "$outb" | grep -c 'waiting for the target lock' || true)
+    if [ "$rca" = 0 ] && [ "$rcb" = 0 ]; then ok "overlapping runs: both exit 0"; else bad "overlapping runs: exits $rca and $rcb"; fi
+    if [ "$waits" = 1 ]; then ok "overlapping runs: exactly one waits for the target lock"; else out=$outa; bad "overlapping runs: $waits waiting lines"; fi
+    if grep -Eq '^test +PASS' "$outa" && grep -Eq '^test +PASS' "$outb"; then ok "overlapping runs: both test steps PASS"; else out=$outa; bad "overlapping runs: a test step did not PASS"; fi
+
+    # 15. A run that cannot get the lock in time exits 2 with a message and prints no step table.
+    ready=$tmp/lock-ready
+    (
+        exec 9>"$share/.check-fast.lock"
+        flock 9
+        printf '%s\n' /held/by/another/worktree >"$share/.check-fast.lock"
+        : >"$ready"
+        sleep 4
+    ) &
+    holder=$!
+    for _ in $(seq 1 50); do [ -e "$ready" ] && break; sleep 0.1; done
+    rc=0
+    (cd "$wta" && POKOIN_CHECK_LOCK_WAIT=1 POKOIN_CHECK_TARGET=$share bash scripts/check-fast --base HEAD) >"$out" 2>&1 || rc=$?
+    wait "$holder" || true
+    expect_rc 2 "lock wait timeout"
+    if grep -q 'gave up after 1s waiting for the target lock' "$out"; then ok "lock wait timeout message"; else bad "no lock wait timeout message"; fi
+    if grep -q 'held by /held/by/another/worktree; re-run later' "$out"; then ok "lock wait timeout names the holder"; else bad "lock wait timeout does not name the holder"; fi
+    if grep -q '^step ' "$out"; then bad "lock wait timeout: a step table was printed"; else ok "lock wait timeout: no step table"; fi
+
+    # 16. A step that leaves a detached child running does not keep the lock: once check-fast has exited, another process
+    # can take the lock at once. The cargo stub starts a detached sleeper that would inherit the lock descriptor.
+    share=$tmp/shared-target-detached
+    det=$tmp/detachedcargo
+    mkdir -p "$det"
+    printf '#!/usr/bin/env bash\nsetsid sleep 8 </dev/null >/dev/null 2>&1 &\nexec "%s" "$@"\n' "$(command -v cargo)" >"$det/cargo"
+    chmod +x "$det/cargo"
+    rc=0
+    (cd "$wta" && PATH=$det:$PATH POKOIN_CHECK_TARGET=$share bash scripts/check-fast --base HEAD) >"$out" 2>&1 || rc=$?
+    expect_rc 0 "detached child: run ends normally"
+    if flock -n "$share/.check-fast.lock" true; then ok "detached child: the lock is free after the run"; else bad "detached child: the lock is still held after the run"; fi
+else
+    echo "skip - flock is not installed: target lock untested"
+fi
 
 echo
 echo "check-fast.test: $pass passed, $fail failed"
