@@ -155,7 +155,7 @@ expect_row test FAIL "failing test: test FAIL"
 reset
 stub=$tmp/stubbin
 mkdir -p "$stub"
-for t in git bash python3 awk sed head grep cat dirname mktemp rm df tail tr seq sleep diff tar mkdir cp env; do
+for t in git bash python3 awk sed head grep cat dirname mktemp rm df tail tr seq sleep diff tar mkdir cp env touch; do
     ln -sf "$(command -v "$t")" "$stub/$t"
 done
 printf '#!/usr/bin/env bash\necho hi\n' >"$repo/scripts/new.sh"
@@ -201,8 +201,8 @@ expect_rc 0 "change outside pokoin-rust"
 expect_row clippy SKIPPED "no crate touched: clippy SKIPPED"
 
 # 12. Two worktrees share one cargo target: each check builds its own sources, not what the other left behind.
-# Source mtimes in both worktrees are set older than the first build (touch -d), so without the crate-root touch cargo
-# would call the shared build fresh and answer the second worktree from the first one's artifacts.
+# Staleness is made deterministic with old mtimes: both worktrees' sources get `touch -d 2001-01-01`, older than the first
+# build, so without the crate-root touch cargo calls the shared build fresh and answers the second worktree from the first.
 reset
 share=$tmp/shared-target
 wta=$tmp/wt-a
@@ -240,6 +240,14 @@ touch -d '2001-01-01 00:00:00' "$wtb/$old_lib"
 run_wt "$wtb"
 expect_rc 0 "shared target: change reverted in the second worktree"
 if grep -q "$notice" "$out"; then bad "shared target: notice for the same worktree after revert"; else ok "shared target: no notice for the same worktree after revert"; fi
+
+
+# 13. A marker that cannot be written (here: a directory in its place) never stops the run: the step table still prints.
+share=$tmp/shared-target-marker
+mkdir -p "$share/.check-fast-last-worktree"
+run_wt "$wta"
+expect_rc 0 "unwritable marker: run still ends normally"
+expect_row test PASS "unwritable marker: step table printed, test PASS"
 
 echo
 echo "check-fast.test: $pass passed, $fail failed"
