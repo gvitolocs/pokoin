@@ -6,7 +6,7 @@ import { bindRailControls, stepRail } from '@market/rail-scroll.js';
 import CardArt from '../components/CardArt.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
 import DumpNav from '../components/DumpNav.jsx';
-import { rememberView, restoreScroll, restoredView } from '../lib/scroll-restore.js';
+import { rememberView, registerViewWriter, restoreScroll, restoredView } from '../lib/scroll-restore.js';
 
 const PAGE = 40;
 

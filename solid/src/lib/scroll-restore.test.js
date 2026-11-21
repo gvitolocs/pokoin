@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { register } from 'node:module';
 import { test } from 'node:test';
 import { resetScrollRestoreForTests } from '../../../market/src/scroll-memory.js';
@@ -125,4 +126,17 @@ test('leaving the page stores the view that was on screen, not the last committe
     assert.equal(entry('solid:5')?.view, undefined);
     done();
   });
+});
+
+test('the portfolio wires every scroll-restore helper it calls', () => {
+  const src = readFileSync(new URL('../pages/Portfolio.jsx', import.meta.url), 'utf8');
+  const imported = src.match(/import \{([^}]*)\} from '\.\.\/lib\/scroll-restore\.js'/)[1]
+    .split(',')
+    .map((name) => name.trim());
+  for (const name of ['rememberView', 'restoredView', 'restoreScroll', 'registerViewWriter']) {
+    assert.ok(imported.includes(name), `Portfolio.jsx must import ${name} from scroll-restore.js`);
+    assert.match(src, new RegExp(`${name}\\(`));
+  }
+  assert.match(src, /stopRestore = restoreScroll\(href\)/);
+  assert.match(src, /onCleanup\(registerViewWriter\(href,/);
 });
