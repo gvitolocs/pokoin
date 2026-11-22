@@ -1105,19 +1105,19 @@ fn tcg_priced_days(row: &Value) -> usize {
 /// when several tie, and the first of those that tie on both; `None` when none is
 /// accepted.
 fn most_days(series: &[Value], within: impl Fn(&Value) -> bool) -> Option<&Value> {
-    let mut best: Option<(&Value, usize, usize)> = None;
+    let mut best: Option<(&Value, (usize, usize))> = None;
     for row in series.iter().filter(|row| within(row)) {
-        let priced = tcg_priced_days(row);
         let seen = row
             .get("days")
             .and_then(Value::as_array)
             .map(Vec::len)
             .unwrap_or(0);
-        if best.is_none_or(|(_, best_priced, best_seen)| (priced, seen) > (best_priced, best_seen)) {
-            best = Some((row, priced, seen));
+        let rank = (tcg_priced_days(row), seen);
+        if best.is_none_or(|(_, best_rank)| rank > best_rank) {
+            best = Some((row, rank));
         }
     }
-    best.map(|(row, _, _)| row)
+    best.map(|(row, _)| row)
 }
 
 fn is_reverse_series(series: &Value) -> bool {
@@ -2554,24 +2554,26 @@ mod tests {
             body
         };
         let answer = graph_answer_with_fx(&body, false, "NM", &rates());
-        let series = answer["tcgplayer"]["series"].as_array().expect("one series");
+        let chosen = &answer["tcgplayer"]["series"][0];
         // The days the graph draws are unchanged: only priced days, as before.
         assert_eq!(
-            series[0]["days"],
+            chosen["days"],
             json!([{ "day": "2026-11-14", "marketPkn": 154.35, "fxApprox": true }]),
         );
         assert_eq!(
-            series[0]["lastObservedDay"],
+            chosen["lastObservedDay"],
             json!("2026-11-16"),
             "the last day TCGplayer answered, priced or not"
         );
+        let fields = chosen.as_object().expect("object");
+        let keys: Vec<&str> = fields.keys().map(String::as_str).collect();
         assert_eq!(
-            series[0].as_object().expect("object").keys().map(|key| key.as_str()).collect::<Vec<_>>().join(","),
+            keys.join(","),
             "productId,categoryId,groupId,subtype,days,lastObservedDay,lastListing",
             "the two fields ride at the end of the series they belong to",
         );
         assert_eq!(
-            series[0]["lastListing"],
+            chosen["lastListing"],
             json!({ "day": "2026-11-16", "lowPkn": 133.33, "low": "0.8000", "currency": "USD" }),
             "0.80 USD at the 2026-11-16 rate of 1.2",
         );
@@ -2582,16 +2584,18 @@ mod tests {
             { "day": "2026-11-15", "lowPrice": "0.8100" },
             { "day": "2026-11-16" },
         ]);
+        let ended = graph_answer_with_fx(&stale, false, "NM", &rates());
         assert_eq!(
-            graph_answer_with_fx(&stale, false, "NM", &rates())["tcgplayer"]["series"][0]["lastListing"],
+            ended["tcgplayer"]["series"][0]["lastListing"],
             json!({ "day": "2026-11-15", "lowPkn": 140.87, "low": "0.8100", "currency": "USD" }),
             "0.81 USD at the 2026-11-15 rate of 1.15",
         );
         // No rates: the low price cannot be converted, so nothing is quoted.
         let blind = graph_answer_with_fx(&body, false, "NM", &FxRates::default());
-        assert_eq!(blind["tcgplayer"]["series"][0]["lastObservedDay"], json!("2026-11-16"));
+        let blind_chosen = &blind["tcgplayer"]["series"][0];
+        assert_eq!(blind_chosen["lastObservedDay"], json!("2026-11-16"));
         assert!(
-            blind["tcgplayer"]["series"][0].get("lastListing").is_none(),
+            blind_chosen.get("lastListing").is_none(),
             "an unconvertible listing price is not sent as a bare source number"
         );
         // A series priced through its last day carries neither field.
