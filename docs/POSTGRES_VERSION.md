@@ -186,6 +186,12 @@ with the official `postgres:17.11-alpine3.24` and `19beta4-alpine3.24`
 images (musl, `en_US.utf8`, as the writer was created) through
 `upgrade-cluster.sh`.
 
+Measured on the live writer with 19.0 on 2026-11-22: the base backup step of
+the rehearsal copied the 29 GB cluster in 174 s; that run then stopped on the
+readiness probe, which named no user and so never saw the 17 copy accept
+connections four seconds after start — fixed the same day, and no upgrade-step
+time is recorded for 19.0 yet.
+
 - **Checksums.** `initdb` turns data checksums on by default since 18; the
   writer has them off, and `pg_upgrade --check` stops with "old cluster
   does not use data checksums but the new one does". The new cluster must be

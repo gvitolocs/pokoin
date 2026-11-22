@@ -56,7 +56,7 @@ else
     sed -n 's/^postgres (PostgreSQL) \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
   [[ $old_version =~ ^[0-9]+\.[0-9]+$ ]] \
     || die "$WRITER: its config says $old_image and \`postgres --version\` says nothing usable; neither gives postgres:<major>.<minor>-alpine (scripts/postgres-recreate.py pins one)"
-  say "old version from the server binary (\`docker exec $WRITER postgres --version\"): $old_version"
+  say "old version from the server binary (\`docker exec $WRITER postgres --version\`): $old_version"
 fi
 old_image=postgres:${old_version}-alpine${alpine}
 new_image=postgres:${new}-alpine${alpine}
@@ -101,11 +101,14 @@ docker rm -f pg-rehearsal-old >/dev/null 2>&1 || true
 docker run -d --name pg-rehearsal-old --user "$uid_gid" --network none \
   -v "$work/old/data":/var/lib/postgresql/data "$old_image" \
   postgres -c listen_addresses='' -c shared_buffers=1GB -c max_connections=120 >/dev/null
+# These containers run as --user "$uid_gid", a uid with no passwd entry in the stock
+# image, so every client must be given its user: pg_isready without -U reports
+# "no attempt" and exits 3 even on a server that is accepting connections.
 for _ in $(seq 1 600); do
-  docker exec pg-rehearsal-old pg_isready -q 2>/dev/null && break
+  docker exec pg-rehearsal-old pg_isready -q -U "$SUPERUSER" 2>/dev/null && break
   sleep 1
 done
-docker exec pg-rehearsal-old pg_isready -q || die "the 17 copy did not become ready (docker logs pg-rehearsal-old)"
+docker exec pg-rehearsal-old pg_isready -q -U "$SUPERUSER" || die "the 17 copy did not become ready (docker logs pg-rehearsal-old)"
 counts_sql="select string_agg(relname || '=' || n, ' ' order by relname) from (select c.relname, (xpath('/row/n/text()', query_to_xml(format('select count(*) as n from %I.%I', n.nspname, c.relname), false, true, '')))[1]::text as n from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'r' order by pg_relation_size(c.oid) desc, c.relname limit 12) t"
 docker exec pg-rehearsal-old psql -U "$SUPERUSER" -d "$DB" -XAtc "$counts_sql" >"$work/work/counts-old.txt"
 docker exec pg-rehearsal-old pg_ctl -D /var/lib/postgresql/data stop -m fast >/dev/null
@@ -138,9 +141,10 @@ docker run -d --name pg-rehearsal-new --user "$uid_gid" --network none \
   -v "$work/new":/var/lib/postgresql -v "$work/work":/work "$new_image" \
   postgres -c listen_addresses='' -c shared_buffers=1GB -c max_connections=120 >/dev/null
 for _ in $(seq 1 120); do
-  docker exec pg-rehearsal-new pg_isready -q 2>/dev/null && break
+  docker exec pg-rehearsal-new pg_isready -q -U "$SUPERUSER" 2>/dev/null && break
   sleep 1
 done
+docker exec pg-rehearsal-new pg_isready -q -U "$SUPERUSER" || die "the 19 result did not become ready (docker logs pg-rehearsal-new)"
 if [[ -s $work/work/update_extensions.sql ]]; then
   docker exec pg-rehearsal-new psql -U "$SUPERUSER" -d postgres -Xq -f /work/update_extensions.sql
 fi
