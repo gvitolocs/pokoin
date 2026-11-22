@@ -384,7 +384,7 @@ status = "partial"
 id = "sold-prices"
 name = "Visitor sees sold medians and price history"
 money = false
-entry = ["solid/src/components/desk/SoldPriceGraph.jsx", "solid/src/pages/Card.jsx", "market/src/price-history.js", "market/src/price-history-cache.js"]
+entry = ["solid/src/components/desk/SoldPriceGraph.jsx", "solid/src/pages/Card.jsx", "market/src/price-history.js", "market/src/price-history-cache.js", "market/src/sold-graph.js"]
 proof = ["pokoin-rust/crates/catalog-api/src/sales/core.rs", "pokoin-rust/crates/catalog-api/src/sales/history_sources.rs", "pokoin-rust/crates/catalog-api/tests/price_history_pokoin_flow.rs", "pokoin-rust/crates/catalog-api/tests/price_history_cm_offers_flow.rs", "market/src/price-history.test.js", "market/src/price-history-cache.test.js", "market/src/sold-graph.test.js", "market/src/sold-sales.test.js", "solid/src/pages/Card.test.js", "market/src/card-desk-warm.test.js"]
 status = "partial"
 

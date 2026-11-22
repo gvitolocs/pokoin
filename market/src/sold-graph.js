@@ -342,6 +342,55 @@ export function soldGraphGapSegments(days, gapDays) {
   return { segments, bridges };
 }
 
+/**
+ * The continuation of a source line whose price stopped while the source itself
+ * kept answering: its last drawn point carried flat to `lastObservedDay`, as the
+ * pair a dotted bridge is drawn from. `bounds` is the range the graph draws, so a
+ * day outside it is not reached for. Nothing when the series is empty, when the
+ * day is not one, when it is not after the last point, or when it is outside the
+ * range.
+ */
+export function soldGraphTailBridge(days, lastObservedDay, bounds) {
+  const tail = soldGraphDayMs(lastObservedDay);
+  if (!Number.isFinite(tail)) {
+    return null;
+  }
+  const lo = soldGraphDayMs(bounds?.from);
+  const hi = soldGraphDayMs(bounds?.to);
+  if ((Number.isFinite(lo) && tail < lo) || (Number.isFinite(hi) && tail > hi)) {
+    return null;
+  }
+  const rows = (Array.isArray(days) ? days : []).filter((row) => Number.isFinite(soldGraphDayMs(row?.day)));
+  if (!rows.length) {
+    return null;
+  }
+  const last = rows.reduce((a, b) => (soldGraphDayMs(b.day) > soldGraphDayMs(a.day) ? b : a));
+  return tail > soldGraphDayMs(last.day) ? [last, { ...last, day: String(lastObservedDay) }] : null;
+}
+
+/**
+ * Where a day sits on a line that stopped being priced while its source kept
+ * answering: `'carried'` over the hole the graph draws it across — the very pair
+ * `soldGraphTailBridge` returns, under the same bounds the renderer passes, so a
+ * day the picture leaves out is not one the hover explains — `'ended'` past the
+ * day the source last answered, and `''` when the day is the line's own business:
+ * one it priced, one before it started, or a hole inside its run.
+ */
+function soldGraphTailState(days, day, lastObservedDay, bounds) {
+  const target = soldGraphDayMs(day);
+  const priced = (Array.isArray(days) ? days : [])
+    .map((row) => soldGraphDayMs(row?.day))
+    .filter((ms) => Number.isFinite(ms));
+  if (!priced.length || !Number.isFinite(target) || target <= Math.max(...priced)) {
+    return '';
+  }
+  const tail = soldGraphTailBridge(days, lastObservedDay, bounds);
+  const carried = tail
+    && target > soldGraphDayMs(tail[0].day)
+    && target <= soldGraphDayMs(tail[1].day);
+  return carried ? 'carried' : 'ended';
+}
+
 /** The series day nearest `day`, when it is within `toleranceDays` of it. */
 export function soldGraphNearDay(days, day, toleranceDays = 0) {
   const target = soldGraphDayMs(day);
@@ -446,13 +495,19 @@ export function soldGraphRowPrice(pkn, parts, currency = '') {
  * gap, says which day it starts from when the hover is earlier than that, and
  * otherwise has no data. A source with `carry: 'none'` is read only on a day it
  * quoted itself — a daily offer series has no price to stand for a day it did
- * not reach. The list is capped and the rest is counted.
+ * not reach. A source that reports where it stopped being priced — the
+ * `lastObservedDay` the graph carries its line to — answers every day past its
+ * last price by itself: one the line is carried over says its price is old rather
+ * than that there is no data, and quotes its `lastListing` under that, dated when
+ * the hover is not on the day of the quote; a day past the carry is no data, and
+ * never the stale price. The list is capped and the rest is counted.
  */
 export function soldGraphHoverRows(series, day, {
   cap = SOLD_GRAPH_TIP_ROWS,
   formatValue = (value) => String(value),
   formatDay = (iso) => iso,
   endDay = '',
+  bounds = null,
 } = {}) {
   const rows = [];
   for (const line of (Array.isArray(series) ? series : [])) {
@@ -471,6 +526,11 @@ export function soldGraphHoverRows(series, day, {
     }
     let hit = null;
     let note = '';
+    let sub = '';
+    // A line that says where it stopped being priced answers its own unpriced days.
+    const tail = line.lastObservedDay
+      ? soldGraphTailState(days, day, line.lastObservedDay, bounds)
+      : '';
     if (line.kind === 'sold') {
       hit = days.find((row) => String(row?.day) === String(day)) || null;
       if (!hit) {
@@ -481,6 +541,24 @@ export function soldGraphHoverRows(series, day, {
       if (!hit) {
         note = 'no data';
       }
+    } else if (tail === 'carried') {
+      // The line is drawn over these days at its last price, and nothing was
+      // priced on them: the listing under the row is what the source has.
+      note = 'no recent sale';
+      const listed = line.lastListing;
+      const low = Number(listed?.lowPkn);
+      const askMs = soldGraphDayMs(listed?.day);
+      // One day's ask, so one day's date: the hover that is not on it says which
+      // day it came from, and an earlier day has no quote of its own to show.
+      if (Number.isFinite(low) && low > 0 && Number.isFinite(askMs)
+        && soldGraphDayMs(day) >= askMs) {
+        sub = `lowest listing ${formatValue(low)}`;
+        if (String(listed.day) !== String(day)) {
+          sub += ` (${formatDay(String(listed.day))})`;
+        }
+      }
+    } else if (tail === 'ended') {
+      note = 'no data';
     } else {
       hit = line.carry === 'onOrBefore'
         ? soldGraphDayOnOrBefore(days, day)
@@ -501,6 +579,7 @@ export function soldGraphHoverRows(series, day, {
       picked: Boolean(line.picked),
       value: hit ? Number(hit.value) : null,
       text: hit ? formatValue(Number(hit.value)) : note,
+      sub,
     });
   }
   const shown = rows.slice(0, Math.max(1, Math.trunc(Number(cap)) || SOLD_GRAPH_TIP_ROWS));

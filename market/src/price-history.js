@@ -229,21 +229,41 @@ function dayRowsOf(row) {
 }
 
 /**
- * TCGplayer answers with one series per product and subtype. A reverse-holo
- * pick reads the reverse series; every other pick reads a series that is not
- * one. Inside the preferred group it is the series with the most days; with no
- * series in it at all, the whole group is the pool.
+ * TCGplayer answers with one series per product and subtype. A reverse-holo pick
+ * reads the reverse series; every other pick reads a series that is not one.
+ * Inside the preferred group it is the series with the most days that carry a
+ * market price, and the one with the most rows when those tie; with no series in
+ * the preferred group at all, the whole answer is the pool. That is the server's
+ * `chosen_series`, read from the same answer.
+ *
+ * `{ days, lastObservedDay, lastListing }`: the days the line is drawn from, plus
+ * the answer's own word for where the series stopped being priced. Both are absent
+ * for a series priced through its last day, so a source that really ended still
+ * ends.
  */
-function tcgplayerDays(tcgplayer, reverse) {
+function tcgplayerSeries(tcgplayer, reverse) {
+  const none = { days: [], lastObservedDay: '', lastListing: null };
   const series = Array.isArray(tcgplayer?.series) ? tcgplayer.series.filter((row) => row && row.days) : [];
   if (!series.length) {
-    return [];
+    return none;
   }
   const prefersReverse = (row) => /reverse/i.test(String(row?.subtype || ''));
+  const isPriced = (day) => day?.marketPkn !== null && day?.marketPkn !== undefined;
+  const rank = (row) => [dayRowsOf(row).filter(isPriced).length, dayRowsOf(row).length];
+  const better = (a, b) => {
+    const [priced, seen] = rank(a);
+    const [bestPriced, bestSeen] = rank(b);
+    return priced > bestPriced || (priced === bestPriced && seen > bestSeen);
+  };
   const preferred = series.filter((row) => (reverse ? prefersReverse(row) : !prefersReverse(row)));
   const pool = preferred.length ? preferred : series;
-  const best = pool.reduce((a, b) => (dayRowsOf(b).length > dayRowsOf(a).length ? b : a), pool[0]);
-  return pricedDays(dayRowsOf(best), (row) => row?.marketPkn);
+  const best = pool.reduce((a, b) => (better(b, a) ? b : a), pool[0]);
+  const lastListing = best?.lastListing;
+  return {
+    days: pricedDays(dayRowsOf(best), (row) => row?.marketPkn),
+    lastObservedDay: isIsoDay(best?.lastObservedDay) ? String(best.lastObservedDay) : '',
+    lastListing: isIsoDay(lastListing?.day) && Number(lastListing.lowPkn) > 0 ? lastListing : null,
+  };
 }
 
 /** Cardmarket answers per product; the desk is one product, so `products[0]`. */
@@ -294,6 +314,10 @@ function cardmarketOffersLine(facet) {
  * for this card (or a status that answered nothing) is left out; `reverse`
  * switches TCGplayer to its reverse series and Cardmarket to its foil trend.
  *
+ * The TCGplayer line also carries the answer's `lastObservedDay` and
+ * `lastListing`: the graph continues it, dotted and flat, to that day, and the
+ * hover quotes the listing under it.
+ *
  * `cmCondition`/`cmLanguage` are the facet the answer was read for — they name
  * the Cardmarket offers line and pick its floor out of the series. They come
  * from what was asked, not from what the chips say now, so the lines that are
@@ -305,17 +329,20 @@ export function priceSourceSeries(history, {
   const foil = reverse === true;
   const bucket = history?.bucket === 'week' ? 'week' : 'day';
   const facet = cmOfferFacet(cmCondition, cmLanguage);
+  const tcgplayer = tcgplayerSeries(history?.tcgplayer, foil);
   const daysByKey = {
-    tcgplayer: tcgplayerDays(history?.tcgplayer, foil),
+    tcgplayer: tcgplayer.days,
     cardmarket: cardmarketDays(history?.cardmarket, foil),
     cardtrader_ask: cardtraderAskDays(history?.cardtrader),
     pokoin: pokoinAskDays(history?.pokoin),
     cardmarket_offers: cardmarketOffersDays(history?.cardmarketOffers, facet.condition),
   };
+  const tailByKey = { tcgplayer: { lastObservedDay: tcgplayer.lastObservedDay, lastListing: tcgplayer.lastListing } };
   const lines = PRICE_SOURCES.map((source) => ({
     ...source,
     gapDays: graphGapDays(source, bucket),
     days: daysByKey[source.key] || [],
+    ...tailByKey[source.key],
   }));
   const offers = {
     ...cardmarketOffersLine(facet),

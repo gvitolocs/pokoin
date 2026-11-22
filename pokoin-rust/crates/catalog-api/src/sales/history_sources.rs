@@ -1088,18 +1088,33 @@ where
     }
 }
 
-/// The row with the most days among those `within` accepts, the first when
-/// several tie; `None` when none is accepted.
+/// The days of a series the graph can draw: TCGplayer keeps answering a product
+/// whose market price has gone, and those days are not a line.
+fn tcg_priced_days(row: &Value) -> usize {
+    row.get("days")
+        .and_then(Value::as_array)
+        .map(|days| {
+            days.iter()
+                .filter(|day| day.get("marketPkn").is_some_and(|price| !price.is_null()))
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+/// The row with the most priced days among those `within` accepts, the most rows
+/// when several tie, and the first of those that tie on both; `None` when none is
+/// accepted.
 fn most_days(series: &[Value], within: impl Fn(&Value) -> bool) -> Option<&Value> {
-    let mut best: Option<(&Value, usize)> = None;
+    let mut best: Option<(&Value, (usize, usize))> = None;
     for row in series.iter().filter(|row| within(row)) {
         let seen = row
             .get("days")
             .and_then(Value::as_array)
             .map(Vec::len)
             .unwrap_or(0);
-        if best.is_none_or(|(_, previous)| seen > previous) {
-            best = Some((row, seen));
+        let rank = (tcg_priced_days(row), seen);
+        if best.is_none_or(|(_, best_rank)| rank > best_rank) {
+            best = Some((row, rank));
         }
     }
     best.map(|(row, _)| row)
@@ -1112,11 +1127,54 @@ fn is_reverse_series(series: &Value) -> bool {
 }
 
 /// The TCGplayer series the graph plots: a reverse-holo one when `reverse`, a
-/// non-reverse one otherwise; among those the one with the most days, and of all
-/// of them when none is in the preferred group.
+/// non-reverse one otherwise; among those the one with the most priced days, and
+/// of all of them when none is in the preferred group.
 pub fn chosen_series(series: &[Value], reverse: bool) -> Option<&Value> {
     most_days(series, |row| is_reverse_series(row) == reverse)
         .or_else(|| most_days(series, |_| true))
+}
+
+/// Where a series stopped being priced, as the two fields of its graph entry.
+/// TCGplayer goes on answering the days of a product that has no market price,
+/// and a line that simply ends cannot tell that apart from a source that stopped;
+/// `last_observed_day` is the last day it answered at all, when that is later than
+/// its last priced day, and `last_listing` the newest such later day whose ask
+/// reaches a PKN amount — an ask of zero or one the rates cannot convert is passed
+/// over for the older day that is neither, so one dead quote does not silence the
+/// source. Nothing for a series priced through its last day, and nothing for one
+/// with no priced day at all: a series the graph cannot draw has no line to carry.
+fn tcg_tail_fields(days: &[Value], rates: &FxRates) -> Vec<(String, Value)> {
+    let day = |row: &Value| day_of(row.get("day"));
+    let is_priced = |row: &&Value| row.get("marketPkn").is_some_and(|price| !price.is_null());
+    let Some(priced_until) = days.iter().filter(is_priced).map(day).max() else {
+        return Vec::new();
+    };
+    let Some(observed) = days.iter().map(day).filter(|row| !row.is_empty()).max() else {
+        return Vec::new();
+    };
+    if observed == priced_until {
+        return Vec::new();
+    }
+    let listing = days
+        .iter()
+        .filter(|row| day(row).as_str() > priced_until.as_str())
+        .filter_map(|row| {
+            let low_day = day(row);
+            let low_pkn = pkn_of_usd(
+                number_of(row.get("lowPrice")),
+                Some(rates.rate_for(&low_day)?.rate),
+            )?;
+            Some((low_day, low_pkn))
+        })
+        .max_by_key(|(low_day, _)| low_day.clone());
+    let mut out = vec![("lastObservedDay".to_owned(), json!(observed))];
+    if let Some((low_day, low_pkn)) = listing {
+        out.push((
+            "lastListing".to_owned(),
+            json!({ "day": low_day, "lowPkn": pg::js_number(low_pkn) }),
+        ));
+    }
+    out
 }
 
 /// The `cardtrader` and `pokoin` blocks of the graph answer: the cheapest ask of
@@ -1133,21 +1191,26 @@ fn ask_graph(block: &Value, weekly: bool) -> Value {
     )
 }
 
-/// The `tcgplayer` block of the graph answer: the one plotted series.
-fn tcgplayer_graph(block: &Value, reverse: bool, weekly: bool) -> Value {
+/// The `tcgplayer` block of the graph answer: the one plotted series, told where
+/// its price stopped.
+fn tcgplayer_graph(block: &Value, reverse: bool, weekly: bool, rates: &FxRates) -> Value {
     let series = block.get("series").and_then(Value::as_array);
     let kept: Vec<Value> = series
         .and_then(|rows| chosen_series(rows, reverse))
         .map(|row| {
-            with_field(
+            let days = row.get("days").and_then(Value::as_array);
+            let mut graphed = with_field(
                 row,
                 "days",
-                Value::Array(graph_day_rows(
-                    row.get("days").and_then(Value::as_array),
-                    weekly,
-                    tcg_graph_day,
-                )),
-            )
+                Value::Array(graph_day_rows(days, weekly, tcg_graph_day)),
+            );
+            let tail = days.map(|days| tcg_tail_fields(days, rates));
+            if let (Some(object), Some(tail)) = (graphed.as_object_mut(), tail) {
+                for (field, value) in tail {
+                    object.insert(field, value);
+                }
+            }
+            graphed
         })
         .into_iter()
         .collect();
@@ -1217,7 +1280,15 @@ fn cardmarket_offers_graph(block: &Value, condition: &str, weekly: bool) -> Valu
 /// the numbers the desk graph draws and thinned per ISO week over a long span
 /// (PH-06). `cm_condition` is the `cmCondition` the request asked, which is the
 /// one floor the offers line plots.
-pub fn graph_answer(body: &Value, reverse: bool, cm_condition: &str) -> Value {
+/// `rates` is the same EUR→USD table the answer's PKN prices were read with: a
+/// TCGplayer series that stopped being priced is only quoted in PKN, so the tail
+/// needs them too.
+pub fn graph_answer_with_fx(
+    body: &Value,
+    reverse: bool,
+    cm_condition: &str,
+    rates: &FxRates,
+) -> Value {
     let Some(object) = body.as_object() else {
         return body.clone();
     };
@@ -1226,7 +1297,7 @@ pub fn graph_answer(body: &Value, reverse: bool, cm_condition: &str) -> Value {
     for (key, block) in object {
         let block = match key.as_str() {
             "cardtrader" | "pokoin" => ask_graph(block, weekly),
-            "tcgplayer" => tcgplayer_graph(block, reverse, weekly),
+            "tcgplayer" => tcgplayer_graph(block, reverse, weekly, rates),
             "cardmarket" => cardmarket_graph(block, weekly),
             "cardmarketOffers" => cardmarket_offers_graph(block, cm_condition, weekly),
             _ => block.clone(),
@@ -1240,6 +1311,12 @@ pub fn graph_answer(body: &Value, reverse: bool, cm_condition: &str) -> Value {
         }
     }
     Value::Object(out)
+}
+
+/// `graph_answer_with_fx` without rates: the shape of a body whose tail cannot be
+/// converted, which is every body that has no `fx` to read.
+pub fn graph_answer(body: &Value, reverse: bool, cm_condition: &str) -> Value {
+    graph_answer_with_fx(body, reverse, cm_condition, &FxRates::default())
 }
 
 fn failed_cardmarket(error: &sqlx::Error) -> Value {
@@ -2411,6 +2488,184 @@ mod tests {
             chosen_series(&[json!({ "subtype": "Normal" })], false).expect("one")["subtype"],
             json!("Normal"),
             "a series without days is still the only one to plot"
+        );
+    }
+
+    /// TCGplayer keeps publishing a series after its market price stops, so a
+    /// count of its rows is not a count of the days the graph can draw.
+    #[test]
+    fn tcgplayer_series_choice_counts_priced_days() {
+        let priced = |day: &str, pkn: f64| json!({ "day": day, "marketPkn": pkn });
+        let unpriced = |day: &str| json!({ "day": day, "marketPkn": Value::Null });
+        let rows = vec![
+            json!({
+                "subtype": "Holofoil",
+                "days": [
+                    priced("2026-10-20", 154.35),
+                    unpriced("2026-11-10"),
+                    unpriced("2026-11-11"),
+                    unpriced("2026-11-12"),
+                ],
+            }),
+            json!({
+                "subtype": "Normal",
+                "days": [priced("2026-11-05", 36.0), priced("2026-11-06", 37.0)],
+            }),
+        ];
+        assert_eq!(
+            chosen_series(&rows, false).expect("one")["subtype"],
+            json!("Normal"),
+            "four days of which one is priced is less series than two priced days"
+        );
+        // A day that carries no `marketPkn` at all is as unpriced as a null one.
+        let holes = vec![
+            json!({ "subtype": "Holofoil", "days": [unpriced("2026-11-01"), { "day": "2026-11-02" }, { "day": "2026-11-03" }] }),
+            json!({ "subtype": "Normal", "days": [unpriced("2026-11-04"), priced("2026-11-05", 36.0)] }),
+        ];
+        assert_eq!(
+            chosen_series(&holes, false).expect("one")["subtype"],
+            json!("Normal"),
+            "the group's one priced day beats three days without any price field"
+        );
+    }
+
+    /// TCGplayer keeps a series alive after its market price stops: the graph
+    /// answer says where the observation really ended, and quotes the newest
+    /// listing that had a price to stand under it.
+    #[test]
+    fn graph_answer_reports_where_a_series_stopped_being_priced() {
+        let body = {
+            let mut body = graph_body();
+            body["tcgplayer"]["series"] = json!([
+                {
+                    "productId": "589965",
+                    "categoryId": "1",
+                    "groupId": "2",
+                    "subtype": "Unlimited Holofoil",
+                    "days": [
+                        { "day": "2026-11-14", "marketPrice": "0.9200", "marketPkn": 154.35,
+                          "lowPrice": "0.7900", "fxApprox": true },
+                        { "day": "2026-11-15", "marketPrice": null, "lowPrice": "0.8100" },
+                        { "day": "2026-11-16", "marketPrice": null, "lowPrice": "0.8000" },
+                    ],
+                },
+            ]);
+            body
+        };
+        let answer = graph_answer_with_fx(&body, false, "NM", &rates());
+        let chosen = &answer["tcgplayer"]["series"][0];
+        // The days the graph draws are unchanged: only priced days, as before.
+        assert_eq!(
+            chosen["days"],
+            json!([{ "day": "2026-11-14", "marketPkn": 154.35, "fxApprox": true }]),
+        );
+        assert_eq!(
+            chosen["lastObservedDay"],
+            json!("2026-11-16"),
+            "the last day TCGplayer answered, priced or not"
+        );
+        let fields = chosen.as_object().expect("object");
+        let keys: Vec<&str> = fields.keys().map(String::as_str).collect();
+        assert_eq!(
+            keys.join(","),
+            "productId,categoryId,groupId,subtype,days,lastObservedDay,lastListing",
+            "the two fields ride at the end of the series they belong to",
+        );
+        assert_eq!(
+            chosen["lastListing"],
+            json!({ "day": "2026-11-16", "lowPkn": 133.33 }),
+            "0.80 USD at the 2026-11-16 rate of 1.2",
+        );
+        // A tail day with no listing price of its own falls back to the newest one.
+        let mut stale = body.clone();
+        stale["tcgplayer"]["series"][0]["days"] = json!([
+            { "day": "2026-11-14", "marketPkn": 154.35, "lowPrice": "0.7900" },
+            { "day": "2026-11-15", "lowPrice": "0.8100" },
+            { "day": "2026-11-16" },
+        ]);
+        let ended = graph_answer_with_fx(&stale, false, "NM", &rates());
+        assert_eq!(
+            ended["tcgplayer"]["series"][0]["lastListing"],
+            json!({ "day": "2026-11-15", "lowPkn": 140.87 }),
+            "0.81 USD at the 2026-11-15 rate of 1.15",
+        );
+        // No rates: the low price cannot be converted, so nothing is quoted.
+        let blind = graph_answer_with_fx(&body, false, "NM", &FxRates::default());
+        let blind_chosen = &blind["tcgplayer"]["series"][0];
+        assert_eq!(blind_chosen["lastObservedDay"], json!("2026-11-16"));
+        assert!(
+            blind_chosen.get("lastListing").is_none(),
+            "an unconvertible listing price is not sent as a bare source number"
+        );
+        // A series priced through its last day carries neither field.
+        let healthy = graph_answer(&graph_body(), false, "NM");
+        let kept = healthy["tcgplayer"]["series"].as_array().expect("series");
+        for row in kept {
+            assert!(row.get("lastObservedDay").is_none(), "{row}");
+            assert!(row.get("lastListing").is_none(), "{row}");
+        }
+    }
+
+    /// TCGplayer writes `0.0000` for a day it has no ask for, which is not the
+    /// source going quiet: the newest tail day that reaches a PKN amount is the one
+    /// quoted, and only a tail with nothing to quote sends no listing at all.
+    #[test]
+    fn graph_answer_quotes_the_newest_usable_tail_listing() {
+        let tail = |older: &str, newer: &str| {
+            let mut body = graph_body();
+            body["tcgplayer"]["series"] = json!([
+                {
+                    "subtype": "Unlimited Holofoil",
+                    "days": [
+                        { "day": "2026-11-14", "marketPkn": 154.35, "lowPrice": "0.7900" },
+                        { "day": "2026-11-15", "marketPrice": null, "lowPrice": older },
+                        { "day": "2026-11-16", "marketPrice": null, "lowPrice": newer },
+                    ],
+                },
+            ]);
+            graph_answer_with_fx(&body, false, "NM", &rates())
+        };
+        assert_eq!(
+            tail("0.8100", "0.0000")["tcgplayer"]["series"][0]["lastListing"],
+            json!({ "day": "2026-11-15", "lowPkn": 140.87 }),
+            "a zero ask passes the quote to the older day that has one"
+        );
+        let answer = tail("0.0000", "0.0000");
+        let chosen = &answer["tcgplayer"]["series"][0];
+        assert_eq!(chosen["lastObservedDay"], json!("2026-11-16"));
+        assert!(
+            chosen.get("lastListing").is_none(),
+            "a tail of nothing but zero asks quotes nothing: {chosen}"
+        );
+    }
+
+    /// A window in which the series was answered but never priced draws no line,
+    /// so it sends no tail either: there is no carried price to quote under.
+    #[test]
+    fn graph_answer_sends_no_tail_for_a_series_that_was_never_priced() {
+        let mut body = graph_body();
+        body["tcgplayer"]["series"] = json!([
+            {
+                "subtype": "Unlimited Holofoil",
+                "days": [
+                    { "day": "2026-11-15", "marketPrice": null, "lowPrice": "0.8100" },
+                    { "day": "2026-11-16", "marketPrice": null, "lowPrice": "0.8000" },
+                ],
+            },
+        ]);
+        let answer = graph_answer_with_fx(&body, false, "NM", &rates());
+        let chosen = &answer["tcgplayer"]["series"][0];
+        assert_eq!(
+            chosen["days"],
+            json!([]),
+            "no priced day, so no point to draw"
+        );
+        let fields = chosen.as_object().expect("object");
+        let keys: Vec<&str> = fields.keys().map(String::as_str).collect();
+        assert_eq!(
+            keys.join(","),
+            "subtype,days",
+            "a series the graph cannot draw carries neither tail field"
         );
     }
 

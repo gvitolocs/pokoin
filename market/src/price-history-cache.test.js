@@ -27,8 +27,9 @@ function fakeStorage() {
   };
 }
 
-const PREFIX = 'pokoin.cardPriceHistory.v2.';
+const PREFIX = 'pokoin.cardPriceHistory.v3.';
 const V1_PREFIX = 'pokoin.cardPriceHistory.v1.';
+const V2_PREFIX = 'pokoin.cardPriceHistory.v2.';
 
 function entryOf(range = '3m', from = '2026-08-18', to = '2026-11-16') {
   return { range, from, to, history: { cardtrader: { days: [{ day: '2026-11-16', lowestAskPkn: 265 }] } } };
@@ -273,18 +274,24 @@ test('an entry that names another facet than its key is read as absent', () => {
   assert.deepEqual(peekCardPriceHistory('813622', '3m', { condition: 'SP', language: 'EN' }), corrected);
 });
 
-test('a v1 window is never read and goes with the first write', () => {
-  store.set(`${V1_PREFIX}813622.3m`, JSON.stringify({ entry: entryOf(), savedAt: Date.now() }));
-  store.set(`${V1_PREFIX}813622.1y`, 'null');
+test('a window of an older shape is never read and goes with the first write', () => {
+  // v1 keys hold an answer of the other facet's series, v2 one whose TCGplayer
+  // line could not say where it stopped being priced: neither is readable here.
+  for (const legacy of [V1_PREFIX, V2_PREFIX]) {
+    store.set(`${legacy}813622.3m`, JSON.stringify({ entry: entryOf(), savedAt: Date.now() }));
+    store.set(`${legacy}813622.1y`, 'null');
+  }
   // Another cache's key, a similar-looking one, and a key of the desk's own.
   const foreign = ['pokoin.cardSales.v12.813622.3m', 'pokoin.cardPage.v1.en:813622', 'pokoin.graph.sources'];
   for (const key of foreign) {
     store.set(key, '{}');
   }
-  assert.equal(peekCardPriceHistory('813622', '3m'), null, 'v1 has no facet in its key');
+  assert.equal(peekCardPriceHistory('813622', '3m'), null, 'neither older shape is readable here');
   assert.deepEqual(saveCardPriceHistory('813622', '3m', entryOf()).range, '3m');
-  assert.ok(!store.has(`${V1_PREFIX}813622.3m`), 'the v1 window went');
-  assert.ok(!store.has(`${V1_PREFIX}813622.1y`), 'with the corrupt one beside it');
+  for (const legacy of [V1_PREFIX, V2_PREFIX]) {
+    assert.ok(!store.has(`${legacy}813622.3m`), `the ${legacy} window went`);
+    assert.ok(!store.has(`${legacy}813622.1y`), 'with the corrupt one beside it');
+  }
   assert.deepEqual(
     [...store.keys()].filter((key) => !key.startsWith(PREFIX)).sort(),
     foreign.sort(),
