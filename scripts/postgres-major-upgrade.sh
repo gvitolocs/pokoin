@@ -7,6 +7,11 @@
 #   MODE=link scripts/postgres-major-upgrade.sh rehearse 19.1     # link mode, as fast as the cutover
 #   scripts/postgres-major-upgrade.sh clean <work-dir>
 #
+# The writer's minor comes from its image tag, and from `postgres --version` when the
+# container was created from a floating tag and only holds an image id. copy mode
+# refuses to start below 2.2x the cluster size free in the work root, link mode below
+# 1.2x; POKOIN_PG_UPGRADE_SKIP_SPACE_CHECK=1 runs it anyway.
+#
 # Steps: base backup of the live writer -> recover that copy with the writer's
 # own 17 image and shut it down cleanly -> build infra/postgres-upgrade ->
 # pg_upgrade --check, then pg_upgrade -> start 19 on the result (no network)
@@ -35,15 +40,24 @@ case $action in
     docker rm -f pg-rehearsal-old pg-rehearsal-new >/dev/null 2>&1 || true
     rm -rf -- "$dir"
     exit 0 ;;
-  *) sed -n '2,20p' "$0"; exit 2 ;;
+  *) sed -n '2,24p' "$0"; exit 2 ;;
 esac
 
 old_image=$(docker inspect -f '{{.Config.Image}}' "$WRITER")
-[[ $old_image =~ ^postgres:[0-9]+\.[0-9]+-alpine ]] \
-  || die "$WRITER runs $old_image; pin an exact postgres:<major>.<minor>-alpine image first (scripts/postgres-recreate.py)"
-old_version=${old_image#postgres:}; old_version=${old_version%%-*}
 # Both images must be built on the Alpine release the writer runs (musl, ICU).
 alpine=$(docker exec "$WRITER" cat /etc/alpine-release | cut -d. -f1,2)
+if [[ $old_image =~ ^postgres:([0-9]+\.[0-9]+)-alpine ]]; then
+  old_version=${BASH_REMATCH[1]}
+  say "old version from the container's image tag: $old_image"
+else
+  # A container created from a floating tag keeps an image id in its config, not a name,
+  # so the tag cannot say which minor runs. The server binary can.
+  old_version=$(docker exec "$WRITER" postgres --version |
+    sed -n 's/^postgres (PostgreSQL) \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
+  [[ $old_version =~ ^[0-9]+\.[0-9]+$ ]] \
+    || die "$WRITER: its config says $old_image and \`postgres --version\` says nothing usable; neither gives postgres:<major>.<minor>-alpine (scripts/postgres-recreate.py pins one)"
+  say "old version from the server binary (\`docker exec $WRITER postgres --version\"): $old_version"
+fi
 old_image=postgres:${old_version}-alpine${alpine}
 new_image=postgres:${new}-alpine${alpine}
 docker pull -q "$old_image" >/dev/null
@@ -58,12 +72,23 @@ chown -R "$uid_gid" "$work"
 say "work dir $work ($old_image -> $new_image, mode $MODE)"
 
 q() { docker exec "$WRITER" psql -U "$SUPERUSER" -d postgres -XAtc "$1"; }
+pretty() { q "select pg_size_pretty(${1}::bigint)"; }
 read -r encoding provider locale < <(q "select pg_encoding_to_char(encoding), case datlocprovider when 'i' then 'icu' when 'b' then 'builtin' else 'libc' end, coalesce(nullif(datlocale, ''), datcollate) from pg_database where datname = 'template0'" | tr '|' ' ')
 say "template0: $encoding $provider $locale; databases: $(q "select string_agg(datname, ' ' order by datname) from pg_database where not datistemplate")"
 say "size: $(q "select pg_size_pretty(sum(pg_database_size(oid))) from pg_database"), free in $ROOT: $(df -h --output=avail "$ROOT" | tail -1)"
 
+size_bytes=$(q "select coalesce(sum(pg_database_size(oid)), 0) from pg_database")
+free_bytes=$(df -B1 --output=avail "$ROOT" | tail -1 | tr -d '[:space:]')
+need_times=22   # copy mode keeps the base backup and a second cluster, plus room for WAL
+[[ $MODE == link ]] && need_times=12
+need_bytes=$(( size_bytes * need_times / 10 ))
+if [[ ${POKOIN_PG_UPGRADE_SKIP_SPACE_CHECK:-} != 1 ]] && (( free_bytes < need_bytes )); then
+  die "$ROOT has $(pretty "$free_bytes") free and $MODE mode needs $(pretty "$need_bytes") (the $(pretty "$size_bytes") cluster times $need_times over 10): make room, or set POKOIN_PG_UPGRADE_SKIP_SPACE_CHECK=1 to run anyway"
+fi
+say "space: $(pretty "$free_bytes") free in $ROOT, $(pretty "$need_bytes") needed for $MODE mode"
+
 say "base backup of the live writer (read-only for the writer)"
-env_file=$(mktemp); trap 'rm -f "$env_file"' EXIT
+env_file=$(mktemp "${TMPDIR:-/tmp}/pg-upgrade-env.XXXXXX"); trap 'rm -f "$env_file"' EXIT
 docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$WRITER" | sed -n 's/^POSTGRES_PASSWORD=/PGPASSWORD=/p' >"$env_file"
 started=$SECONDS
 docker run --rm --user "$uid_gid" --network none --env-file "$env_file" \
