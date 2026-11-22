@@ -101,6 +101,14 @@ fn request_games(headers: &HeaderMap, query_game: Option<&str>) -> (String, Stri
     (requested, pool)
 }
 
+/// The database `/api/marketplace-daily-medians` reads, named by the token the
+/// request carried: [`pool_game`] follows an alias of a configured game to that
+/// game's database, as [`request_games`] does for the snapshot kinds, and leaves
+/// every other name the request spelled it.
+fn median_pool_game(headers: &HeaderMap, query_game: Option<&str>) -> String {
+    pool_game(&crate::suggest::game_from(headers, query_game))
+}
+
 /// `GET /api/marketplace-list?kind=set|artist|name|species&key=<slug or dex>[&game=][&format=c1]`
 /// (`kind=seller` is served from `marketplace_seller_books`, see `seller_list`).
 pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -> Response {
@@ -780,7 +788,7 @@ pub async fn daily_medians(State(state): State<AppState>, headers: HeaderMap, ur
     if ids.is_empty() {
         return catalog_api::response(StatusCode::OK, json!({"medians": {}}), "public, max-age=300, s-maxage=3600");
     }
-    let game = crate::suggest::game_from(&headers, q.first("game"));
+    let game = median_pool_game(&headers, q.first("game"));
     let Some(pool) = catalog_api::game_pool(&state, &game).await else {
         return catalog_api::response(StatusCode::SERVICE_UNAVAILABLE, json!({"error": "Marketplace database unavailable."}), "no-store");
     };
@@ -1938,6 +1946,97 @@ mod game_scope {
     }
 }
 
+/// The database name the `/api/marketplace-daily-medians` handler asks for,
+/// through [`median_pool_game`] exactly as the handler composes it. Needs no
+/// database: it pins which pool a request selects, not what comes out of it.
+#[cfg(test)]
+mod median_game_scope {
+    use super::*;
+
+    /// The handler's own chain: the query `game`, else the `x-pokoin-game`
+    /// header, then the database name the route reads.
+    fn served_as(query_game: Option<&str>, header_game: Option<&str>) -> String {
+        let mut headers = HeaderMap::new();
+        if let Some(value) = header_game {
+            headers.insert("x-pokoin-game", HeaderValue::from_str(value).unwrap());
+        }
+        median_pool_game(&headers, query_game)
+    }
+
+    #[test]
+    fn daily_medians_reads_an_alias_from_that_games_database() {
+        for name in ["onepiece", "one-piece", "op"] {
+            assert_eq!(served_as(Some(name), None), "one_piece", "{name}");
+        }
+        assert_eq!(
+            served_as(None, Some("onepiece")),
+            "one_piece",
+            "the header names the game the same way"
+        );
+    }
+
+    #[test]
+    fn daily_medians_keeps_pokemon_and_an_unknown_name_on_todays_answer() {
+        for (query, expected) in [
+            (None, "pokemon"),
+            (Some(""), "pokemon"),
+            (Some("pokemon"), "pokemon"),
+            (Some("poke"), "pokemon"),
+            (Some("default"), "pokemon"),
+            // Not a game-table name: untouched, so it still misses and answers
+            // 503 instead of quietly reading the Pokémon medians.
+            (Some("nonsense"), "nonsense"),
+        ] {
+            assert_eq!(served_as(query, None), expected, "{query:?}");
+        }
+    }
+}
+
+/// The 503 with no database anywhere: `new_state` leaves every pool `None`, and a
+/// game no one configured is refused before the handler reaches a query, so the
+/// route builds and answers from no variable at all.
+#[cfg(test)]
+mod unavailable_without_a_database {
+    use super::*;
+    use axum::routing::get;
+
+    async fn answer(path: &str) -> (StatusCode, String) {
+        let state =
+            crate::new_state(pokoin_config::Config::from_env(), std::time::Instant::now()).unwrap();
+        let app = Router::new()
+            .route("/api/marketplace-list", get(list))
+            .route("/api/marketplace-daily-medians", get(daily_medians))
+            .with_state(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(path.to_owned())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let cache = response.headers()["cache-control"]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        (status, cache)
+    }
+
+    #[tokio::test]
+    async fn an_unknown_game_answers_503_without_any_database() {
+        for path in [
+            "/api/marketplace-list?kind=name&key=0000000000000000&game=nonsense",
+            "/api/marketplace-daily-medians?ids=1&game=nonsense",
+        ] {
+            let (status, cache) = answer(path).await;
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{path}");
+            assert_eq!(cache, "no-store", "{path}");
+        }
+    }
+}
+
 /// `game=<alias>` through the real route against a satellite database. Needs
 /// `POKOIN_TEST_DATABASE_URL` (the Pokémon pool, created and dropped here) and a
 /// reachable `ONE_PIECE_MARKETPLACE_DATABASE_URL` (the satellite); without either
@@ -1950,13 +2049,18 @@ mod game_scoped_lists {
     /// A name key no builder can write, so the read always misses.
     const MISSING_KEY: &str = "0000000000000000";
 
+    /// The one test here, named on every line it prints when it skips, so a run
+    /// that asserted nothing says so.
+    const THIS_TEST: &str =
+        "game_scoped_lists::an_alias_of_a_configured_game_answers_like_that_games_canonical_id";
+
     async fn scratch_database() -> Option<(PgPool, PgPool, String)> {
         let Ok(url) = std::env::var("POKOIN_TEST_DATABASE_URL") else {
-            eprintln!("skipped: POKOIN_TEST_DATABASE_URL is not set");
+            eprintln!("SKIPPED: {THIS_TEST}: POKOIN_TEST_DATABASE_URL is not set");
             return None;
         };
         if catalog_api::game_db_url("one_piece").is_none() {
-            eprintln!("skipped: ONE_PIECE_MARKETPLACE_DATABASE_URL is not set");
+            eprintln!("SKIPPED: {THIS_TEST}: ONE_PIECE_MARKETPLACE_DATABASE_URL is not set");
             return None;
         }
         let admin = PgPool::connect(&url)
