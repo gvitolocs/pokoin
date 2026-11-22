@@ -2008,11 +2008,19 @@ mod unavailable_without_a_database {
             .route("/api/marketplace-daily-medians", get(daily_medians))
             .with_state(state);
         let response = app
-            .oneshot(Request::builder().uri(path.to_owned()).body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri(path.to_owned())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         let status = response.status();
-        let cache = response.headers()["cache-control"].to_str().unwrap().to_owned();
+        let cache = response.headers()["cache-control"]
+            .to_str()
+            .unwrap()
+            .to_owned();
         (status, cache)
     }
 
