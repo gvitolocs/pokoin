@@ -870,7 +870,7 @@ pub async fn card_price_history(State(state): State<RouteState>, method: Method,
     // `fields=graph` answers the same blocks thinned to what the desk graph draws
     // (PH-06); without it the response is the full one above.
     let body = if graph {
-        history_sources::graph_answer(&body, reverse, &cm_condition)
+        history_sources::graph_answer_with_fx(&body, reverse, &cm_condition, &rates)
     } else {
         body
     };

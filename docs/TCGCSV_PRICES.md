@@ -168,6 +168,16 @@ that same facet — and thins a span over 400 days to one point per ISO week,
 marked `"bucket": "week"`. Without the parameter the full shape above is
 unchanged.
 
+That one TCGplayer entry gains two fields when its market price stopped before
+the source did: `lastObservedDay`, the last day TCGplayer answered the series at
+all, and `lastListing` — `{day, lowPkn, low, currency}` — the cheapest ask of the
+newest such day that had one, `low` as TCGplayer wrote it and `lowPkn` through the
+same rate its `marketPkn` used, left out when no rate converts it. A series priced
+through its last day carries neither, and `days` is what it always was: only the
+priced days. The desk draws the line flat to `lastObservedDay` and quotes
+`lastListing` under it, so an ended price and an ended source are not the same
+picture.
+
 Deploy through `scripts/deploy-pokoin-rust.sh` from the exact integrated
 `origin/main` commit. TCGCSV reader configuration is optional to the CardTrader feed.
 
