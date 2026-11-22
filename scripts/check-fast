@@ -411,10 +411,10 @@ step_postgres() {
     port=$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
     pg_name=pokoin-check-pg-$$
     docker run -d --rm --name "$pg_name" -e POSTGRES_PASSWORD=test -p "127.0.0.1:$port:5432" \
-        --tmpfs /var/lib/postgresql/data postgres:17-alpine >/dev/null
+        --tmpfs /var/lib/postgresql postgres:19.0-alpine >/dev/null
     for i in $(seq 1 60); do
         if docker exec "$pg_name" pg_isready -q -h 127.0.0.1 -U postgres; then
-            echo "postgres:17-alpine ready on 127.0.0.1:$port"
+            echo "postgres:19.0-alpine ready on 127.0.0.1:$port"
             echo "export POKOIN_TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:$port/postgres" >"$tmp/dburl.sh"
             REASON="127.0.0.1:$port"
             return 0
