@@ -13451,6 +13451,7 @@ button.sold-graph-key.is-source:hover { color: var(--text); }
 .sold-graph-tip.is-rows .sold-graph-tip-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.34rem;
   margin-top: 0.1rem;
   color: var(--muted);
@@ -13484,6 +13485,16 @@ button.sold-graph-key.is-source:hover { color: var(--text); }
   font-weight: 800;
 }
 .sold-graph-tip.is-rows .sold-graph-tip-value.is-none { color: var(--muted); font-weight: 600; }
+/* A row's own second line, under its price column: what the source has for a day
+   it priced no more. */
+.sold-graph-tip.is-rows .sold-graph-tip-sub {
+  flex: 0 0 100%;
+  padding-left: 0.5rem;
+  text-align: right;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
 .sold-graph-tip.is-rows .sold-graph-tip-more {
   margin-top: 0.12rem;
   color: var(--muted);

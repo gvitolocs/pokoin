@@ -526,3 +526,47 @@ test('the stopped line is carried flat to the day the source last answered', () 
   assert.equal(split.segments[0].length, 2, 'the pair is one run of two points');
   assert.equal(split.bridges.length, 0);
 });
+
+test('the hover row of a carried day says the price is old, and quotes the listing', () => {
+  const line = {
+    key: 'tcgplayer',
+    label: 'TCGplayer',
+    kind: 'source',
+    gapDays: 10,
+    carry: 'near',
+    days: [{ day: '2026-10-18', value: 150 }, { day: '2026-10-20', value: 154.35 }],
+    lastObservedDay: '2026-11-21',
+    lastListing: { day: '2026-11-21', lowPkn: 133.33, low: '0.8000', currency: 'USD' },
+  };
+  const row = (day, of = line) => soldGraphHoverRows([of], day, { formatValue: (value) => `${value} PKN` }).rows[0];
+  // On a day the line is carried over: the price is old, not missing, and what
+  // TCGplayer still has is its cheapest listing. The words follow the sold rows'
+  // "NM · JP … no sale", and the listing is the row's own quieter line.
+  assert.deepEqual(row('2026-11-16'), {
+    key: 'tcgplayer',
+    label: 'TCGplayer',
+    color: '',
+    dashed: false,
+    picked: false,
+    value: null,
+    text: 'no recent sale',
+    sub: 'lowest listing 133.33 PKN',
+  });
+  // The last day it was quoted keeps its own price; a day past the carry is the
+  // plain no data again, with nothing quoted under it.
+  assert.deepEqual({ value: row('2026-10-20').value, text: row('2026-10-20').text, sub: row('2026-10-20').sub }, {
+    value: 154.35, text: '154.35 PKN', sub: '',
+  });
+  assert.deepEqual({ value: row('2026-12-10').value, text: row('2026-12-10').text, sub: row('2026-12-10').sub }, {
+    value: null, text: 'no data', sub: '',
+  });
+  // Before its first day the row reads as it always did.
+  assert.equal(row('2026-09-30').text, 'from 2026-10-18');
+  // A carried line whose answer has no listing says only that the price is old.
+  assert.deepEqual({ text: row('2026-11-16', { ...line, lastListing: null }).text, sub: row('2026-11-16', { ...line, lastListing: null }).sub }, {
+    text: 'no recent sale', sub: '',
+  });
+  // A source that does not report the day is read exactly as before.
+  const plain = { key: 'cardtrader_ask', label: 'CT lowest ask', kind: 'source', gapDays: 3, carry: 'near', days: line.days };
+  assert.deepEqual({ text: row('2026-11-16', plain).text, sub: row('2026-11-16', plain).sub }, { text: 'no data', sub: '' });
+});

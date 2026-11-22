@@ -457,7 +457,18 @@ export default function SoldPriceGraph(props) {
     };
     const sources = underLines()
       .filter((row) => row.isSource)
-      .map((row) => ({ key: row.key, label: row.label, kind: 'source', color: row.color, dashed: row.dashed, gapDays: row.gapDays, carry: row.carry, days: row.days }));
+      .map((row) => ({
+        key: row.key,
+        label: row.label,
+        kind: 'source',
+        color: row.color,
+        dashed: row.dashed,
+        gapDays: row.gapDays,
+        carry: row.carry,
+        lastObservedDay: row.lastObservedDay,
+        lastListing: row.lastListing,
+        days: row.days,
+      }));
     // Pokoin with a line of its own is one of the source rows above. With none it
     // is one value, today: its row joins the list only when the guide stands on
     // the last day of the range, and is left out before that.
@@ -798,6 +809,10 @@ export default function SoldPriceGraph(props) {
                         <i class={['sold-graph-tip-swatch', { 'is-dashed': row.dashed }]} />
                         <span class="sold-graph-tip-label">{row.label}</span>
                         <em class={['sold-graph-tip-value', { 'is-none': row.value == null }]}>{row.text}</em>
+                        {/* What the source has for a day it priced no more, never in place of a price. */}
+                        <Show when={row.sub}>
+                          <em class="sold-graph-tip-sub">{row.sub}</em>
+                        </Show>
                       </span>
                     )}
                   </For>
