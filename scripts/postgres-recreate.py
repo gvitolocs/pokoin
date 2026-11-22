@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Recreate a Postgres container on a new image of the SAME major version.
 
-A minor update (17.x -> 17.11) only swaps binaries: the data directory is
+A minor update (19.0 -> 19.1) only swaps binaries: the data directory is
 reused as is. Docker cannot change a container's image in place, so this
 rebuilds the `docker run` from `docker inspect` and keeps the old container,
 stopped and renamed, for rollback. docs/POSTGRES_VERSION.md is the runbook.
 
-  scripts/postgres-recreate.py pokoin-marketplace-postgres-15t postgres:17.11-alpine          # dry run
-  scripts/postgres-recreate.py pokoin-marketplace-postgres-15t postgres:17.11-alpine --apply
+  scripts/postgres-recreate.py pokoin-marketplace-postgres-15t postgres:19.0-alpine           # dry run
+  scripts/postgres-recreate.py pokoin-marketplace-postgres-15t postgres:19.0-alpine --apply
 
 Refuses, without touching anything, when:
 - the new image is a different major than the data directory (PG_VERSION);
@@ -208,7 +208,7 @@ def wait_ready(name, timeout):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("container")
-    parser.add_argument("image", help="new image, same major, e.g. postgres:17.11-alpine")
+    parser.add_argument("image", help="new image, same major, e.g. postgres:19.0-alpine")
     parser.add_argument("--apply", action="store_true", help="do it (default: print the plan only)")
     parser.add_argument("--stop-timeout", type=int, default=60)
     parser.add_argument("--ready-timeout", type=int, default=180)
