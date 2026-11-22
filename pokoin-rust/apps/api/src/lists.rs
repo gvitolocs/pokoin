@@ -101,6 +101,14 @@ fn request_games(headers: &HeaderMap, query_game: Option<&str>) -> (String, Stri
     (requested, pool)
 }
 
+/// The database `/api/marketplace-daily-medians` reads, named by the token the
+/// request carried: [`pool_game`] follows an alias of a configured game to that
+/// game's database, as [`request_games`] does for the snapshot kinds, and leaves
+/// every other name the request spelled it.
+fn median_pool_game(headers: &HeaderMap, query_game: Option<&str>) -> String {
+    pool_game(&crate::suggest::game_from(headers, query_game))
+}
+
 /// `GET /api/marketplace-list?kind=set|artist|name|species&key=<slug or dex>[&game=][&format=c1]`
 /// (`kind=seller` is served from `marketplace_seller_books`, see `seller_list`).
 pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -> Response {
@@ -780,7 +788,7 @@ pub async fn daily_medians(State(state): State<AppState>, headers: HeaderMap, ur
     if ids.is_empty() {
         return catalog_api::response(StatusCode::OK, json!({"medians": {}}), "public, max-age=300, s-maxage=3600");
     }
-    let game = crate::suggest::game_from(&headers, q.first("game"));
+    let game = median_pool_game(&headers, q.first("game"));
     let Some(pool) = catalog_api::game_pool(&state, &game).await else {
         return catalog_api::response(StatusCode::SERVICE_UNAVAILABLE, json!({"error": "Marketplace database unavailable."}), "no-store");
     };
