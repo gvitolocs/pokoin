@@ -1088,21 +1088,36 @@ where
     }
 }
 
-/// The row with the most days among those `within` accepts, the first when
-/// several tie; `None` when none is accepted.
+/// The days of a series the graph can draw: TCGplayer keeps answering a product
+/// whose market price has gone, and those days are not a line.
+fn tcg_priced_days(row: &Value) -> usize {
+    row.get("days")
+        .and_then(Value::as_array)
+        .map(|days| {
+            days.iter()
+                .filter(|day| day.get("marketPkn").is_some_and(|price| !price.is_null()))
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+/// The row with the most priced days among those `within` accepts, the most rows
+/// when several tie, and the first of those that tie on both; `None` when none is
+/// accepted.
 fn most_days(series: &[Value], within: impl Fn(&Value) -> bool) -> Option<&Value> {
-    let mut best: Option<(&Value, usize)> = None;
+    let mut best: Option<(&Value, usize, usize)> = None;
     for row in series.iter().filter(|row| within(row)) {
+        let priced = tcg_priced_days(row);
         let seen = row
             .get("days")
             .and_then(Value::as_array)
             .map(Vec::len)
             .unwrap_or(0);
-        if best.is_none_or(|(_, previous)| seen > previous) {
-            best = Some((row, seen));
+        if best.is_none_or(|(_, best_priced, best_seen)| (priced, seen) > (best_priced, best_seen)) {
+            best = Some((row, priced, seen));
         }
     }
-    best.map(|(row, _)| row)
+    best.map(|(row, _, _)| row)
 }
 
 fn is_reverse_series(series: &Value) -> bool {
@@ -1112,8 +1127,8 @@ fn is_reverse_series(series: &Value) -> bool {
 }
 
 /// The TCGplayer series the graph plots: a reverse-holo one when `reverse`, a
-/// non-reverse one otherwise; among those the one with the most days, and of all
-/// of them when none is in the preferred group.
+/// non-reverse one otherwise; among those the one with the most priced days, and
+/// of all of them when none is in the preferred group.
 pub fn chosen_series(series: &[Value], reverse: bool) -> Option<&Value> {
     most_days(series, |row| is_reverse_series(row) == reverse)
         .or_else(|| most_days(series, |_| true))
@@ -2411,6 +2426,44 @@ mod tests {
             chosen_series(&[json!({ "subtype": "Normal" })], false).expect("one")["subtype"],
             json!("Normal"),
             "a series without days is still the only one to plot"
+        );
+    }
+
+    /// TCGplayer keeps publishing a series after its market price stops, so a
+    /// count of its rows is not a count of the days the graph can draw.
+    #[test]
+    fn tcgplayer_series_choice_counts_priced_days() {
+        let priced = |day: &str, pkn: f64| json!({ "day": day, "marketPkn": pkn });
+        let unpriced = |day: &str| json!({ "day": day, "marketPkn": Value::Null });
+        let rows = vec![
+            json!({
+                "subtype": "Holofoil",
+                "days": [
+                    priced("2026-10-20", 154.35),
+                    unpriced("2026-11-10"),
+                    unpriced("2026-11-11"),
+                    unpriced("2026-11-12"),
+                ],
+            }),
+            json!({
+                "subtype": "Normal",
+                "days": [priced("2026-11-05", 36.0), priced("2026-11-06", 37.0)],
+            }),
+        ];
+        assert_eq!(
+            chosen_series(&rows, false).expect("one")["subtype"],
+            json!("Normal"),
+            "four days of which one is priced is less series than two priced days"
+        );
+        // A day that carries no `marketPkn` at all is as unpriced as a null one.
+        let holes = vec![
+            json!({ "subtype": "Holofoil", "days": [unpriced("2026-11-01"), { "day": "2026-11-02" }, { "day": "2026-11-03" }] }),
+            json!({ "subtype": "Normal", "days": [unpriced("2026-11-04"), priced("2026-11-05", 36.0)] }),
+        ];
+        assert_eq!(
+            chosen_series(&holes, false).expect("one")["subtype"],
+            json!("Normal"),
+            "the group's one priced day beats three days without any price field"
         );
     }
 
