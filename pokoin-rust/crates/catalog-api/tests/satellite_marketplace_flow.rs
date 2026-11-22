@@ -124,7 +124,7 @@ fn printing_path(p: &Value) -> Option<&str> {
 #[tokio::test]
 async fn satellite_marketplace_routes_read_the_game_catalog() {
     let Ok(base) = std::env::var("POKOIN_TEST_DATABASE_URL") else {
-        eprintln!("POKOIN_TEST_DATABASE_URL unset; skipping");
+        eprintln!("SKIPPED: satellite_marketplace_routes_read_the_game_catalog: POKOIN_TEST_DATABASE_URL is unset");
         return;
     };
     let admin = PgPoolOptions::new().max_connections(1).connect(&base).await.unwrap();
@@ -368,7 +368,7 @@ impl Drop for ScratchDbs {
 #[tokio::test]
 async fn satellite_expansion_page_answers_404_for_an_unknown_set() {
     let Ok(base) = std::env::var("POKOIN_TEST_DATABASE_URL") else {
-        eprintln!("POKOIN_TEST_DATABASE_URL unset; skipping");
+        eprintln!("SKIPPED: satellite_expansion_page_answers_404_for_an_unknown_set: POKOIN_TEST_DATABASE_URL is unset");
         return;
     };
     let admin = PgPoolOptions::new()
@@ -454,5 +454,188 @@ insert into public.marketplace_search_candidates (card_id, ct_id, name, set_name
     pokemon.close().await;
     onepiece.close().await;
     lorcana.close().await;
+    drop(scratch);
+}
+
+/// The singles desk `read_set_cards` reads, plus the price cache it overlays:
+/// what a resolved Pokémon set still needs after its wordmark row.
+const POKEMON_DESK_SCHEMA: &str = r#"
+create table public.marketplace_search_candidates (
+  card_id bigint primary key, ct_id bigint not null, name text not null,
+  set_name text not null default '', card_number text not null default '',
+  rarity text not null default 'Card', item_kind text not null default 'single',
+  product_type text not null default 'card', image_url text, cdn_image_url text,
+  preview_image_url text, homepage_image_url text, emoji text not null default '',
+  version text, rarity_kind text, art_layout text, artist text, illustrator text,
+  set_order integer not null default 0);
+create table public.marketplace_card_urls (card_id bigint primary key, ct_id bigint,
+  language text not null default 'en', canonical_path text);
+create table public.cheapest_homepage_cache_blueprint (pokoin_card_id text, blueprint_id bigint,
+  cheapest_price_pkn numeric, eligible_listing_count integer not null default 0,
+  eligible_quantity integer not null default 0, provider text not null default 'cardtrader');
+"#;
+
+const SLUG_READ_DB: &str = "sat_slug_read_pokemon";
+const SLUG_FAILING_LOOKUP_DB: &str = "sat_slug_failing_lookup_pokemon";
+
+/// A Pokémon set reads from `pokoin_pokemon_expansions` and
+/// `marketplace_set_card_counts`, the two tables with one row per set. The
+/// version-set fallback behind them evaluated a slug expression over every row
+/// of the largest catalogue table, so an unknown slug spent the statement
+/// timeout instead of answering the 404 a satellite already answers.
+#[tokio::test]
+async fn pokemon_expansion_page_reads_the_set_tables_only() {
+    let Ok(base) = std::env::var("POKOIN_TEST_DATABASE_URL") else {
+        eprintln!("SKIPPED: pokemon_expansion_page_reads_the_set_tables_only: POKOIN_TEST_DATABASE_URL is unset");
+        return;
+    };
+    let admin = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&base)
+        .await
+        .unwrap();
+    let scratch = ScratchDbs {
+        base: base.clone(),
+        names: &[SLUG_READ_DB, SLUG_FAILING_LOOKUP_DB],
+    };
+
+    let (_, desk) = fresh_db(&admin, &base, SLUG_READ_DB).await;
+    let (_, failing) = fresh_db(&admin, &base, SLUG_FAILING_LOOKUP_DB).await;
+    exec_all(&desk, POKEMON_DESK_SCHEMA).await;
+    exec_all(&desk, EXPANSION_SCHEMA).await;
+    // One set per wordmark source, so neither of the two lookups is silently lost.
+    exec_all(
+        &desk,
+        r#"
+insert into public.pokoin_pokemon_expansions (name, symbol_image_url, logo_image_url, catalog_card_count, nationality)
+  values ('Base Set', 'https://cdn.pokoin.com/expansions/symbols/base-set.png', '', 102, 'Western');
+insert into public.marketplace_set_card_counts (set_name, slug, catalog_card_count)
+  values ('Skyridge', 'skyridge', 244);
+insert into public.marketplace_search_candidates (card_id, ct_id, name, set_name, card_number, cdn_image_url)
+  values (500001, 600001, 'Pikachu', 'Base Set', '44', 'https://cdn.pokoin.com/cards/500001.webp'),
+         (500002, 600002, 'Charizard', 'Base Set', '4', 'https://cdn.pokoin.com/cards/500002.webp'),
+         (500003, 600003, 'Lugia', 'Skyridge', '9', 'https://cdn.pokoin.com/cards/500003.webp');
+"#,
+    )
+    .await;
+    // The by-slug lookup cannot run here: the wordmark read finds nothing and the
+    // set-count read behind it asks for a `slug` column this table does not have.
+    // The version-set table is present and holds the requested set, so a fallback
+    // would answer 200 with an empty desk from a database the desk cannot read.
+    exec_all(
+        &failing,
+        r#"
+create extension if not exists unaccent;
+create table public.pokoin_pokemon_expansions (name text primary key, symbol_image_url text,
+  logo_image_url text, catalog_card_count integer not null default 0, nationality text not null default '');
+create table public.marketplace_set_card_counts (set_name text primary key,
+  catalog_card_count integer not null default 0);
+create table public.marketplace_card_versions (
+  card_id bigint primary key, blueprint_id bigint, name text not null, expansion_name text not null,
+  expansion_number text, expansion_number_int integer, product_type text not null default 'card');
+insert into public.marketplace_card_versions (card_id, blueprint_id, name, expansion_name, expansion_number)
+  values (700001, 800001, 'Ivysaur', 'Jungle', '44');
+"#,
+    )
+    .await;
+    exec_all(&failing, POKEMON_DESK_SCHEMA).await;
+
+    let desk_app = pokoin_catalog_api::router(pokoin_api_common::RouteState::new(
+        pokoin_api_common::ApiState::new(desk.clone(), desk.clone(), None, 1),
+        pokoin_accounts::DomainState::default(),
+    ));
+    let failing_app = pokoin_catalog_api::router(pokoin_api_common::RouteState::new(
+        pokoin_api_common::ApiState::new(failing.clone(), failing.clone(), None, 1),
+        pokoin_accounts::DomainState::default(),
+    ));
+
+    // 1. An unknown slug on a database that has no version-set table at all.
+    let (status, body) = get(
+        &desk_app,
+        "/api/marketplace-expansion-page?game=pokemon&slug=zzz-not-a-set",
+        None,
+    )
+    .await;
+    println!("pokemon expansion-page unknown slug body: {body}");
+    assert_eq!(status, StatusCode::NOT_FOUND, "body: {body}");
+    assert_eq!(
+        body,
+        serde_json::json!({"error": "Expansion not found.", "slug": "zzz-not-a-set", "expansionName": ""})
+    );
+
+    // 2. A wordmark row answers with its own symbol and the desk below it.
+    let (status, body) = get(
+        &desk_app,
+        "/api/marketplace-expansion-page?game=pokemon&slug=base-set",
+        None,
+    )
+    .await;
+    println!("pokemon expansion-page base-set body: {body}");
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["expansion"]["name"], "Base Set");
+    assert_eq!(body["expansion"]["slug"], "base-set");
+    assert_eq!(body["expansion"]["nationality"], "western");
+    assert_eq!(
+        body["expansion"]["symbolImageUrl"],
+        "https://cdn.pokoin.com/expansions/symbols/base-set.png"
+    );
+    assert_eq!(body["expansion"]["cardCount"], 102);
+    assert_eq!(body["total"], 102);
+    let cards = body["cards"].as_array().expect("base-set cards");
+    assert_eq!(cards.len(), 2, "body: {body}");
+    assert_eq!(printing_id(&cards[0]), Some(500002), "cards: {cards:?}");
+
+    // 3. A set-count row answers with the slug it stores and no letter mark.
+    let (status, body) = get(
+        &desk_app,
+        "/api/marketplace-expansion-page?game=pokemon&slug=skyridge",
+        None,
+    )
+    .await;
+    println!("pokemon expansion-page skyridge body: {body}");
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["expansion"]["name"], "Skyridge");
+    assert_eq!(body["expansion"]["slug"], "skyridge");
+    assert_eq!(body["expansion"]["defaultSymbolUrl"], "");
+    assert_eq!(body["expansion"]["cardCount"], 244);
+    let cards = body["cards"].as_array().expect("skyridge cards");
+    assert_eq!(cards.len(), 1, "body: {body}");
+    assert_eq!(printing_id(&cards[0]), Some(500003), "cards: {cards:?}");
+
+    // 4. A lookup that cannot run is the server error the edge may serve stale,
+    // for a Pokémon slug too: a database failure never becomes an answer about
+    // whether the set exists.
+    let (status, body) = get(
+        &failing_app,
+        "/api/marketplace-expansion-page?game=pokemon&slug=jungle",
+        None,
+    )
+    .await;
+    println!("pokemon expansion-page failing lookup body: {body}");
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "body: {body}");
+    assert_ne!(status, StatusCode::NOT_FOUND);
+
+    // 5. A name no row carries keeps the placeholder desk the rail links to.
+    let (status, body) = get(
+        &desk_app,
+        "/api/marketplace-expansion-page?game=pokemon&expansionName=Delta%20Reign",
+        None,
+    )
+    .await;
+    println!("pokemon expansion-page placeholder body: {body}");
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["expansion"]["name"], "Delta Reign");
+    assert_eq!(body["expansion"]["slug"], "delta-reign");
+    assert_eq!(
+        body["expansion"]["defaultSymbolUrl"],
+        "https://cdn.pokoin.com/expansions/symbols/delta-reign.png"
+    );
+    assert_eq!(body["expansion"]["cardCount"], 0);
+    let cards = body["cards"].as_array().expect("placeholder cards");
+    assert!(cards.is_empty(), "body: {body}");
+
+    admin.close().await;
+    desk.close().await;
+    failing.close().await;
     drop(scratch);
 }
