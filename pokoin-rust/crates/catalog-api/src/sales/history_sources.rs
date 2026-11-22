@@ -1138,10 +1138,10 @@ pub fn chosen_series(series: &[Value], reverse: bool) -> Option<&Value> {
 /// TCGplayer goes on answering the days of a product that has no market price,
 /// and a line that simply ends cannot tell that apart from a source that stopped;
 /// `last_observed_day` is the last day it answered at all, when that is later than
-/// its last priced day, and `last_listing` the cheapest ask of the newest such day
-/// that had one — in PKN with the series' own conversion, so a low price the rates
-/// cannot convert is not quoted at all. Nothing for a series priced through its
-/// last day.
+/// its last priced day, and `last_listing` the newest such later day whose ask
+/// reaches a PKN amount — an ask of zero or one the rates cannot convert is passed
+/// over for the older day that is neither, so one dead quote does not silence the
+/// source. Nothing for a series priced through its last day.
 fn tcg_tail_fields(days: &[Value], currency: &str, rates: &FxRates) -> Vec<(String, Value)> {
     let day = |row: &Value| day_of(row.get("day"));
     let is_priced = |row: &&Value| row.get("marketPkn").is_some_and(|price| !price.is_null());
@@ -1152,27 +1152,29 @@ fn tcg_tail_fields(days: &[Value], currency: &str, rates: &FxRates) -> Vec<(Stri
     if priced_until.as_deref() == Some(observed.as_str()) {
         return Vec::new();
     }
-    let mut out = Vec::with_capacity(2);
-    out.push(("lastObservedDay".to_owned(), json!(observed)));
     let listing = days
         .iter()
         .filter(|row| day(row).as_str() > priced_until.as_deref().unwrap_or(""))
-        .filter(|row| number_of(row.get("lowPrice")).is_some())
-        .max_by_key(|row| day(row));
-    if let Some(row) = listing {
-        let low_day = day(row);
-        let rate = rates.rate_for(&low_day).map(|rate| rate.rate);
-        if let Some(low_pkn) = pkn_of_usd(number_of(row.get("lowPrice")), rate) {
-            out.push((
-                "lastListing".to_owned(),
-                json!({
-                    "day": low_day,
-                    "lowPkn": pg::js_number(low_pkn),
-                    "low": row["lowPrice"].clone(),
-                    "currency": currency,
-                }),
-            ));
-        }
+        .filter_map(|row| {
+            let low_day = day(row);
+            let low_pkn = pkn_of_usd(
+                number_of(row.get("lowPrice")),
+                Some(rates.rate_for(&low_day)?.rate),
+            )?;
+            Some((low_day, low_pkn, row["lowPrice"].clone()))
+        })
+        .max_by_key(|(low_day, _, _)| low_day.clone());
+    let mut out = vec![("lastObservedDay".to_owned(), json!(observed))];
+    if let Some((low_day, low_pkn, low)) = listing {
+        out.push((
+            "lastListing".to_owned(),
+            json!({
+                "day": low_day,
+                "lowPkn": pg::js_number(low_pkn),
+                "low": low,
+                "currency": currency,
+            }),
+        ));
     }
     out
 }
@@ -2605,6 +2607,39 @@ mod tests {
             assert!(row.get("lastObservedDay").is_none(), "{row}");
             assert!(row.get("lastListing").is_none(), "{row}");
         }
+    }
+
+    /// TCGplayer writes `0.0000` for a day it has no ask for, which is not the
+    /// source going quiet: the newest tail day that reaches a PKN amount is the one
+    /// quoted, and only a tail with nothing to quote sends no listing at all.
+    #[test]
+    fn graph_answer_quotes_the_newest_usable_tail_listing() {
+        let tail = |older: &str, newer: &str| {
+            let mut body = graph_body();
+            body["tcgplayer"]["series"] = json!([
+                {
+                    "subtype": "Unlimited Holofoil",
+                    "days": [
+                        { "day": "2026-11-14", "marketPkn": 154.35, "lowPrice": "0.7900" },
+                        { "day": "2026-11-15", "marketPrice": null, "lowPrice": older },
+                        { "day": "2026-11-16", "marketPrice": null, "lowPrice": newer },
+                    ],
+                },
+            ]);
+            graph_answer_with_fx(&body, false, "NM", &rates())
+        };
+        assert_eq!(
+            tail("0.8100", "0.0000")["tcgplayer"]["series"][0]["lastListing"],
+            json!({ "day": "2026-11-15", "lowPkn": 140.87, "low": "0.8100", "currency": "USD" }),
+            "a zero ask passes the quote to the older day that has one"
+        );
+        let answer = tail("0.0000", "0.0000");
+        let chosen = &answer["tcgplayer"]["series"][0];
+        assert_eq!(chosen["lastObservedDay"], json!("2026-11-16"));
+        assert!(
+            chosen.get("lastListing").is_none(),
+            "a tail of nothing but zero asks quotes nothing: {chosen}"
+        );
     }
 
     #[test]
