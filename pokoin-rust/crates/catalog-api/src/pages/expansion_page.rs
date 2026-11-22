@@ -131,34 +131,18 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
     }
 
     let mut expansion = if !slug.is_empty() {
-        // try/catch around readExpansionBySlug -> null on failure. A satellite cannot
-        // fall through, so a failing lookup is the 500 the reference catch answers,
-        // not a 404 that tells a crawler the set is gone.
+        // A failing lookup is the 500 the reference catch answers, not a 404 that
+        // tells a crawler the set is gone.
         match react_sql::read_expansion_by_slug(&pool, is_pokemon, &slug).await {
             Ok(expansion) => expansion,
-            Err(error) if !is_pokemon => {
+            Err(error) => {
                 tracing::error!(route = "expansion-page", step = "expansion-by-slug", game = %game, slug = %slug, %error, "marketplace-expansion-page failed");
                 return support::node_error_response(&error, "Marketplace expansion page failed.");
-            }
-            Err(error) => {
-                tracing::warn!(route = "expansion-page", step = "expansion-by-slug", game = %game, slug = %slug, %error, "marketplace-expansion-page fell back to the version-set lookup");
-                None
             }
         }
     } else {
         None
     };
-    if expansion.is_none() && is_pokemon {
-        // marketplace_card_versions exists in the Pokémon catalog only, so a satellite must not fall back to it.
-        let listed = match expansions::rows_for_expansions(&pool, Some(&slug), 1).await {
-            Ok(listed) => listed,
-            Err(error) => {
-                tracing::error!(route = "expansion-page", step = "expansion-lookup", game = %game, slug = %slug, %error, "marketplace-expansion-page failed");
-                return support::node_error_response(&error, "Marketplace expansion page failed.");
-            }
-        };
-        expansion = listed.into_iter().next();
-    }
     if expansion.is_none() && !expansion_name.is_empty() {
         expansion = Some(json!({
             "name": expansion_name,
