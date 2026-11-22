@@ -3,7 +3,7 @@
 # data, while the live writer keeps serving. Nothing here stops, changes or
 # writes to the live container; it only reads it with pg_basebackup.
 #
-#   scripts/postgres-major-upgrade.sh rehearse 19beta4            # copy mode, keeps the 17 copy
+#   scripts/postgres-major-upgrade.sh rehearse 19.0               # copy mode, keeps the 17 copy
 #   MODE=link scripts/postgres-major-upgrade.sh rehearse 19.1     # link mode, as fast as the cutover
 #   scripts/postgres-major-upgrade.sh clean <work-dir>
 #
@@ -28,7 +28,7 @@ die() { echo "postgres-major-upgrade: $*" >&2; exit 1; }
 
 action=${1:-}
 case $action in
-  rehearse) new=${2:?target version, e.g. 19beta4 or 19.1} ;;
+  rehearse) new=${2:?target version, e.g. 19.0 or 19.1} ;;
   clean)
     dir=${2:?work dir}
     [[ $dir == "$ROOT"/* ]] || die "refusing to delete $dir: not under $ROOT"

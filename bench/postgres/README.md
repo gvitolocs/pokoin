@@ -45,7 +45,7 @@ Pokoin listings, with popularity skewed so most traffic hits a few cards.
 ```bash
 OUT=/path/to/pg          # outside the repo
 bench/postgres/build-pg.sh REL_17_11 17 "$OUT"
-bench/postgres/build-pg.sh REL_19_BETA4 19 "$OUT"
+bench/postgres/build-pg.sh REL_19_0 19 "$OUT"
 # initdb the 17 cluster (-U pokoin_marketplace, UTF8), include postgresql.bench.conf, start it, createdb pokoin_marketplace
 bench/postgres/load-schema.sh "$OUT/inst17/bin/psql" "host=... port=... user=pokoin_marketplace dbname=pokoin_marketplace" ../cardvault schema.tsv
 psql ... -v scale=1 -v names_tsv=names.tsv -v sets_tsv=sets.tsv -f bench/postgres/seed.sql
