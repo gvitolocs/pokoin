@@ -425,7 +425,7 @@ function stoppedSeries({ priced, tail, withNormal = true }) {
           days: [...priced, ...tail.map((day) => ({ day, marketPrice: null }))],
           ...(tail.length ? {
             lastObservedDay: tail[tail.length - 1],
-            lastListing: { day: tail[tail.length - 1], lowPkn: 133.33, low: '0.8000', currency: 'USD' },
+            lastListing: { day: tail[tail.length - 1], lowPkn: 133.33 },
           } : {}),
         },
         ...(withNormal ? [{
@@ -472,7 +472,7 @@ test('the line carries the day the source stopped being priced', () => {
   const [tp] = priceSourceSeries(stopped);
   assert.deepEqual(tp.days, [{ day: '2026-10-20', pkn: 154.35 }], 'the tail is not a price');
   assert.equal(tp.lastObservedDay, '2026-11-21');
-  assert.deepEqual(tp.lastListing, { day: '2026-11-21', lowPkn: 133.33, low: '0.8000', currency: 'USD' });
+  assert.deepEqual(tp.lastListing, { day: '2026-11-21', lowPkn: 133.33 });
   // A series priced through its last day, and an answer that has no TCGplayer
   // block at all, both have nothing to continue to.
   const healthy = priceSourceSeries(HISTORY)[0];
@@ -536,7 +536,7 @@ test('the hover row of a carried day says the price is old, and quotes the listi
     carry: 'near',
     days: [{ day: '2026-10-18', value: 150 }, { day: '2026-10-20', value: 154.35 }],
     lastObservedDay: '2026-11-21',
-    lastListing: { day: '2026-11-15', lowPkn: 133.33, low: '0.8000', currency: 'USD' },
+    lastListing: { day: '2026-11-15', lowPkn: 133.33 },
   };
   const row = (day, of = line) => soldGraphHoverRows([of], day, { formatValue: (value) => `${value} PKN` }).rows[0];
   // On a day the line is carried over: the price is old, not missing, and what
@@ -599,6 +599,74 @@ test('a listing quote that is not of the hovered day says which day it is of', (
   });
   // The day it priced is the line's own business, tail or not.
   assert.equal(row('2026-11-14').text, '154.35 PKN');
+});
+
+test('a day past the day the source last answered is no data, not its last price', () => {
+  const line = {
+    key: 'tcgplayer',
+    label: 'TCGplayer',
+    kind: 'source',
+    gapDays: 10,
+    carry: 'near',
+    days: [{ day: '2026-11-18', value: 150 }, { day: '2026-11-20', value: 154.35 }],
+    lastObservedDay: '2026-11-21',
+    lastListing: { day: '2026-11-21', lowPkn: 133.33 },
+  };
+  const row = (day) => soldGraphHoverRows([line], day, { formatValue: (value) => `${value} PKN` }).rows[0];
+  // 25 November is inside the hole the line would otherwise be carried across,
+  // but the source stopped answering on the 21st: its last price is not a price
+  // for a day it never saw.
+  assert.deepEqual({ value: row('2026-11-25').value, text: row('2026-11-25').text, sub: row('2026-11-25').sub }, {
+    value: null, text: 'no data', sub: '',
+  });
+  assert.equal(row('2026-11-21').text, 'no recent sale');
+  assert.equal(row('2026-11-20').text, '154.35 PKN');
+});
+
+test('the hover answers for the window the graph draws', () => {
+  const line = {
+    key: 'tcgplayer',
+    label: 'TCGplayer',
+    kind: 'source',
+    gapDays: 40,
+    carry: 'near',
+    days: [{ day: '2026-10-20', value: 154.35 }],
+    lastObservedDay: '2026-11-21',
+    lastListing: { day: '2026-11-21', lowPkn: 133.33 },
+  };
+  const row = (bounds) => soldGraphHoverRows([line], '2026-11-10', {
+    formatValue: (value) => `${value} PKN`,
+    bounds,
+  }).rows[0];
+  // A window that ends 16 November never draws the bridge to the 21st, so the
+  // hole beside it is a hole in the line: no data, and nothing quoted for a day
+  // the picture leaves out.
+  assert.deepEqual({ text: row({ key: '1m', from: '2026-10-17', to: '2026-11-16' }).text, sub: row({ key: '1m', from: '2026-10-17', to: '2026-11-16' }).sub }, {
+    text: 'no data', sub: '',
+  });
+  assert.equal(row({ key: '3m', from: '2026-08-18', to: '2026-11-21' }).text, 'no recent sale');
+  assert.equal(row().text, 'no recent sale', 'no window asked is the whole series');
+});
+
+test('a series with no priced day in the window draws no line and says nothing', () => {
+  const only = stoppedSeries({ priced: [], tail: ['2026-11-20', '2026-11-21'], withNormal: false });
+  assert.deepEqual(priceSourceSeries(only), [], 'nothing to draw, so no line at all');
+  // A line handed to the tooltip without a priced day cannot borrow the tail: the
+  // day it reports is no data, with no listing under it and no old price beside.
+  const broken = {
+    key: 'tcgplayer',
+    label: 'TCGplayer',
+    kind: 'source',
+    gapDays: 10,
+    carry: 'near',
+    days: [],
+    lastObservedDay: '2026-11-21',
+    lastListing: { day: '2026-11-21', lowPkn: 133.33 },
+  };
+  assert.equal(soldGraphTailBridge(broken.days, broken.lastObservedDay), null);
+  assert.deepEqual(soldGraphHoverRows([broken], '2026-11-20', { formatValue: (value) => `${value} PKN` }).rows[0], {
+    key: 'tcgplayer', label: 'TCGplayer', color: '', dashed: false, picked: false, value: null, text: 'no data', sub: '',
+  });
 });
 
 test('a listing quote nobody can date is not carried to the tooltip', () => {

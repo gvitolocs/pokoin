@@ -170,13 +170,16 @@ unchanged.
 
 That one TCGplayer entry gains two fields when its market price stopped before
 the source did: `lastObservedDay`, the last day TCGplayer answered the series at
-all, and `lastListing` — `{day, lowPkn, low, currency}` — the cheapest ask of the
-newest such day that had one, `low` as TCGplayer wrote it and `lowPkn` through the
-same rate its `marketPkn` used, left out when no rate converts it. A series priced
-through its last day carries neither, and `days` is what it always was: only the
-priced days. The desk draws the line flat to `lastObservedDay` and quotes
-`lastListing` under it, so an ended price and an ended source are not the same
-picture.
+all, and `lastListing` — `{day, lowPkn}` — the ask of the newest such later day
+whose `lowPrice` is above zero and converts through the same rate its
+`marketPkn` used: a dead quote on the last of them passes the word to the older
+day that has one, and no other part of that day is sent, because the desk plots
+PKN alone. A series priced through its last day carries neither field, and so
+does one with no priced day at all: a line the graph cannot draw has nothing to
+carry. `days` is what it always was: only the priced days. The desk draws the
+line flat to `lastObservedDay` and quotes `lastListing` under it, naming the day
+of the quote whenever the hover is on another, so an ended price and an ended
+source are not the same picture.
 
 Deploy through `scripts/deploy-pokoin-rust.sh` from the exact integrated
 `origin/main` commit. TCGCSV reader configuration is optional to the CardTrader feed.

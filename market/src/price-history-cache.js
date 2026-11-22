@@ -5,17 +5,23 @@
  * later. v2 because a `fields=graph` answer holds the series of one facet, so the
  * facet is part of the key — the foil facet, and since PH-C025 the Cardmarket
  * grade floor and language the desk asked for; what v1 left behind is dropped,
- * never read. A key of the default facet is the one without those two, so a
- * window written before them is still read; every other facet writes both words
+ * never read. v3 because a TCGplayer series now says where it stopped being
+ * priced, and a v2 answer cannot: what it left behind is dropped too. A key of
+ * the default facet is the one without those two, so a window written before them
+ * is still read; every other facet writes both words
  * in one form, `.FLOOR-LANGUAGE`, because a key that left one out would be the
  * key of another facet too.
  */
 
 import { CARD_SALES_TTL_MS } from './sold-sales-cache.js';
 
-const PREFIX = 'pokoin.cardPriceHistory.v2.';
-/** v1 keys hold an answer of the other facet's series: unreadable, so removed. */
-const LEGACY_PREFIX = 'pokoin.cardPriceHistory.v1.';
+const PREFIX = 'pokoin.cardPriceHistory.v3.';
+/**
+ * v1 keys hold an answer of the other facet's series and v2 one whose TCGplayer
+ * line could not say where it stopped being priced: both are unreadable shapes
+ * for v3, so they are dropped rather than read.
+ */
+const LEGACY_PREFIXES = ['pokoin.cardPriceHistory.v1.', 'pokoin.cardPriceHistory.v2.'];
 /** As fresh as the sold slices it is drawn with. */
 export const CARD_PRICE_HISTORY_TTL_MS = CARD_SALES_TTL_MS;
 const MEMORY_CAP = 32;
@@ -202,7 +208,7 @@ function pruneStoredPriceHistory(keep = STORE_CAP) {
       if (!key) {
         continue;
       }
-      if (key.startsWith(LEGACY_PREFIX)) {
+      if (LEGACY_PREFIXES.some((prefix) => key.startsWith(prefix))) {
         legacy.push(key);
       } else if (key.startsWith(PREFIX)) {
         rows.push([key, savedAtOf(local.getItem(key))]);

@@ -1141,39 +1141,37 @@ pub fn chosen_series(series: &[Value], reverse: bool) -> Option<&Value> {
 /// its last priced day, and `last_listing` the newest such later day whose ask
 /// reaches a PKN amount — an ask of zero or one the rates cannot convert is passed
 /// over for the older day that is neither, so one dead quote does not silence the
-/// source. Nothing for a series priced through its last day.
-fn tcg_tail_fields(days: &[Value], currency: &str, rates: &FxRates) -> Vec<(String, Value)> {
+/// source. Nothing for a series priced through its last day, and nothing for one
+/// with no priced day at all: a series the graph cannot draw has no line to carry.
+fn tcg_tail_fields(days: &[Value], rates: &FxRates) -> Vec<(String, Value)> {
     let day = |row: &Value| day_of(row.get("day"));
     let is_priced = |row: &&Value| row.get("marketPkn").is_some_and(|price| !price.is_null());
-    let priced_until = days.iter().filter(is_priced).map(day).max();
+    let Some(priced_until) = days.iter().filter(is_priced).map(day).max() else {
+        return Vec::new();
+    };
     let Some(observed) = days.iter().map(day).filter(|row| !row.is_empty()).max() else {
         return Vec::new();
     };
-    if priced_until.as_deref() == Some(observed.as_str()) {
+    if observed == priced_until {
         return Vec::new();
     }
     let listing = days
         .iter()
-        .filter(|row| day(row).as_str() > priced_until.as_deref().unwrap_or(""))
+        .filter(|row| day(row).as_str() > priced_until.as_str())
         .filter_map(|row| {
             let low_day = day(row);
             let low_pkn = pkn_of_usd(
                 number_of(row.get("lowPrice")),
                 Some(rates.rate_for(&low_day)?.rate),
             )?;
-            Some((low_day, low_pkn, row["lowPrice"].clone()))
+            Some((low_day, low_pkn))
         })
-        .max_by_key(|(low_day, _, _)| low_day.clone());
+        .max_by_key(|(low_day, _)| low_day.clone());
     let mut out = vec![("lastObservedDay".to_owned(), json!(observed))];
-    if let Some((low_day, low_pkn, low)) = listing {
+    if let Some((low_day, low_pkn)) = listing {
         out.push((
             "lastListing".to_owned(),
-            json!({
-                "day": low_day,
-                "lowPkn": pg::js_number(low_pkn),
-                "low": low,
-                "currency": currency,
-            }),
+            json!({ "day": low_day, "lowPkn": pg::js_number(low_pkn) }),
         ));
     }
     out
@@ -1197,7 +1195,6 @@ fn ask_graph(block: &Value, weekly: bool) -> Value {
 /// its price stopped.
 fn tcgplayer_graph(block: &Value, reverse: bool, weekly: bool, rates: &FxRates) -> Value {
     let series = block.get("series").and_then(Value::as_array);
-    let currency = js::string_or_empty(block.get("currency"));
     let kept: Vec<Value> = series
         .and_then(|rows| chosen_series(rows, reverse))
         .map(|row| {
@@ -1207,7 +1204,7 @@ fn tcgplayer_graph(block: &Value, reverse: bool, weekly: bool, rates: &FxRates) 
                 "days",
                 Value::Array(graph_day_rows(days, weekly, tcg_graph_day)),
             );
-            let tail = days.map(|days| tcg_tail_fields(days, &currency, rates));
+            let tail = days.map(|days| tcg_tail_fields(days, rates));
             if let (Some(object), Some(tail)) = (graphed.as_object_mut(), tail) {
                 for (field, value) in tail {
                     object.insert(field, value);
@@ -2576,7 +2573,7 @@ mod tests {
         );
         assert_eq!(
             chosen["lastListing"],
-            json!({ "day": "2026-11-16", "lowPkn": 133.33, "low": "0.8000", "currency": "USD" }),
+            json!({ "day": "2026-11-16", "lowPkn": 133.33 }),
             "0.80 USD at the 2026-11-16 rate of 1.2",
         );
         // A tail day with no listing price of its own falls back to the newest one.
@@ -2589,7 +2586,7 @@ mod tests {
         let ended = graph_answer_with_fx(&stale, false, "NM", &rates());
         assert_eq!(
             ended["tcgplayer"]["series"][0]["lastListing"],
-            json!({ "day": "2026-11-15", "lowPkn": 140.87, "low": "0.8100", "currency": "USD" }),
+            json!({ "day": "2026-11-15", "lowPkn": 140.87 }),
             "0.81 USD at the 2026-11-15 rate of 1.15",
         );
         // No rates: the low price cannot be converted, so nothing is quoted.
@@ -2630,7 +2627,7 @@ mod tests {
         };
         assert_eq!(
             tail("0.8100", "0.0000")["tcgplayer"]["series"][0]["lastListing"],
-            json!({ "day": "2026-11-15", "lowPkn": 140.87, "low": "0.8100", "currency": "USD" }),
+            json!({ "day": "2026-11-15", "lowPkn": 140.87 }),
             "a zero ask passes the quote to the older day that has one"
         );
         let answer = tail("0.0000", "0.0000");
@@ -2639,6 +2636,36 @@ mod tests {
         assert!(
             chosen.get("lastListing").is_none(),
             "a tail of nothing but zero asks quotes nothing: {chosen}"
+        );
+    }
+
+    /// A window in which the series was answered but never priced draws no line,
+    /// so it sends no tail either: there is no carried price to quote under.
+    #[test]
+    fn graph_answer_sends_no_tail_for_a_series_that_was_never_priced() {
+        let mut body = graph_body();
+        body["tcgplayer"]["series"] = json!([
+            {
+                "subtype": "Unlimited Holofoil",
+                "days": [
+                    { "day": "2026-11-15", "marketPrice": null, "lowPrice": "0.8100" },
+                    { "day": "2026-11-16", "marketPrice": null, "lowPrice": "0.8000" },
+                ],
+            },
+        ]);
+        let answer = graph_answer_with_fx(&body, false, "NM", &rates());
+        let chosen = &answer["tcgplayer"]["series"][0];
+        assert_eq!(
+            chosen["days"],
+            json!([]),
+            "no priced day, so no point to draw"
+        );
+        let fields = chosen.as_object().expect("object");
+        let keys: Vec<&str> = fields.keys().map(String::as_str).collect();
+        assert_eq!(
+            keys.join(","),
+            "subtype,days",
+            "a series the graph cannot draw carries neither tail field"
         );
     }
 

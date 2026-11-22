@@ -493,6 +493,9 @@ export default function SoldPriceGraph(props) {
       formatValue: rowValue,
       formatDay: (iso) => formatSoldDayWithYear(iso, soldDateLocale(), geo?.withYear),
       endDay: tipEndDay(),
+      // The same window the plot carries the line across, so a day the picture
+      // leaves out is not one the hover explains.
+      bounds: bounds(),
     });
   });
 

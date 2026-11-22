@@ -406,6 +406,9 @@ test('every price source is a line inside the graph the desk already had', () =>
   assert.doesNotMatch(graph, /now: nowPt|geo\(\)\.now/);
   // The hover lists every visible line, and the helper caps the rows.
   assert.match(graph, /soldGraphHoverRows\(tipLines\(\), hoverDay\(\)/);
+  // The hover answers for the window that is drawn: it is handed the same bounds
+  // the bridge is clipped to, so it never explains a day the picture leaves out.
+  assert.match(graph, /soldGraphHoverRows\(tipLines\(\), hoverDay\(\), \{[\s\S]*?bounds: bounds\(\),\s*\}\)/);
   // A carried day answers with the listing the source still has, as a second line
   // of its own row: the helper needs the tail to decide, and nothing else does.
   assert.match(graph, /lastObservedDay: row\.lastObservedDay,\s*lastListing: row\.lastListing,/);
