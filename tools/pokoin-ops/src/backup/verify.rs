@@ -243,13 +243,14 @@ fn restore_and_check(
     }
     println!("unpacked into {}", files.display());
 
-    let pgdata = format!("{}:/var/lib/postgresql/data", work.join("pgdata").display());
+    // 19 rejects a mount at /var/lib/postgresql/data and moved its own PGDATA, so pin the path.
+    let pgdata = format!("{}:/var/lib/postgresql/pgdata", work.join("pgdata").display());
     let restore = format!("{}:/restore:ro", files.display());
     let mem = env::get_or("POKOIN_RESTORE_MEMORY", "6g");
     sys::output("docker", &[
         "run", "-d", "--name", &c.name, "--label", "pokoin-restore-test=1", "--network", "none",
         "--shm-size", "1g", "--memory", &mem, "-e", "POSTGRES_HOST_AUTH_METHOD=trust",
-        "-v", &pgdata, "-v", &restore, &cfg.pg_image,
+        "-e", "PGDATA=/var/lib/postgresql/pgdata", "-v", &pgdata, "-v", &restore, &cfg.pg_image,
         "-c", "fsync=off", "-c", "full_page_writes=off", "-c", "synchronous_commit=off",
         "-c", "autovacuum=off", "-c", "max_wal_size=16GB", "-c", "maintenance_work_mem=512MB",
     ])?;
