@@ -4,7 +4,7 @@
 # and contrib (pg_trgm, unaccent, pgcrypto, pg_stat_statements).
 #
 #   bench/postgres/build-pg.sh REL_17_11 17 "$OUT"
-#   bench/postgres/build-pg.sh REL_19_BETA4 19 "$OUT"
+#   bench/postgres/build-pg.sh REL_19_0 19 "$OUT"
 #
 # Needs: gcc, make, bison, flex, pkg-config and the libicu, libssl, liblz4,
 # libzstd, libreadline, zlib headers (Debian/Ubuntu: apt-get install flex

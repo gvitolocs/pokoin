@@ -10,7 +10,7 @@
 # the same Alpine release (musl and ICU must match what the data was built
 # against). docs/POSTGRES_VERSION.md is the runbook.
 ARG OLD=17.11
-ARG NEW=19beta4
+ARG NEW=19.0
 ARG ALPINE=3.24
 FROM postgres:${OLD}-alpine${ALPINE} AS old
 
