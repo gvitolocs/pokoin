@@ -342,6 +342,32 @@ export function soldGraphGapSegments(days, gapDays) {
   return { segments, bridges };
 }
 
+/**
+ * The continuation of a source line whose price stopped while the source itself
+ * kept answering: its last drawn point carried flat to `lastObservedDay`, as the
+ * pair a dotted bridge is drawn from. `bounds` is the range the graph draws, so a
+ * day outside it is not reached for. Nothing when the series is empty, when the
+ * day is not one, when it is not after the last point, or when it is outside the
+ * range.
+ */
+export function soldGraphTailBridge(days, lastObservedDay, bounds) {
+  const tail = soldGraphDayMs(lastObservedDay);
+  if (!Number.isFinite(tail)) {
+    return null;
+  }
+  const lo = soldGraphDayMs(bounds?.from);
+  const hi = soldGraphDayMs(bounds?.to);
+  if ((Number.isFinite(lo) && tail < lo) || (Number.isFinite(hi) && tail > hi)) {
+    return null;
+  }
+  const rows = (Array.isArray(days) ? days : []).filter((row) => Number.isFinite(soldGraphDayMs(row?.day)));
+  if (!rows.length) {
+    return null;
+  }
+  const last = rows.reduce((a, b) => (soldGraphDayMs(b.day) > soldGraphDayMs(a.day) ? b : a));
+  return tail > soldGraphDayMs(last.day) ? [last, { ...last, day: String(lastObservedDay) }] : null;
+}
+
 /** The series day nearest `day`, when it is within `toleranceDays` of it. */
 export function soldGraphNearDay(days, day, toleranceDays = 0) {
   const target = soldGraphDayMs(day);

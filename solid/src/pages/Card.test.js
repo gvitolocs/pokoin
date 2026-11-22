@@ -396,6 +396,12 @@ test('every price source is a line inside the graph the desk already had', () =>
   // marker: the plot draws no dot for it and no stub pointing at one.
   assert.match(graph, /soldGraphGapSegments\(row\.days, row\.gapDays\)/);
   assert.match(graph, /class="sold-graph-gap"/);
+  // A series that stopped being priced while TCGplayer went on answering is
+  // carried flat to the day it was last seen, on that same dotted bridge, and the
+  // range it is drawn for holds the day.
+  assert.match(graph, /soldGraphTailBridge\(row\.days, row\.lastObservedDay, bounds\(\)\)/);
+  assert.ok(graph.includes('if (pair) every.push(pair[1]);'),
+    'the day a line is carried to is inside the range every series shares');
   assert.doesNotMatch(graph, /sold-graph-now/);
   assert.doesNotMatch(graph, /now: nowPt|geo\(\)\.now/);
   // The hover lists every visible line, and the helper caps the rows.

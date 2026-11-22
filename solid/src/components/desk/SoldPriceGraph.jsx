@@ -21,6 +21,7 @@ import {
   soldGraphRangeDays,
   soldGraphScale,
   soldGraphSpansYears,
+  soldGraphTailBridge,
   soldGraphTipMods,
   soldGraphTone,
   soldGraphY,
@@ -171,8 +172,9 @@ export default function SoldPriceGraph(props) {
   // the visitor picked, drawn under the current one on the same scale and dates.
   // props.onRemoveOverlay(key) takes one off, props.color paints the current one.
   const overlays = () => (Array.isArray(props.overlays) ? props.overlays : []).filter((row) => Array.isArray(row?.days) && row.days.length);
-  // props.sources = [{ key, label, short, color, dashed, gapDays, carry, days }]:
-  // one line per other price source, Pokoin's own listings among them.
+  // props.sources = [{ key, label, short, color, dashed, gapDays, carry, days,
+  // lastObservedDay, lastListing }]: one line per other price source, Pokoin's own
+  // listings among them.
   // props.nowPoint is the cheapest live Pokoin listing today, props.range the
   // window the history was read for, and props.onRange(key) asks for another one.
   // Without them the chart is the one that has always been here: the sold median
@@ -191,6 +193,8 @@ export default function SoldPriceGraph(props) {
       dashed: Boolean(row.dashed),
       gapDays: Number(row.gapDays) || 0,
       carry: ['onOrBefore', 'none'].includes(row.carry) ? row.carry : 'near',
+      lastObservedDay: String(row.lastObservedDay || ''),
+      lastListing: row.lastListing || null,
       isSource: true,
       days: soldGraphRangeDays(row.days, bounds())
         .map((day) => ({ day: String(day.day), value: Number(day.pkn ?? day.value) || 0 }))
@@ -240,7 +244,16 @@ export default function SoldPriceGraph(props) {
     const box = size();
     // Sold days and source days together: every series shares one scale and one
     // date range, so the lines can be read against each other.
+    const tailOf = new Map(others
+      .filter((row) => row.isSource)
+      .map((row) => [row.key, soldGraphTailBridge(row.days, row.lastObservedDay, bounds())]));
     const every = [...rows, ...others.flatMap((row) => row.days)];
+    // A source whose price stopped while it kept answering is carried to the day
+    // it was last observed, and the range holds that day too even though no price
+    // is quoted for it.
+    for (const pair of tailOf.values()) {
+      if (pair) every.push(pair[1]);
+    }
     if (!every.length || !box) return null;
     const width = box.w;
     const height = box.h;
@@ -349,8 +362,12 @@ export default function SoldPriceGraph(props) {
         if (row.isSource) {
           // A source starts at its own first day and ends at its own last one.
           // Where its quotes are further apart than its gap the line breaks and a
-          // faint dotted segment bridges the hole.
+          // faint dotted segment bridges the hole. A series that stopped being
+          // priced while the source went on answering is carried flat to the day
+          // it was last observed, on the same dotted line: the source did not end,
+          // only its market price did.
           const split = soldGraphGapSegments(row.days, row.gapDays);
+          const tail = tailOf.get(row.key);
           return {
             key: row.key,
             color: row.color,
@@ -358,7 +375,7 @@ export default function SoldPriceGraph(props) {
             isSource: true,
             join: row.key === POKOIN_SOURCE.key ? nowJoin : '',
             segments: split.segments.map((run) => join(run.map(place))),
-            bridges: split.bridges.map((pair) => join(pair.map(place))),
+            bridges: [...split.bridges, ...(tail ? [tail] : [])].map((pair) => join(pair.map(place))),
           };
         }
         const pts = row.days.map(place);
