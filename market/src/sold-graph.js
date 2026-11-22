@@ -491,8 +491,9 @@ export function soldGraphRowPrice(pkn, parts, currency = '') {
  * quoted itself — a daily offer series has no price to stand for a day it did
  * not reach. A source that stopped being priced while it kept answering — it
  * carries the `lastObservedDay` the graph draws its line to — says its price is
- * old rather than that it has no data, and quotes its `lastListing` under that.
- * The list is capped and the rest is counted.
+ * old rather than that it has no data, and quotes its `lastListing` under that,
+ * dated when the hover is not on the day of the quote and silent on a tail day
+ * before it. The list is capped and the rest is counted.
  */
 export function soldGraphHoverRows(series, day, {
   cap = SOLD_GRAPH_TIP_ROWS,
@@ -532,8 +533,18 @@ export function soldGraphHoverRows(series, day, {
       // The line is drawn over these days at its last price, and nothing was
       // priced on them: the listing under the row is what the source has.
       note = 'no recent sale';
-      const low = Number(line.lastListing?.lowPkn);
-      sub = Number.isFinite(low) && low > 0 ? `lowest listing ${formatValue(low)}` : '';
+      const listed = line.lastListing;
+      const low = Number(listed?.lowPkn);
+      const askMs = soldGraphDayMs(listed?.day);
+      // One day's ask, so one day's date: the hover that is not on it says which
+      // day it came from, and a tail day before it has no quote of its own.
+      if (Number.isFinite(low) && low > 0 && Number.isFinite(askMs)
+        && soldGraphDayMs(day) >= askMs) {
+        sub = `lowest listing ${formatValue(low)}`;
+        if (String(listed.day) !== String(day)) {
+          sub += ` (${formatDay(String(listed.day))})`;
+        }
+      }
     } else {
       hit = line.carry === 'onOrBefore'
         ? soldGraphDayOnOrBefore(days, day)

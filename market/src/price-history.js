@@ -262,7 +262,7 @@ function tcgplayerSeries(tcgplayer, reverse) {
   return {
     days: pricedDays(dayRowsOf(best), (row) => row?.marketPkn),
     lastObservedDay: isIsoDay(best?.lastObservedDay) ? String(best.lastObservedDay) : '',
-    lastListing: lastListing && Number(lastListing.lowPkn) > 0 ? lastListing : null,
+    lastListing: isIsoDay(lastListing?.day) && Number(lastListing.lowPkn) > 0 ? lastListing : null,
   };
 }
 

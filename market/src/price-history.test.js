@@ -536,12 +536,13 @@ test('the hover row of a carried day says the price is old, and quotes the listi
     carry: 'near',
     days: [{ day: '2026-10-18', value: 150 }, { day: '2026-10-20', value: 154.35 }],
     lastObservedDay: '2026-11-21',
-    lastListing: { day: '2026-11-21', lowPkn: 133.33, low: '0.8000', currency: 'USD' },
+    lastListing: { day: '2026-11-15', lowPkn: 133.33, low: '0.8000', currency: 'USD' },
   };
   const row = (day, of = line) => soldGraphHoverRows([of], day, { formatValue: (value) => `${value} PKN` }).rows[0];
   // On a day the line is carried over: the price is old, not missing, and what
   // TCGplayer still has is its cheapest listing. The words follow the sold rows'
-  // "NM · JP … no sale", and the listing is the row's own quieter line.
+  // "NM · JP … no sale", and the listing is the row's own quieter line — of the
+  // 15th, which this 16th says because it is not the day it was asked on.
   assert.deepEqual(row('2026-11-16'), {
     key: 'tcgplayer',
     label: 'TCGplayer',
@@ -550,7 +551,7 @@ test('the hover row of a carried day says the price is old, and quotes the listi
     picked: false,
     value: null,
     text: 'no recent sale',
-    sub: 'lowest listing 133.33 PKN',
+    sub: 'lowest listing 133.33 PKN (2026-11-15)',
   });
   // The last day it was quoted keeps its own price; a day past the carry is the
   // plain no data again, with nothing quoted under it.
@@ -569,4 +570,49 @@ test('the hover row of a carried day says the price is old, and quotes the listi
   // A source that does not report the day is read exactly as before.
   const plain = { key: 'cardtrader_ask', label: 'CT lowest ask', kind: 'source', gapDays: 3, carry: 'near', days: line.days };
   assert.deepEqual({ text: row('2026-11-16', plain).text, sub: row('2026-11-16', plain).sub }, { text: 'no data', sub: '' });
+});
+
+test('a listing quote that is not of the hovered day says which day it is of', () => {
+  const line = {
+    key: 'tcgplayer',
+    label: 'TCGplayer',
+    kind: 'source',
+    gapDays: 30,
+    carry: 'near',
+    days: [{ day: '2026-11-14', value: 154.35 }],
+    lastObservedDay: '2026-11-16',
+    lastListing: { day: '2026-11-15', lowPkn: 140.87 },
+  };
+  const row = (day, of = line) => soldGraphHoverRows([of], day, {
+    formatValue: (value) => `${value} PKN`,
+    formatDay: (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`,
+  }).rows[0];
+  // One ask of one day: on that day it needs no date, and the day after it says
+  // where the quote came from instead of being read as that day's own.
+  assert.equal(row('2026-11-15').sub, 'lowest listing 140.87 PKN');
+  assert.equal(row('2026-11-16').sub, 'lowest listing 140.87 PKN (15/11)');
+  // A tail day before the quote has none of its own to show: the row says the
+  // price is old and stops there, rather than quoting the future.
+  const last = { ...line, lastListing: { day: '2026-11-16', lowPkn: 133.33 } };
+  assert.deepEqual({ text: row('2026-11-15', last).text, sub: row('2026-11-15', last).sub }, {
+    text: 'no recent sale', sub: '',
+  });
+  // The day it priced is the line's own business, tail or not.
+  assert.equal(row('2026-11-14').text, '154.35 PKN');
+});
+
+test('a listing quote nobody can date is not carried to the tooltip', () => {
+  const series = (lastListing) => priceSourceSeries({
+    tcgplayer: {
+      series: [{
+        subtype: 'Holofoil',
+        days: [{ day: '2026-10-20', marketPkn: 154.35 }],
+        lastObservedDay: '2026-11-21',
+        lastListing,
+      }],
+    },
+  })[0];
+  assert.deepEqual(series({ day: '2026-11-20', lowPkn: 140.87 }).lastListing, { day: '2026-11-20', lowPkn: 140.87 });
+  assert.equal(series({ lowPkn: 140.87 }).lastListing, null, 'an answer that names no day');
+  assert.equal(series({ day: 'later', lowPkn: 140.87 }).lastListing, null, 'an answer whose day is not one');
 });
