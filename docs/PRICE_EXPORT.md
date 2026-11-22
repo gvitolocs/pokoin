@@ -110,7 +110,7 @@ away from the seller-api flow test's container):
 
 ```sh
 docker run -d --rm --name pokoin-price-export-test-pg -e POSTGRES_PASSWORD=test \
-  -p 127.0.0.1:55496:5432 --tmpfs /var/lib/postgresql/data postgres:17-alpine
+  -p 127.0.0.1:55496:5432 --tmpfs /var/lib/postgresql postgres:19.0-alpine
 cd pokoin-rust && POKOIN_PRICE_EXPORT_TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55496/postgres \
   cargo test -p pokoin-commerce --test price_export_flow
 ```

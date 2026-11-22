@@ -111,14 +111,14 @@ skipped and the rest are still to do. `verify` reads the whole window again, so
 
 ```bash
 cargo test -p ct-ask-unpad                                  # unit tests only
-apps/ct-ask-unpad/tests/container.sh                        # end to end on Postgres 17
+apps/ct-ask-unpad/tests/container.sh                        # end to end on Postgres 19.0
 apps/ct-ask-unpad/tests/container.sh --exact                # extra libtest flags, bare
 ```
 
 On nezopt both go through the build queue:
 `~/.local/bin/bq run --class long --who <slug> --max-wait 5400 -- apps/ct-ask-unpad/tests/container.sh`.
 
-`container.sh` starts its own throwaway `postgres:17-alpine` on a loopback port,
+`container.sh` starts its own throwaway `postgres:19.0-alpine` on a loopback port,
 runs `tests/fixture.rs` against it and removes the container whichever way the
 test went. The test itself prints the plan it read, and the script insists on the
 `fixture ran:` marker and on `1 passed`: a fixture that skipped for want of a

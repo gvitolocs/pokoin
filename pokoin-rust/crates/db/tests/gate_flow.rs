@@ -3,7 +3,7 @@
 //! ```text
 //! docker run -d --rm --name pokoin-gate-test-pg \
 //!   -e POSTGRES_PASSWORD=test -p 127.0.0.1:55478:5432 \
-//!   --tmpfs /var/lib/postgresql/data postgres:17-alpine
+//!   --tmpfs /var/lib/postgresql postgres:19.0-alpine
 //! POKOIN_TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55478/postgres \
 //!   cargo test -p pokoin-db --test gate_flow
 //! ```

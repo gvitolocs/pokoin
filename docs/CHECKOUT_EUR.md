@@ -155,7 +155,7 @@ sellers (Italy, Denmark) and a two-parcel cart on every start.
 
 ```sh
 docker run -d --name pokoin-checkout-e2e-pg -e POSTGRES_USER=e2e -e POSTGRES_PASSWORD=e2e \
-  -e POSTGRES_DB=e2e -p 127.0.0.1:55432:5432 postgres:17-alpine
+  -e POSTGRES_DB=e2e -p 127.0.0.1:55432:5432 postgres:19.0-alpine
 java -jar ~/.cache/firebase/emulators/cloud-firestore-emulator-v1.22.0.jar --host 127.0.0.1 --port 8086 &
 set -a; . ~/.config/pokoin/stripe-test.env; set +a   # STRIPE_SECRET_KEY=sk_test_...
 POKOIN_LISTING_SYNC_WORKER=0 POKOIN_SYNC_CONSUMER=0 \
