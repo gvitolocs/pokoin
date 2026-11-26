@@ -337,6 +337,19 @@ export function undoListingIds(line, fallback = []) {
   return ids;
 }
 
+/**
+ * The server marked the box this pick would take from as taken: the line's own
+ * box (`ownTaken`) when `listingId` is empty or the own one, else that
+ * candidate's `taken`. Only the server's flags count; the client never works
+ * out a box's capacity itself.
+ */
+export function pickTaken(line, listingId = '') {
+  const own = String(line?.listingId || '');
+  const id = String(listingId || own);
+  if (id === own) return Boolean(line?.ownTaken);
+  return (Array.isArray(line?.candidates) ? line.candidates : []).some((entry) => String(entry?.listingId || '') === id && entry?.taken === true);
+}
+
 /** `alsoIn` as display text (strings, or `{location}` objects). */
 export function alsoInLabels(line) {
   return (line?.alsoIn || [])

@@ -17,6 +17,7 @@ import {
   pickActionBody,
   pickedFromText,
   pickingOrdersMatch,
+  pickTaken,
   pickSaveBody,
   readPickCache,
   reconcilePickCache,
@@ -282,6 +283,12 @@ export function ShipmentPanel(props) {
   async function runPick(line, action, listingId = '') {
     const key = lineKeyOf(line);
     if (pickFlight.has(key)) return; // a double click never sends twice
+    // Every way in (buttons, drag, keyboard, single image) stops here when the
+    // server said that box is taken; the server refuses it anyway.
+    if (action === 'pick' && pickTaken(line, listingId)) {
+      setError(key, `Not saved: ${PICK_ERRORS.copy_already_picked}`);
+      return;
+    }
     const body = pickActionBody(untrack(order), line, action, listingId);
     // An undo reverses the copies physically picked: the stored picks (or the click just made), never the default box.
     const bodies = action === 'undo'
@@ -307,13 +314,21 @@ export function ShipmentPanel(props) {
     }
     pickFlight.add(key);
     setBusyKeys((keys) => [...keys, key]);
+    let sent = 0;
     try {
       const token = await getBearer();
       let data = null;
-      for (const send of bodies) data = await saveCardTraderZeroPick(token, send);
+      for (const send of bodies) {
+        data = await saveCardTraderZeroPick(token, send);
+        sent += 1;
+      }
       confirm(data?.inventory || (action === 'undo' ? 'restored' : 'removed'));
+      // Other lines' boxes may be taken (or free again) now: the server says which.
+      props.onChanged?.();
     } catch (err) {
       setError(key, `Not saved: ${pickErrorMessage(err)}`);
+      // A box taken meanwhile, or an undo that reversed only some copies: reload the server's state.
+      if (err?.body?.code === 'copy_already_picked' || sent > 0) props.onChanged?.();
     } finally {
       pickFlight.delete(key);
       setBusyKeys((keys) => keys.filter((other) => other !== key));
@@ -412,7 +427,8 @@ export function ShipmentPanel(props) {
     get current() { return currentKey(); },
     get errors() { return errors(); },
     get notes() { return notes(); },
-    pickedFromOf: (line) => pickedFromText(line, boxes()[lineKeyOf(line)] || null),
+    // Only while the line counts as picked: after an undo the stored pick is stale until the reload.
+    pickedFromOf: (line) => (pickOf(line).picked > 0 ? pickedFromText(line, boxes()[lineKeyOf(line)] || null) : ''),
     pickOf,
     isDone,
     isBusy,

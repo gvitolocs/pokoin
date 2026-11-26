@@ -264,3 +264,28 @@ test('undo reverses the copies physically picked (stored picks), also after a re
   assert.match(pack, /undoListingIds\(line, /);
   assert.match(pack, /pickActionBody\(untrack\(order\), line, 'undo', id\)/);
 });
+
+test('a taken box is refused before sending, whatever started the pick (button, drag, keyboard)', () => {
+  const run = pack.slice(pack.indexOf('async function runPick('), pack.indexOf('const onPick = '));
+  assert.match(run, /if \(action === 'pick' && pickTaken\(line, listingId\)\) \{\s*setError\(key, `Not saved: \$\{PICK_ERRORS\.copy_already_picked\}`\);\s*return;\s*\}/);
+  assert.ok(run.indexOf('pickTaken(line, listingId)') < run.indexOf('saveCardTraderZeroPick('), 'guard before the request');
+  // Drag and the single image go through setPicked -> onPick -> runPick.
+  assert.match(pack, /const setPicked = \(line, picked\) => \{\s*if \(picked > 0 && !isDone\(line\)\) onPick\(line\);/);
+  assert.match(pack, /if \(line\) setPicked\(line, action\.to === 'picked' \? lineQuantity\(line\) : 0\);/);
+});
+
+test('after a pick, an undo, a taken refusal or a partial undo the server list is read again', () => {
+  const run = pack.slice(pack.indexOf('async function runPick('), pack.indexOf('const onPick = '));
+  assert.match(run, /confirm\(data\?\.inventory[^\n]*\n(\s*\/\/[^\n]*\n)?\s*props\.onChanged\?\.\(\);/);
+  assert.match(run, /if \(err\?\.body\?\.code === 'copy_already_picked' \|\| sent > 0\) props\.onChanged\?\.\(\);/);
+  assert.match(page, /onChanged=\{refreshLines\}/);
+  const refresh = page.slice(page.indexOf('function refreshLines('), page.indexOf('createEffect(signedIn'));
+  assert.match(refresh, /if \(props\.preview\) return null;/);
+  assert.match(refresh, /fetchCardTraderZero\(token, overlay \? \{\} : \{ powerTools: false \}\)/);
+  assert.doesNotMatch(refresh, /refresh: true/);
+  assert.match(refresh, /while \(again\)/);
+});
+
+test('"picked from" is gone as soon as the line is no longer picked', () => {
+  assert.match(pack, /pickedFromOf: \(line\) => \(pickOf\(line\)\.picked > 0 \? pickedFromText\(line, boxes\(\)\[lineKeyOf\(line\)\] \|\| null\) : ''\)/);
+});

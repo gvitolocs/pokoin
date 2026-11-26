@@ -9,6 +9,7 @@ import {
   lineCopies,
   pickedFromText,
   undoListingIds,
+  pickTaken,
   lineFacets,
   lineFinishLabel,
   lineIsFoil,
@@ -407,4 +408,24 @@ test('undo reverses the copies physically picked, not the default box', () => {
   assert.equal(body.listingId, 'L2');
   assert.equal(body.allocatedListingId, 'L1');
   assert.equal(body.action, 'undo');
+});
+
+test('pickTaken reads only the server flags of the box the pick would take from', () => {
+  const line = {
+    listingId: 'L1',
+    candidates: [
+      { listingId: 'L2', quantityAvailable: 0, taken: true },
+      { listingId: 'L3', quantityAvailable: 2 },
+    ],
+  };
+  assert.equal(pickTaken(line), false);
+  assert.equal(pickTaken(line, 'L1'), false);
+  assert.equal(pickTaken(line, 'L2'), true);
+  assert.equal(pickTaken(line, 'L3'), false);
+  // The default box taken: plain Pick, drag and keyboard all name it.
+  assert.equal(pickTaken({ ...line, ownTaken: true }), true);
+  assert.equal(pickTaken({ ...line, ownTaken: true }, 'L3'), false);
+  // No flag is no capacity guess: a box with no stock but no flag is the server's to answer.
+  assert.equal(pickTaken({ listingId: 'L1', quantityAvailable: 0 }), false);
+  assert.equal(pickTaken({ listingId: 'L1', candidates: [{ listingId: 'L2', quantityAvailable: 0 }] }, 'L2'), false);
 });
