@@ -265,7 +265,8 @@ export function pickActionBody(order, line, action = 'pick', listingId = '') {
 
 /**
  * Identical copies of this line in other boxes, `[{ listingId, location,
- * quantityAvailable }]`: the server's `candidates` (smart locations off), or
+ * quantityAvailable }]`: the server's `candidates` (sent whatever the Smart
+ * locations setting; `taken` ones included), or
  * `alsoIn` entries that carry a listing id. Never the line's own listing.
  */
 export function lineCopies(line) {

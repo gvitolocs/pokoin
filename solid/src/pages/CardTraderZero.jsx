@@ -579,6 +579,11 @@ function ZeroDesk(props) {
       <Show when={ptError()}>
         <p class="ct-token-hint is-warn" role="status">Power Tools overlay not loaded: {ptError()}</p>
       </Show>
+      <Show when={data()?.picksUnavailable === true}>
+        <p class="ct-token-hint is-warn zero-picks-unavailable" role="status">
+          Picked boxes could not be read, so boxes other lines took are not marked taken. A pick from one is still refused when you save it.
+        </p>
+      </Show>
 
       <Show when={notConnected()}>
         <EmptyDesk title="Connect CardTrader first" lede="The Zero list comes from your CardTrader seller orders. Paste your CardTrader API token in Settings.">

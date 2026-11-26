@@ -289,3 +289,8 @@ test('after a pick, an undo, a taken refusal or a partial undo the server list i
 test('"picked from" is gone as soon as the line is no longer picked', () => {
   assert.match(pack, /pickedFromOf: \(line\) => \(pickOf\(line\)\.picked > 0 \? pickedFromText\(line, boxes\(\)\[lineKeyOf\(line\)\] \|\| null\) : ''\)/);
 });
+
+test('a failed picked-boxes read is said on the page, and the server stays the guard', () => {
+  assert.match(page, /<Show when=\{data\(\)\?\.picksUnavailable === true\}>/);
+  assert.match(page, /Picked boxes could not be read, so boxes other lines took are not marked taken\. A pick from one is still refused when you save it\./);
+});
