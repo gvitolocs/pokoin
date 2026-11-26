@@ -167,10 +167,7 @@ So the first unnamed item gets the oldest member (the baseline default, so `seve
 assert.match(tile, /props\.smartLocations === false && copies\(\)\.length > 0/);
 ```
 
-The required design makes the chooser **independent of `smartLocations`** whenever several boxes exist, which removes this exact expression from `Tile:60`. I must not edit the existing test. Options for the coordinator (default recommendation first):
-
-1. Allow a deliberate edit of that one assertion in phase two (it pins a gate the requirement abolishes). **Needs coordinator approval**, because the instruction is to stop on conflicts.
-2. Keep the literal expression in the tile in a harmless place (e.g. a retained smart-off-only legacy helper). I do not recommend this: it is dead code written to satisfy a regex.
+The required design makes the chooser **independent of `smartLocations`** whenever several boxes exist, which removes this exact expression from `Tile:60`. The owner's instruction says: "If an existing assertion contradicts the required behaviour, stop and write the conflict into the cause report instead." Implementation is stopped here. Only the owner can authorize revising that existing assertion; coordinator approval cannot override this instruction. Retaining redundant source text just to satisfy the regex is not an acceptable resolution.
 
 Related regexes that stay valid with the new design: `ZeroPack.test.js:41` (`Picked from another box…` stays for the single-copy case or as is), `:130` and `:131` (`props.onPick(item(), copy.listingId)`, `props.onPick(line(), copy.listingId)` stay), `:132` (`onChoose(copy.listingId)` stays).
 Existing Rust assertions checked against the capacity rule: `several_members_never_last_row_wins` (`zero.rs:2809-2837`: one item, qty 5 -> oldest member / named, `alsoIn` unchanged) and `candidates_on_every_line_with_other_copies` (`zero.rs:3511-3564`: one item, named-first ordering) hold; `webhook_allocations_split_one_line_per_box` (`2840-2872`) is branch 1, untouched; `named_listing_or_none` (`2875-2888`) is branch 3/4, untouched. `zp.js` `lineCopies`/`pickActionBody` tests (`zero-pick.test.js:253-278`) hold.
@@ -187,3 +184,11 @@ Then code, docs (`docs/CARDTRADER_ZERO.md` lines 55-59, 80-82, 179-180) and `doc
 2. Money: a chosen candidate on line A may be the default on line B. Both picks are accepted by the unique key; the second can fail with `insufficient_quantity` (swap) or finalize an emptied row. The backend cannot tell which row a CT sale really decremented in the fallback. Proposed mitigation (not implemented, needs approval): none server-side; the cycle makes the defaults distinct, which makes collisions rare.
 3. `quantityAvailable` text stays the own row's stock (a fact), so a sold default still reads "(0 available)"; the chooser shows the other boxes with their stock next to it.
 4. The single image view has no chooser today (`PickingMode`); phase two should either add the same row or document that it picks the default only. Not required by the staff reports.
+
+### Coordinator review: design remains incomplete
+
+Sections 7-8 and the phase-two plan are worker proposals, not an approved implementation. No source or existing test has changed, and no checks were run. The source-regex conflict above requires stopping before implementation.
+
+The proposed "no server-side mitigation" for candidate/default collisions is rejected: requirement C explicitly forbids two lines claiming the one copy a box held. Making this rare does not meet that requirement. Likewise, always honoring repeated named listings can still pile multiple lines onto one member, and counting an entire multi-copy item as one capacity unit needs reconciliation with requirement B's copy capacity. A later design must address these cases and actual chosen-box display after reload, rather than treating them as optional. The unchanged handler currently permits distinct items to finalize the same listing (`picks.rs:176-178, 216-221`), so distinct default assignments alone cannot establish C.
+
+The single-image view is also part of the existing picking flow. Its lack of location choice cannot be accepted merely because the staff examples use another view. Scope and tests must cover the required behaviour throughout interactive picking while retaining read-only pending tiles.
