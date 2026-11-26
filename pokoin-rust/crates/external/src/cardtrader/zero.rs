@@ -2040,14 +2040,17 @@ pub fn apply_picks_with(list: &mut Value, picks: &HashMap<String, Value>, pg: &P
 /// [`zero_claims::check_claim`](crate::cardtrader::zero_claims::check_claim)
 /// the pick handler refuses with. Members other lines claimed that hold no
 /// copy any more stay offered as taken (instead of dropping out with their
-/// stock), their location recovered from the pick that cleared it. A line
+/// stock), their location recovered from the pick that cleared it. A line that
+/// has a live pick of its own takes one box, so every other box of it is taken
+/// as well ([`zero_claims::line_picked_elsewhere`], the handler's
+/// `line_already_picked`). A line
 /// picked from another box than its own gets `pickedFrom`
 /// (`[{listingId, location, quantity}]`). A line whose own box a live pick
 /// emptied and cleared keeps that box's location (from the pick row), so it
 /// does not lose its box or its sort place. Runs after [`apply_picks_with`]
 /// and before the sort; the pending list has no picks and is left as it is.
 pub fn annotate_claims(list: &mut Value, rows: &[Value], pg: &PgPicks) {
-    use crate::cardtrader::zero_claims::{taken, BoxClaims, ClaimKind};
+    use crate::cardtrader::zero_claims::{line_picked_elsewhere, taken, BoxClaims, ClaimKind};
     let index = ListingIndex::new(rows);
     let mut cleared: HashMap<String, String> = HashMap::new();
     for pick in pg.values().flat_map(|lines| lines.values()).flatten() {
@@ -2100,6 +2103,18 @@ pub fn annotate_claims(list: &mut Value, rows: &[Value], pg: &PgPicks) {
             let item_id = text(line.get("itemId"), 40);
             let own = text(line.get("listingId"), 80);
             let quantity = line.get("quantity").and_then(Value::as_i64).unwrap_or(0);
+            // One line, one box: a line that already picked a box has no other
+            // box to pick, and the handler refuses it with `line_already_picked`.
+            let line_picked: Vec<(String, String, i64)> = order_picks
+                .iter()
+                .filter(|(key, pick)| *key == line_key && text(pick.get("itemId"), 40) == item_id)
+                .map(|(key, pick)| {
+                    let quantity = pick.get("quantity").and_then(Value::as_i64).unwrap_or(0);
+                    (key.clone(), text(pick.get("listingId"), 80), quantity)
+                })
+                .collect();
+            let settled_elsewhere =
+                |listing: &str| line_picked_elsewhere(&line_picked, &line_key, listing) > 0;
             // As the handler: other lines' live picks on the box; the same item
             // on another line holding it is refused outright (one live pick per
             // item and copy).
@@ -2128,7 +2143,7 @@ pub fn annotate_claims(list: &mut Value, rows: &[Value], pg: &PgPicks) {
                 .unwrap_or_default();
             for candidate in candidates.iter_mut() {
                 let id = text(candidate.get("listingId"), 80);
-                let is_taken = box_taken(&id, ClaimKind::Swap);
+                let is_taken = box_taken(&id, ClaimKind::Swap) || settled_elsewhere(&id);
                 if is_taken && text(candidate.get("location"), 120).is_empty() {
                     candidate["location"] = json!(location_of(&id));
                 }
@@ -2148,7 +2163,7 @@ pub fn annotate_claims(list: &mut Value, rows: &[Value], pg: &PgPicks) {
                 {
                     continue;
                 }
-                if box_taken(&id, ClaimKind::Swap) {
+                if box_taken(&id, ClaimKind::Swap) || settled_elsewhere(&id) {
                     candidates.push(json!({
                         "listingId": id,
                         "location": location_of(&id),
@@ -4595,6 +4610,14 @@ mod tests {
             .unwrap_or_else(|| panic!("{id} not offered: {line}"))
     }
 
+    fn offers(line: &Value, id: &str) -> bool {
+        line["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["listingId"] == id)
+    }
+
     #[test]
     fn a_box_another_line_swapped_out_is_taken_for_its_default_line_and_stays_offered() {
         let before = vec![
@@ -4645,6 +4668,57 @@ mod tests {
             json!([{ "listingId": N2, "location": "box2·1", "quantity": 1 }])
         );
         assert_eq!(out[1]["pickedFrom"], json!([]));
+    }
+
+    #[test]
+    fn a_line_that_picked_a_box_is_offered_no_other_box() {
+        let before = vec![
+            stocked(N1, 1, "active", "box1·1", "2026-09-01T00:00:00.000Z"),
+            stocked(N2, 1, "active", "box2·1", "2026-09-02T00:00:00.000Z"),
+            stocked(N3, 1, "active", "box3·1", "2026-09-03T00:00:00.000Z"),
+        ];
+        let items = || {
+            vec![
+                item("11", "101", 1, 10),
+                item("12", "101", 1, 10),
+                item("13", "101", 1, 10),
+            ]
+        };
+        // Nothing picked: every line is offered the other two boxes.
+        let free = annotated(items(), &before, &before, &[], &HashMap::new());
+        assert_eq!(listing_ids(&free), vec![N1, N2, N3]);
+        assert_eq!(candidate(&free[0], N2)["taken"], false);
+        assert_eq!(candidate(&free[0], N3)["taken"], false);
+        // Line 11 (its box N1) took N3: N3 is empty and N1 credited its copy.
+        let mut after = before.clone();
+        after[0]["quantity_available"] = json!(2);
+        after[2] = stocked(N3, 0, "sold_out", "", "2026-09-03T00:00:00.000Z");
+        let picks = [live_pick(
+            "11",
+            &format!("11@{N1}"),
+            N3,
+            N1,
+            "swap",
+            1,
+            "box3·1",
+        )];
+        let out = annotated(items(), &before, &after, &picks, &HashMap::new());
+        // The line is settled: the box it took is gone from the offer, and the box
+        // it could still try is marked taken, as the handler answers
+        // `line_already_picked` for either.
+        assert_eq!(out[0]["picked"], 1);
+        assert!(
+            !offers(&out[0], N3),
+            "the emptied copy is not offered again: {}", out[0]
+        );
+        assert_eq!(candidate(&out[0], N2)["taken"], true);
+        // A line with no pick of its own keeps its choices: 12 still has N1.
+        assert_eq!(out[1]["picked"], 0);
+        assert_eq!(candidate(&out[1], N1)["taken"], false);
+        // Undone: 11 is offered its boxes again.
+        let back = annotated(items(), &before, &before, &[], &HashMap::new());
+        assert_eq!(candidate(&back[0], N2)["taken"], false);
+        assert_eq!(candidate(&back[0], N3)["taken"], false);
     }
 
     #[test]

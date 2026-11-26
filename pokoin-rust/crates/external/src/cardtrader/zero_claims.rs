@@ -34,12 +34,23 @@
 //!
 //! A client cannot raise any of these numbers: they come from the locked row
 //! and the stored pick rows. Capacity is per order, not across orders.
+//!
+//! One line, one box is the other half ([`line_picked_elsewhere`]): a line that
+//! already has a live pick on another copy is refused with
+//! [`LINE_ALREADY_PICKED`] and the list stops offering its other boxes, so two
+//! tabs of one line cannot move two boxes for one sale.
 
 /// The error code of a claim refused because other lines have the copies.
 pub const COPY_ALREADY_PICKED: &str = "copy_already_picked";
 /// The message shown with it.
 pub const COPY_ALREADY_PICKED_MESSAGE: &str =
     "That box's copy was already picked for another line; choose another box";
+
+/// The error code of a pick refused because the line already picked a box.
+pub const LINE_ALREADY_PICKED: &str = "line_already_picked";
+/// The message shown with it.
+pub const LINE_ALREADY_PICKED_MESSAGE: &str =
+    "This line was already picked from another box; undo it first";
 
 /// What a pick does with box X.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,6 +121,20 @@ pub fn check_claim(
 /// The list's `taken`: this line cannot have the box because of other lines.
 pub fn taken(kind: ClaimKind, stock: i64, claims: BoxClaims, quantity: i64) -> bool {
     check_claim(kind, stock, claims, quantity) == Err(Refusal::CopyAlreadyPicked)
+}
+
+/// The copies a line already holds on a box other than `listing_id`.
+///
+/// A line is one box of one item (docs/CARDTRADER_ZERO.md "One line per box"),
+/// so its first live pick settles it: a pick of the same line key from another
+/// copy would move two boxes for one sale. `rows` are the item's live picks on
+/// every copy (`(line_key, listing_id, quantity)`); the same copy is not
+/// counted — it is the idempotent replay.
+pub fn line_picked_elsewhere(rows: &[(String, String, i64)], line_key: &str, listing_id: &str) -> i64 {
+    rows.iter()
+        .filter(|(key, copy, _)| key == line_key && copy != listing_id)
+        .map(|(_, _, quantity)| *quantity)
+        .sum()
 }
 
 #[cfg(test)]
@@ -229,6 +254,27 @@ mod tests {
             check_claim(Swap, 3, claims(NONE), 4),
             Err(Refusal::InsufficientQuantity)
         );
+    }
+
+    #[test]
+    fn a_line_picked_from_one_box_holds_no_other_box() {
+        let rows = |entries: &[(&str, &str, i64)]| -> Vec<(String, String, i64)> {
+            entries
+                .iter()
+                .map(|(key, copy, quantity)| (key.to_string(), copy.to_string(), *quantity))
+                .collect()
+        };
+        // Two tabs, one line: the pick of the other box is what is refused.
+        let two_boxes = rows(&[("11@N1", "N2", 1)]);
+        assert_eq!(line_picked_elsewhere(&two_boxes, "11@N1", "N3"), 1);
+        // The copy it already picked stays the idempotent replay.
+        assert_eq!(line_picked_elsewhere(&two_boxes, "11@N1", "N2"), 0);
+        // Another line of the same item (a webhook split) is another line.
+        assert_eq!(line_picked_elsewhere(&two_boxes, "11@N9", "N3"), 0);
+        // A line is settled by any live copies of it, however many rows.
+        let spread = rows(&[("11@N1", "N2", 1), ("11@N1", "N3", 2), ("12@N1", "N2", 4)]);
+        assert_eq!(line_picked_elsewhere(&spread, "11@N1", "N4"), 3);
+        assert_eq!(line_picked_elsewhere(&[], "11@N1", "N2"), 0);
     }
 
     #[test]
