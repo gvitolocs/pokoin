@@ -134,6 +134,8 @@ Client: `Pack:276-303` `runPick(line, action, listingId)`.
 
 ## 7. Proposed capacity rule (members fallback only)
 
+> Historical phase-one proposal. Superseded by section 11: named members are honoured only at the lowest load, a quantity weighs its box by q, and server-side claim enforcement was added.
+
 Applies only to `split_item_lines` branch 2 (several members, no allocations). Branches 1 (webhook), 3 and 4 are unchanged, byte for byte.
 
 **Scope.** Each shipment (each weekly order's `items`) is its own scope; the pending list is its own scope. Within a scope, a per-product **load** counter (`HashMap<member id, usize>`) starts at zero. Scopes never share counters (a shipment's pick does not depend on pending, and shipments do not depend on each other).
@@ -152,6 +154,8 @@ So the first unnamed item gets the oldest member (the baseline default, so `seve
 **alsoIn / candidates.** `alsoIn` stays computed from the chosen primary exactly as today (other members' distinct non-empty locations, `zero.rs:706-712`). `candidates` stays "members of the product minus own, `quantity_available > 0`, `active`/`paused`, named first then oldest" (`zero.rs:634-664`): own excluded, the sold-out default is not offered, and nothing else about it changes. The chooser (phase two) shows **own listing first, then candidates**, so the three lines of report 2 each offer their own box plus the other boxes.
 
 ## 8. Reload-stability design
+
+> Historical phase-one design; still true for defaults (rule 1). Point 2 ("picked from") is now implemented, and point 3's shared-row location loss is fixed: see section 11.
 
 1. **Defaults never read stock or location or picks.** The only inputs are the member rows' `id`, `created_at`, `source_listing_id`, the item ids, and the named listing. Picking, swapping, undoing, clearing a location or paying more sales (which change the `quantity_available` of rows but not the row set) cannot move any default. The `lineKey` (`item@listing`) is therefore stable across reloads, which is what the pick rows (`line_key`) and `picked` counts rely on (`zero.rs:1870-1877`).
 2. **The picked listing is already persisted** per pick row (`listing_id`, `allocated_listing_id`), exposed as `picks[]` (`zero.rs:1878`). Planned display (phase two, UI only): when a line has a live pick whose `listingId` differs from the default, the tile may note "picked from <location>"; not required for correctness. Only that line changes.
@@ -180,6 +184,8 @@ Then code, docs (`docs/CARDTRADER_ZERO.md` lines 55-59, 80-82, 179-180) and `doc
 
 ### Risks / open questions for the coordinator
 
+> Historical. Decisions in section 11: (1) owner authorized rewriting that one assertion; (2) rejected "no server-side mitigation", replaced by `copy_already_picked`; (3) kept; (4) the single image view got the chooser.
+
 1. The existing source-regex test in section 9.
 2. Money: a chosen candidate on line A may be the default on line B. Both picks are accepted by the unique key; the second can fail with `insufficient_quantity` (swap) or finalize an emptied row. The backend cannot tell which row a CT sale really decremented in the fallback. Proposed mitigation (not implemented, needs approval): none server-side; the cycle makes the defaults distinct, which makes collisions rare.
 3. `quantityAvailable` text stays the own row's stock (a fact), so a sold default still reads "(0 available)"; the chooser shows the other boxes with their stock next to it.
@@ -192,3 +198,99 @@ Sections 7-8 and the phase-two plan are worker proposals, not an approved implem
 The proposed "no server-side mitigation" for candidate/default collisions is rejected: requirement C explicitly forbids two lines claiming the one copy a box held. Making this rare does not meet that requirement. Likewise, always honoring repeated named listings can still pile multiple lines onto one member, and counting an entire multi-copy item as one capacity unit needs reconciliation with requirement B's copy capacity. A later design must address these cases and actual chosen-box display after reload, rather than treating them as optional. The unchanged handler currently permits distinct items to finalize the same listing (`picks.rs:176-178, 216-221`), so distinct default assignments alone cannot establish C.
 
 The single-image view is also part of the existing picking flow. Its lack of location choice cannot be accepted merely because the staff examples use another view. Scope and tests must cover the required behaviour throughout interactive picking while retaining read-only pending tiles.
+
+## 11. Phase two: decisions and implementation (PK-C046, PK-R077)
+
+Owner and lead authorization (`reports/pk-c046-work/phase2-brief.md`) resolved the stop in
+section 9. Commits on `zero-pick-location`, after `47e0a8c3`:
+
+| Commit | What |
+| --- | --- |
+| `d43976f8` | Chooser in every interactive view (images, list, single image), own box first with location and available count, taken boxes disabled, "picked from", undo of the stored picks. The one authorized `ZeroPack.test.js` assertion and its title were rewritten (commit body says which and why). |
+| `6bbb51df` | Server list refresh after pick, undo, `copy_already_picked` and partial undo; `runPick` refuses a box the server marked taken (covers drag, keyboard, single image); "picked from" hidden once the line is unpicked. |
+| `b2cf6feb` | `picksUnavailable` stated on the page; `lineCopies` doc no longer ties candidates to Smart locations. |
+| `447349ba` | `zero_claims.rs`: the shared capacity rule. |
+| `04fb705d` | `zero.rs`: default box per pass, list annotations (`ownTaken`, `candidates[].taken`, kept taken members, `pickedFrom`, own location kept), `location_from` in the picks read, picked boxes read, `picksUnavailable`. |
+| `2c8a9a0d` | Handler: claims checked after the listing locks in an explicit READ COMMITTED transaction, replay only for the same line key, undo re-read after the locks. |
+
+### Decisions
+
+1. **Default box (requirement B).** Section 7's rule with two corrections: a named member is
+   honoured only while its load is the lowest of the product (one copy per box per pass);
+   a repeated name falls through to the lowest load, oldest first. An item of quantity q
+   stays one line and adds q. Scope: each weekly shipment and the pending list apart.
+   Natural `itemId` order. No stock, status, location, picks, sort or Smart locations input.
+   Webhook allocations unchanged and not counted. Documented in docs/CARDTRADER_ZERO.md
+   ("One line per box").
+2. **One copy, one line (requirement C).** Server-side, in the pick transaction, through
+   the pure `zero_claims::check_claim` the list also uses. Capacity S − F (S: locked stock,
+   already net of sales and live swaps; F: other lines' live finalize copies). The first
+   finalize with no other claim is always allowed. Swap error priority: claims exhausted
+   (S − F ≤ 0) or a request the stock alone would cover is `copy_already_picked`; a request
+   larger than what is left stays `insufficient_quantity` (flow item 23). Another line is
+   another `(item_id, line_key)`. Sonnet's draft (client-sent `allocation: "event"`
+   bypass; claims keyed by item only; finalize after a swap allowed) was rejected.
+3. **Concurrency.** READ COMMITTED set explicitly as the first statement; listings locked
+   in id order, then plain reads of the live pick and the claims; undo locks its pick row
+   after the listings (no lock cycle). A claim-read failure fails the pick (no default).
+4. **Display.** Taken flags from the same function; claimed members at 0 stock stay
+   offered as taken, located from `location_from`; a line whose own box a pick cleared
+   keeps that location and its sort place (the section 6 shared-row loss); `pickedFrom`
+   after reload and at once. A failed picks read is `picksUnavailable`, said on the page;
+   the handler stays the guard.
+5. **Undo identity.** Undo still finds its row by (seller, order, item, picked copy), not
+   by line key: the baseline flow test undoes with a different client `lineKey`
+   (`pick("21", c, decoy, …)`) and must keep passing.
+
+### Evidence (logs in `reports/pk-c046-work/`, not committed)
+
+- Red before the allocation fix: `coordinator-external-red.log`, worktree with zero.rs
+  production unchanged and the appended tests only: `359 passed; 7 failed` (the seven
+  allocation tests). `rust-red-snapshot.log` repeats it on a frozen copy.
+- Red before the own-location fix: `own-location-red.log` (`B still names its box`,
+  `left: ""`).
+- Client red: `client-red.log` (new JS tests against the previous sources: 4 failures).
+- Handler and claims tests were written with the new functions; their red is a compile
+  failure only, not a behavioural one.
+- Green: the four mandatory checks and `scripts/check-fast` (see the final report).
+
+### Test inventory (appended only)
+
+- `zero.rs`: `three_same_product_items_take_three_distinct_boxes`,
+  `a_named_box_is_taken_first_and_repeated_names_spread`,
+  `named_boxes_beat_unnamed_items_of_lower_ids`, `a_quantity_weighs_the_box_but_stays_one_line`,
+  `more_items_than_boxes_reuse_the_lowest_load`, `webhook_lines_stay_and_do_not_count_in_the_load`,
+  `shipments_and_pending_are_independent_scopes`, `defaults_do_not_move_with_stock_location_or_row_order`,
+  `pending_items_spread_over_the_boxes_as_their_own_scope`, `a_named_box_is_honoured_again_on_a_later_pass`,
+  `a_box_another_line_swapped_out_is_taken_for_its_default_line_and_stays_offered`,
+  `the_first_finalize_of_a_sold_out_box_takes_it_from_the_other_lines`,
+  `the_other_line_of_a_split_item_holding_a_box_takes_it`,
+  `multi_copy_finalize_holds_its_quantity_on_the_list`, `picked_listing_ids_cover_every_live_pick`,
+  `a_default_box_another_line_emptied_keeps_its_location_and_sort_place`.
+- `zero_claims.rs`: 7 pure tests (finalize after swap, first finalize blocks others,
+  swap priority, request shortfall, no double subtraction, multi-copy, counting).
+- `zero_picks.rs` (handler): `a_finalize_after_another_lines_swap_took_the_copy_is_refused`,
+  `a_swap_names_the_claim_or_the_shortage_that_stops_it`,
+  `only_the_same_line_replays_a_live_pick_of_its_copy`,
+  `multi_copy_lines_finalize_alone_and_hold_their_quantity`,
+  `every_pick_transaction_says_read_committed_before_its_first_read`.
+- `zero_picks_flow.rs` (Postgres, **compiled only, never run here**):
+  `one_copy_is_claimed_by_one_line_of_the_order`, `two_lines_racing_for_one_sold_copy_get_one_pick`.
+- JS: `zero-pick.test.js` and `ZeroPack.test.js` appended tests (chooser, taken, picked from,
+  undo, `pickTaken`, refresh wiring, guard, `picksUnavailable`).
+
+### Open limits
+
+- No DB flow test ran (no database allowed): the claim flow, race and isolation are proved
+  by unit tests and code reading only. docs/FEATURES.toml says `partial`.
+- Capacity per order, not across orders; a restocked box still counts an older finalize;
+  with every box sold out and more lines than boxes held, the extra lines have no box to
+  pick until an earlier line is undone.
+- In the members fallback a swap credits the guessed default, so recorded stock can drift
+  from the real boxes (only real allocations remove that).
+- Firestore-only orders (before inventory picks) have no claims.
+- The list can be briefly stale (separate reads, possibly a replica); the handler on the
+  writer is authoritative.
+- `scripts/check-fast` copies changed files to a temp dir for gitleaks, so the repository's
+  `.gitleaks.toml` (which allowlists the existing zero.rs test fixture key) is not applied
+  there; it was run with `GITLEAKS_CONFIG` pointing at that unchanged file.

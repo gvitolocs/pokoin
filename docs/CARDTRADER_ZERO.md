@@ -48,21 +48,30 @@ D00000F), quantity, seller price, and:
   ranked), and `ptLocation` (this line's Power Tools location);
 - `lineKey`, `quantity` (copies on this line), `itemQuantity`, `allocation`, `alsoIn`;
 - `picked` / `issue`: the server-side picked state, and `picks`: the line's live
-  Postgres picks `[{id, itemId, listingId, allocatedListingId, kind, quantity}]` (the
-  copy to undo can differ from the line's listing after a swap);
+  Postgres picks `[{id, itemId, listingId, allocatedListingId, kind, quantity,
+  locationFrom}]` (the copy to undo can differ from the line's listing after a swap);
 - `quantityAvailable`: the stock of the line's own listing row (null when unlinked), for
   the "(N available)" location text;
 - `candidates`, on every line: the identical copies in other boxes
   `[{listingId, location, quantityAvailable}]` (the other members of the item's CardTrader
   product: members fallback, or a grouped product), the listing the item names first, then
   oldest; the line's own listing excluded; only rows with `quantity_available > 0` and
-  status `active` / `paused`. `[]` when there are none. Used for "Picked from another box…";
+  status `active` / `paused`. `[]` when there are none. Weekly lines add `taken` to each
+  (see "One copy, one line"), and keep a member other lines of the order claimed even at
+  0 stock, as `taken`, located from the pick that cleared it. Used for the box chooser and
+  "Picked from another box…";
+- weekly lines only: `ownTaken` (the line's own box is taken: its plain Pick is off) and
+  `pickedFrom` `[{listingId, location, quantity}]`, the line's live picks from another
+  box than its own (location recovered from `location_from` when the pick cleared it);
 - `powerTools`: Power Tools order state, picked quantity, location, bin, and its picking
   position, when a Power Tools session is connected.
 
 Each weekly order adds `ptPicking`, `pickedLines`, and `issueCount`; top-level
 `powerTools.picking` is `{ok, source: "articlesToPick" | "orders" | "none", error}`, and
 `sorting` is `{fields, defaultFields, smartLocations}` (the seller's saved sort, below).
+`picksUnavailable` is true when the Postgres picks could not be read: the list then
+marks no box taken and the page says so; the pick handler still checks the claims on the
+writer, so a taken box is refused on save either way.
 
 ### One line per box
 
@@ -77,14 +86,61 @@ five boxes. Both work: each CardTrader item becomes one line per box:
    listing first, then oldest). Zero decrements on the `hub_pending` order, so the doc of
    the item's `hub_pending_order_id` is read first, then the weekly order's. One line per
    allocation; a short sum puts the remainder on the first line.
-2. **`members`**: no allocations and several members: one line at the named listing,
-   else the oldest member, for the full quantity; `alsoIn` lists the other members'
-   locations.
+2. **`members`**: no allocations and several members: one line for the full quantity at
+   the item's default box (below); `alsoIn` lists the other members' locations.
 3. **`listing`**: a single member, or the listing `user_data_field` names.
 4. **`none`**: no Pokoin listing.
 
 Rows are read without a status filter: a `sold_out` row still says which box the copy
-left. `lineKey` is `<itemId>@<listingId>` for a linked line, else `<itemId>`.
+left. `lineKey` is `<itemId>@<listingId>` for a linked line, else `<itemId>`. Boxes the
+live picks name are read too, even outside the lines' products.
+
+**Default box of a `members` line (one copy per box per pass).** Without allocations
+Pokoin cannot know which box each sale took from, so identical items no longer all name
+the oldest member. Per scope (each weekly shipment, and the pending list, apart) and per
+product, items are taken in natural `itemId` order, in two stages:
+
+1. an item naming a member (`user_data_field`) gets it only while that member's load is
+   the lowest of the product (its copy of the current pass is still free); a repeated
+   name falls through to stage 2;
+2. every other item gets the member with the lowest load, oldest first on ties
+   (`created_at`, then id).
+
+An item of quantity q stays one line and adds q to its box's load; with more items than
+boxes the loads wrap. `event` items and single-member products are not counted. The
+inputs are only the member set, the names, the item ids and quantities: stock, status,
+locations, picks, sort settings, Smart locations and the response order never move a
+default, so `lineKey` stays the same across reloads. A changed member set (a listing
+added or deleted) can move defaults, as before.
+
+### One copy, one line
+
+> requirement C: a box whose copies are all picked for other lines of the same order is
+> refused, `409 copy_already_picked`, "That box's copy was already picked for another
+> line; choose another box".
+
+Scope: the seller and the CardTrader order (`order_id`); another line is another
+`(itemId, lineKey)`, so two lines of one item (`event` over two boxes) are two lines.
+`pokoin_external::cardtrader::zero_claims::check_claim` decides, for the handler and for
+the list's `taken` flags alike. With S = the box's `quantity_available` (already net of
+sales and of live swaps *from* it) and F = the copies other lines' live `finalize`
+picks hold on it:
+
+| Pick | Allowed when | Else |
+|---|---|---|
+| finalize (own box), no other live pick on it | always, any quantity (it takes the copies the sale took, which Pokoin cannot count after the sale) | — |
+| finalize, other live picks on it | S − F ≥ quantity | `copy_already_picked` |
+| swap (another box) | S − F ≥ quantity (other swaps are already out of S) | `copy_already_picked` when other lines' picks are on it and either S − F ≤ 0 or S alone would cover the request; else `insufficient_quantity` |
+
+So a finalize after another line's swap took the box's last copy is refused, the first
+finalize of a sold-out box refuses every other line until it is undone, a box of 3 serves
+swaps of 2 and then 1, and a request larger than what is left stays
+`insufficient_quantity`. A live pick of the same item and copy on another line key is
+refused too, never answered as a replay. Known limits: capacity is per order, not across
+orders; a box restocked after a finalize still counts that finalize; when every box of a
+product is sold out and more lines default to a box than it held, the extra lines have
+no box to pick until an earlier line is undone (the members fallback cannot know which
+box the sale took); orders picked only in Firestore have no claims.
 
 ### Picking order
 
@@ -177,7 +233,10 @@ to the default. `POST /api/cardtrader-zero-sort` `{fields?, smartLocations?}` or
 `{ok, sorting}`; it calls neither CardTrader nor Power Tools.
 
 **Smart locations** is a display preference only (default on): the API answer is the same
-either way. `alsoIn` (location strings) and `candidates` are always sent.
+either way. `alsoIn` (location strings) and `candidates` are always sent, and the box
+chooser (own box first, then the other boxes, each with its location and available count;
+taken ones disabled) shows on image tiles, list rows and the single image whatever the
+setting. Read-only pending tiles and single-box lines have none.
 
 ### Power Tools picking order
 
@@ -254,7 +313,7 @@ listing rows locked in id order:
 | Case | What changes |
 |---|---|
 | pick, same copy (or no allocation): `finalize` | No quantity change. When the copy now holds none (0 / `sold_out`), its location goes to `location_from` and the listing's `location` is cleared, so the location page and board stop showing it. A multi-copy listing keeps its location. |
-| pick, another copy: `swap` | Same seller, `card_id`, condition, language, reverse, first edition, signed, graded, else `409 not_identical`. Picked copy −quantity (`409 insufficient_quantity` when it has fewer), allocated copy +quantity. Net −quantity across the seller's copies of that card, i.e. the sale's copy. CardTrader gets −n on one product and +n on the other (increments, never totals). A picked copy left at 0 also leaves its box (as finalize). |
+| pick, another copy: `swap` | Same seller, `card_id`, condition, language, reverse, first edition, signed, graded, else `409 not_identical`. Picked copy −quantity (`409 insufficient_quantity` when it has fewer, `409 copy_already_picked` when other lines hold its copies: "One copy, one line"), allocated copy +quantity. Net −quantity across the seller's copies of that card, i.e. the sale's copy. CardTrader gets −n on one product and +n on the other (increments, never totals). A picked copy left at 0 also leaves its box (as finalize). |
 | undo `finalize` | `location_from` comes back if the listing's location is still blank. |
 | undo `swap` | Picked copy +n, the **stored** allocated copy −n (`409 allocated_copy_gone` when it no longer has n: nothing changes), location restored as above. |
 
@@ -268,9 +327,18 @@ product (product grouping): that product gets `−n` instead. Each change queues
 listing.changed outbox event in the same transaction; a location clear queues
 `LISTING_UPDATED`.
 
+Every pick also runs the "One copy, one line" check (a finalize included). The
+transaction sets READ COMMITTED explicitly, locks the listing rows, then reads the live
+pick of its copy and the other lines' claims with plain reads: every claim on a copy is
+written under that copy's row lock, so a claim committed first is seen and the next one
+waits. Undo reads its row unlocked to learn which copies to lock, then again `for update`
+after the listing locks (always listings before pick rows, so no lock cycle); a row
+undone and picked again from another sold copy in between answers `409 pick_changed`.
+
 Idempotent: a live pick is unique per (seller, order, item, copy) (partial unique index
-on `state = 'picked'`). A replay or a double click answers the existing row and changes
-nothing; concurrent clicks collapse on the index. Undo marks the row `undone`; undoing
+on `state = 'picked'`). A replay or a double click of the same line (same `lineKey`)
+answers the existing row and changes nothing; concurrent clicks collapse on the listing
+lock and the index. Undo marks the row `undone`; undoing
 an undone row is a no-op. Undo finds the row by (seller, order, item, picked copy) and
 always restores the allocated copy stored on it; an `allocatedListingId` the client
 sends with an undo is ignored. An issue report never touches stock.
@@ -287,7 +355,15 @@ of a line with no Pokoin listing (no `listingId`) is a Firestore picked count
 `GET /api/cardtrader-zero` reads picked counts from Postgres: an order with any live
 Postgres pick takes its counts from there (the line's `picks`); an order without keeps its
 Firestore counts (orders ticked before the deploy). Issues always come from Firestore.
-A missing table reads as no rows.
+A missing table or a failed read is no rows, with `picksUnavailable: true`.
+
+After a pick, an undo, a refused `copy_already_picked` or an undo that reversed only some
+copies, the page reads the list again (cached CardTrader orders; Power Tools only when its
+overlay is shown) so other lines' boxes show what is taken now. The client also refuses a
+pick of a box the server marked taken before sending (buttons, drag, keyboard, single
+image); it never works out a capacity itself. A swapped line shows "picked from
+<location>" at once and after a reload, and its undo sends the copies its stored picks
+name.
 
 ### Picked section
 
