@@ -3,6 +3,7 @@ import { inventoryListingHref } from '@market/inventory-listings.js';
 import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } from '@market/listing-meta.js';
 import {
   alsoInLabels,
+  lineChoices,
   lineCopies,
   lineIsFoil,
   lineIsReverse,
@@ -57,7 +58,9 @@ export default function ZeroTile(props) {
   const flag = () => (item().language ? listingLanguageFlag(item().language) : null);
   const copies = () => lineCopies(item());
   const also = () => alsoInLabels(item());
-  const choose = () => interactive() && props.smartLocations === false && copies().length > 0 && !done();
+  const others = () => lineChoices(item()).filter((choice) => !choice.own);
+  const choose = () => interactive() && !done() && copies().length > 0;
+  const ownTaken = () => Boolean(item().ownTaken);
   const comment = () => String(item().comment || '').trim();
   return (
     <article
@@ -147,40 +150,43 @@ export default function ZeroTile(props) {
         <Show when={also().length && !choose()}>
           <span class="zero-also">also in: {also().join(', ')}</span>
         </Show>
+        <Show when={props.pickedFrom}><span class="zero-picked-from">{props.pickedFrom}</span></Show>
         <Show when={props.note}><span class="zero-inventory-note" role="status">{props.note}</span></Show>
         <Show when={props.error}><span class="zero-save-error" role="alert">{props.error}</span></Show>
       </div>
       <Show when={interactive()}>
         <div class="zero-card-actions">
+          <button
+            class={['btn', 'zero-pick-main', { ghost: done(), stripe: !done() }]}
+            type="button"
+            draggable="false"
+            disabled={props.busy || (ownTaken() && !done())}
+            title={ownTaken() && !done() ? "That box's copy was already picked for another line; choose another box" : undefined}
+            aria-pressed={done() ? 'true' : 'false'}
+            onClick={() => (done() ? props.onUndo(item()) : props.onPick(item()))}
+          >
+            {props.busy ? 'Saving…' : done() ? 'Undo' : 'Pick'}
+          </button>
           <Show when={choose()}>
             <div class="zero-box-choice" role="group" aria-label="Pick from box">
               <span class="thread-meta">Pick from:</span>
-              <button class="btn ghost" type="button" disabled={props.busy} onClick={() => props.onPick(item())}>
+              <button class="btn ghost" type="button" disabled={props.busy || ownTaken()} onClick={() => props.onPick(item())}>
                 {lineLocation(item()) || 'No location'}
+                <Show when={item().quantityAvailable != null}> ({item().quantityAvailable} available)</Show>
+                <Show when={ownTaken()}> · taken</Show>
               </button>
-              <For each={copies()}>
+              <For each={others()}>
                 {(copy) => (
-                  <button class="btn ghost" type="button" disabled={props.busy} onClick={() => props.onPick(item(), copy.listingId)}>
+                  <button class="btn ghost" type="button" disabled={props.busy || copy.taken} onClick={() => props.onPick(item(), copy.listingId)}>
                     {copy.location || 'No location'}
-                    <Show when={copy.quantityAvailable != null}> ({copy.quantityAvailable})</Show>
+                    <Show when={copy.quantityAvailable != null}> ({copy.quantityAvailable} available)</Show>
+                    <Show when={copy.taken}> · taken</Show>
                   </button>
                 )}
               </For>
             </div>
           </Show>
-          <Show when={!choose()}>
-            <button
-              class={['btn', 'zero-pick-main', { ghost: done(), stripe: !done() }]}
-              type="button"
-              draggable="false"
-              disabled={props.busy}
-              aria-pressed={done() ? 'true' : 'false'}
-              onClick={() => (done() ? props.onUndo(item()) : props.onPick(item()))}
-            >
-              {props.busy ? 'Saving…' : done() ? 'Undo' : 'Pick'}
-            </button>
-          </Show>
-          <Show when={!done() && copies().length && !choose()}>
+          <Show when={!done() && copies().length}>
             <button class="zero-issue-link" type="button" disabled={props.busy} onClick={() => props.onSwap(item())}>
               Picked from another box…
             </button>

@@ -478,7 +478,7 @@ function ZeroDesk(props) {
       const token = await getBearer();
       const saved = await saveCardTraderZeroSort(token, { fields: sortFields(), smartLocations: on });
       takeSorting(saved?.sorting);
-      await load(); // the server adds or drops each line's candidate boxes
+      await load(); // the sort preference reloads the list; the box chooser never depends on it
     } catch (err) {
       setSortNote({ tone: 'warn', text: err.message || 'Could not save Smart locations.' });
     } finally {

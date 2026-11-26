@@ -1,6 +1,6 @@
 import { For, Show } from 'solid-js';
 import { inventoryListingHref } from '@market/inventory-listings.js';
-import { lineCopies, lineKeyOf, lineLocation, lineQuantity } from '@market/zero-pick.js';
+import { lineChoices, lineCopies, lineKeyOf, lineLocation, lineQuantity } from '@market/zero-pick.js';
 import { FacetBadges, IssueBadge, linePrice, LocationText, lineWhere, PtPlace, TakeBits } from './zero-bits.jsx';
 
 /**
@@ -53,12 +53,19 @@ export default function ZeroList(props) {
                         <span class="zero-row-place">{props.places.get(key())}</span>
                         <strong class={{ 'is-empty': !lineLocation(line()) }}><LocationText item={line()} /></strong>
                         <TakeBits item={line()} />
-                        <Show when={!props.printOnly && !props.readOnly && props.smartLocations === false && !done() && lineCopies(line()).length}>
-                          <span class="zero-box-choice" role="group" aria-label="Picked from another box">
-                            <For each={lineCopies(line())}>
+                        <Show when={!props.printOnly && !props.readOnly && !done() && lineChoices(line()).length}>
+                          <span class="zero-box-choice" role="group" aria-label="Pick from box">
+                            <button class="btn ghost" type="button" disabled={busy() || Boolean(line().ownTaken)} onClick={() => props.onPick(line())}>
+                              Pick from {lineLocation(line()) || 'No location'}
+                              <Show when={line().quantityAvailable != null}> ({line().quantityAvailable} available)</Show>
+                              <Show when={line().ownTaken}> · taken</Show>
+                            </button>
+                            <For each={lineChoices(line()).filter((choice) => !choice.own)}>
                               {(copy) => (
-                                <button class="btn ghost" type="button" disabled={busy()} onClick={() => props.onPick(line(), copy.listingId)}>
+                                <button class="btn ghost" type="button" disabled={busy() || copy.taken} onClick={() => props.onPick(line(), copy.listingId)}>
                                   Pick from {copy.location || 'No location'}
+                                  <Show when={copy.quantityAvailable != null}> ({copy.quantityAvailable} available)</Show>
+                                  <Show when={copy.taken}> · taken</Show>
                                 </button>
                               )}
                             </For>
@@ -70,6 +77,7 @@ export default function ZeroList(props) {
                           <a href={inventoryListingHref(line())}><strong>{line().name}</strong></a>
                         </Show>
                         <Show when={line().nameEn}><small>{line().nameEn}</small></Show>
+                        <Show when={props.pickedFromOf?.(line())}><span class="zero-picked-from">{props.pickedFromOf(line())}</span></Show>
                         <Show when={!props.printOnly && props.notes?.[key()]}>
                           <span class="zero-inventory-note" role="status">{props.notes[key()]}</span>
                         </Show>
@@ -91,7 +99,7 @@ export default function ZeroList(props) {
                           <button
                             class={['btn', 'zero-pick-btn', { ghost: done(), on: done() }]}
                             type="button"
-                            disabled={busy()}
+                            disabled={busy() || (Boolean(line().ownTaken) && !done())}
                             aria-pressed={done() ? 'true' : 'false'}
                             onClick={() => (done() ? props.onUndo(line()) : props.onPick(line()))}
                           >

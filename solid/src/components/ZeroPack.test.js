@@ -125,8 +125,10 @@ test('Apply sort: local, save on Pokoin, PT dry run then confirmed write with ex
   assert.match(page, /saveCardTraderZeroSort\(token, \{ fields: sortFields\(\), smartLocations: on \}\)/);
 });
 
-test('smart locations off: every candidate box is a choice; choosing one is the swap pick', () => {
-  assert.match(tile, /props\.smartLocations === false && copies\(\)\.length > 0/);
+test('box choice does not depend on smart locations: interactive, not done, another box exists; choosing one is the swap pick', () => {
+  const choose = tile.match(/const choose = [^\n]*/)?.[0] || '';
+  assert.match(choose, /const choose = \(\) => interactive\(\) && !done\(\) && copies\(\)\.length > 0;/);
+  assert.doesNotMatch(choose, /smartLocations/);
   assert.match(tile, /props\.onPick\(item\(\), copy\.listingId\)/);
   assert.match(list, /props\.onPick\(line\(\), copy\.listingId\)/);
   assert.match(dialogs, /props\.onChoose\(copy\.listingId\)/);
@@ -194,4 +196,71 @@ test('foil is a rainbow mark, not a Foil text pill, on tiles and facet badges', 
   assert.match(css, /\.zero-foil-text \{[^}]*font-weight: 800/);
   assert.match(css, /\.zero-foil-text \{ color: #000 !important; font-size: 9pt; \}/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.zero-foil \{ animation: none; \}/);
+});
+
+test('the chooser shows in every interactive view and never gates on smart locations', () => {
+  assert.doesNotMatch(tile, /smartLocations/);
+  assert.doesNotMatch(list, /smartLocations/);
+  assert.doesNotMatch(picking, /smartLocations/);
+  // Images (both layouts) and the list use the same options: own box first, then the others.
+  assert.match(tile, /lineChoices\(item\(\)\)\.filter\(\(choice\) => !choice\.own\)/);
+  assert.match(list, /lineChoices\(line\(\)\)/);
+  assert.match(list, /!props\.printOnly && !props\.readOnly && !done\(\) && lineChoices\(line\(\)\)\.length/);
+  // Single image: the same buttons, wired to the same pick-from-a-box call.
+  assert.match(picking, /lineChoices\(line\(\)\)/);
+  assert.match(picking, /props\.onPick\(line\(\), copy\.listingId\)/);
+  assert.match(pack, /<PickingMode\s+inline[\s\S]*?onPick=\{onPick\}/);
+});
+
+test('the suggested Pick stays one tap next to the chooser; the swap link stays too', () => {
+  assert.match(tile, /props\.onPick\(item\(\)\)\}/);
+  assert.match(tile, /'zero-pick-main'/);
+  assert.doesNotMatch(tile, /<Show when=\{!choose\(\)\}>\s*<button\s+class=\{\['btn', 'zero-pick-main'/);
+  assert.match(tile, /Picked from another box…/);
+  assert.match(tile, /!done\(\) && copies\(\)\.length\}/);
+  assert.match(list, /Other box…/);
+  assert.match(pack, /onChoose=\{\(listingId\) => \{ setSwapKey\(''\); onPick\(line\(\), listingId\); \}\}/);
+});
+
+test('every option shows its location and available count, own box included', () => {
+  assert.match(tile, /\{choice\.quantityAvailable\} available|\(\{[a-z().]*quantityAvailable[a-z().]*\} available\)/);
+  assert.match(tile, /item\(\)\.quantityAvailable/);
+  assert.match(list, /available\)/);
+  assert.match(picking, /available\)/);
+  assert.match(dialogs, /available/);
+});
+
+test('a taken box stays visible but disabled, and a taken default disables Pick too', () => {
+  assert.match(tile, /disabled=\{props\.busy \|\| copy\.taken\}/);
+  assert.match(tile, /· taken/);
+  assert.match(tile, /const ownTaken = \(\) => Boolean\(item\(\)\.ownTaken\);/);
+  assert.match(tile, /disabled=\{props\.busy \|\| \(ownTaken\(\) && !done\(\)\)\}/);
+  assert.match(list, /copy\.taken/);
+  assert.match(list, /ownTaken/);
+  assert.match(picking, /copy\.taken/);
+  assert.match(picking, /ownTaken/);
+  assert.match(dialogs, /disabled=\{props\.busy \|\| copy\.taken\}/);
+  assert.match(pack, /copy_already_picked: /);
+  assert.match(pack, /That box's copy was already picked for another line; choose another box/);
+});
+
+test('read-only tiles and single boxes have no chooser', () => {
+  assert.match(tile, /const interactive = \(\) => Boolean\(props\.onPick\);/);
+  assert.match(tile, /const choose = \(\) => interactive\(\)/);
+  assert.match(pack, /return <ZeroTile item=\{props\.item\} horizontal=\{props\.horizontal\} \/>;/);
+  assert.match(list, /readOnly/);
+  assert.match(tile, /copies\(\)\.length > 0/);
+});
+
+test('picked from another box is named on tiles, list rows and the single image, at once and after reload', () => {
+  assert.match(pack, /pickedFromText\(line, boxes\(\)\[lineKeyOf\(line\)\] \|\| null\)/);
+  assert.match(pack, /pickedFromOf/);
+  assert.match(tile, /props\.pickedFrom/);
+  assert.match(list, /props\.pickedFromOf/);
+  assert.match(picking, /props\.pickedFromOf/);
+});
+
+test('undo reverses the copies physically picked (stored picks), also after a reload', () => {
+  assert.match(pack, /undoListingIds\(line, /);
+  assert.match(pack, /pickActionBody\(untrack\(order\), line, 'undo', id\)/);
 });

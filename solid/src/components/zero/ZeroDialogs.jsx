@@ -114,9 +114,10 @@ export function SwapDialog(props) {
       <div class="zero-swap-list">
         <For each={props.copies}>
           {(copy) => (
-            <button class="btn ghost" type="button" disabled={props.busy} onClick={() => props.onChoose(copy.listingId)}>
+            <button class="btn ghost" type="button" disabled={props.busy || copy.taken} onClick={() => props.onChoose(copy.listingId)}>
               {copy.location || 'No location'}
               <Show when={copy.quantityAvailable != null}> · {copy.quantityAvailable} available</Show>
+              <Show when={copy.taken}> · taken</Show>
             </button>
           )}
         </For>

@@ -5,7 +5,10 @@ import {
   confirmPickEntry,
   dropUnsentPicks,
   inventoryNote,
+  lineChoices,
   lineCopies,
+  pickedFromText,
+  undoListingIds,
   lineFacets,
   lineFinishLabel,
   lineIsFoil,
@@ -359,4 +362,49 @@ test('foil lines get the rainbow mark; lineFacets still names the finish for tex
   ] };
   const finishes = zeroPickCsv(order).trim().split('\r\n').slice(1).map((row) => row.split(',')[14]);
   assert.deepEqual(finishes, ['Foil', 'Cold Foil', 'Reverse', '']);
+});
+
+test('box choices: own box first, every other box, location and available count on each', () => {
+  const line = {
+    listingId: 'L1',
+    location: 'box·1',
+    quantityAvailable: 0,
+    candidates: [
+      { listingId: 'L2', location: 'box·2', quantityAvailable: 2 },
+      { listingId: 'L3', location: 'box·3', quantityAvailable: 0, taken: true },
+    ],
+  };
+  assert.deepEqual(lineChoices(line), [
+    { listingId: 'L1', location: 'box·1', quantityAvailable: 0, own: true, taken: false },
+    { listingId: 'L2', location: 'box·2', quantityAvailable: 2, own: false, taken: false },
+    { listingId: 'L3', location: 'box·3', quantityAvailable: 0, own: false, taken: true },
+  ]);
+  // The default box can itself be taken: its Pick is off too.
+  assert.equal(lineChoices({ ...line, ownTaken: true })[0].taken, true);
+  // One box only: nothing to choose between.
+  assert.deepEqual(lineChoices({ listingId: 'L1', location: 'box·1', candidates: [] }), []);
+  // lineCopies keeps listing the other boxes only.
+  assert.deepEqual(lineCopies(line).map((copy) => copy.listingId), ['L2', 'L3']);
+});
+
+test('picked from: the box a line was taken from, from the stored pick or the click just made', () => {
+  const line = { listingId: 'L1', location: '', picks: [{ listingId: 'L2' }], pickedFrom: [{ listingId: 'L2', location: 'box·2', quantity: 1 }] };
+  assert.equal(pickedFromText(line), 'picked from box·2');
+  assert.equal(pickedFromText({ ...line, pickedFrom: [{ listingId: 'L2', location: '', quantity: 1 }] }), 'picked from another box');
+  assert.equal(pickedFromText({ listingId: 'L1', pickedFrom: [] }), '');
+  assert.equal(pickedFromText({ listingId: 'L1' }), '');
+  // The click just made, before any reload.
+  assert.equal(pickedFromText({ listingId: 'L1' }, { listingId: 'L3', location: 'box·3' }), 'picked from box·3');
+  assert.equal(pickedFromText({ listingId: 'L1' }, { listingId: 'L1', location: 'box·1' }), '');
+});
+
+test('undo reverses the copies physically picked, not the default box', () => {
+  assert.deepEqual(undoListingIds({ listingId: 'L1' }), ['L1']);
+  assert.deepEqual(undoListingIds({ listingId: 'L1', picks: [{ listingId: 'L2' }, { listingId: 'L2' }, { listingId: 'L1' }] }), ['L2', 'L1']);
+  assert.deepEqual(undoListingIds({ listingId: 'L1', picks: [] }, ['L3']), ['L3']);
+  const line = { itemId: 7, lineKey: '7@L1', listingId: 'L1', quantity: 1 };
+  const body = pickActionBody({ orderId: 9 }, line, 'undo', undoListingIds({ ...line, picks: [{ listingId: 'L2' }] })[0]);
+  assert.equal(body.listingId, 'L2');
+  assert.equal(body.allocatedListingId, 'L1');
+  assert.equal(body.action, 'undo');
 });

@@ -288,6 +288,55 @@ export function lineCopies(line) {
   return out;
 }
 
+/**
+ * Every box a line can be picked from, the line's own box first, each with its
+ * location and available count: `[{ listingId, location, quantityAvailable,
+ * own, taken }]`. `taken` = every copy of that box is already picked for
+ * another line (the server refuses it). Empty when the line has one box only.
+ */
+export function lineChoices(line) {
+  const copies = lineCopies(line);
+  if (!copies.length) return [];
+  const flags = new Map((Array.isArray(line?.candidates) ? line.candidates : []).map((entry) => [String(entry?.listingId || ''), Boolean(entry?.taken)]));
+  const own = Number(line?.quantityAvailable);
+  return [
+    {
+      listingId: String(line?.listingId || ''),
+      location: String(line?.location || ''),
+      quantityAvailable: line?.quantityAvailable != null && Number.isFinite(own) ? own : null,
+      own: true,
+      taken: Boolean(line?.ownTaken),
+    },
+    ...copies.map((copy) => ({ ...copy, own: false, taken: flags.get(copy.listingId) === true })),
+  ];
+}
+
+/**
+ * "picked from <location>" when the copy came from another box than the one
+ * the line names: the stored picks (`pickedFrom`, location recovered by the
+ * server when the pick cleared it) or `local`, the click just made.
+ */
+export function pickedFromText(line, local = null) {
+  const own = String(line?.listingId || '');
+  const entries = local
+    ? local.listingId && local.listingId !== own ? [local] : []
+    : (Array.isArray(line?.pickedFrom) ? line.pickedFrom : []).filter((entry) => entry && entry.listingId !== own);
+  if (!entries.length) return '';
+  const places = [...new Set(entries.map((entry) => String(entry.location || '').trim()))];
+  return places.every(Boolean) ? `picked from ${places.join(', ')}` : 'picked from another box';
+}
+
+/** The copies an undo reverses: the stored picks' listings (then `fallback`, then the line's own). */
+export function undoListingIds(line, fallback = []) {
+  const ids = [];
+  for (const id of [...(Array.isArray(line?.picks) ? line.picks : []).map((pick) => pick?.listingId), ...fallback]) {
+    const text = String(id || '');
+    if (text && !ids.includes(text)) ids.push(text);
+  }
+  if (!ids.length && line?.listingId) ids.push(String(line.listingId));
+  return ids;
+}
+
 /** `alsoIn` as display text (strings, or `{location}` objects). */
 export function alsoInLabels(line) {
   return (line?.alsoIn || [])
