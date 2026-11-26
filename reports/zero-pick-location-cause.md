@@ -201,8 +201,9 @@ The single-image view is also part of the existing picking flow. Its lack of loc
 
 ## 11. Phase two: decisions and implementation (PK-C046, PK-R077)
 
-Owner and lead authorization (`reports/pk-c046-work/phase2-brief.md`) resolved the stop in
-section 9. Commits on `zero-pick-location`, after `47e0a8c3`:
+The owner's phase-two message (owner and lead authorization) resolved the stop in section 9:
+rewrite only the one chooser assertion and its title, the capacity rule for defaults, the
+server-side one copy, one line rule (requirement C), the chooser in every interactive view. Commits on `zero-pick-location`, after `47e0a8c3`:
 
 | Commit | What |
 | --- | --- |
@@ -242,50 +243,113 @@ section 9. Commits on `zero-pick-location`, after `47e0a8c3`:
    by line key: the baseline flow test undoes with a different client `lineKey`
    (`pick("21", c, decoy, …)`) and must keep passing.
 
-### Evidence (logs in `reports/pk-c046-work/`, not committed)
+### Execution results (retained summary)
 
-- Red before the allocation fix: `coordinator-external-red.log`, worktree with zero.rs
-  production unchanged and the appended tests only: `359 passed; 7 failed` (the seven
-  allocation tests). `rust-red-snapshot.log` repeats it on a frozen copy.
-- Red before the own-location fix: `own-location-red.log` (`B still names its box`,
-  `left: ""`).
-- Client red: `client-red.log` (new JS tests against the previous sources: 4 failures).
-- Handler and claims tests were written with the new functions; their red is a compile
+The run's scratch logs are temporary and will be removed; this list is the record that
+stays.
+
+- Red before the allocation fix: `cargo test -p pokoin-external --locked` on the worktree
+  with zero.rs production unchanged and only the appended tests:
+  `test result: FAILED. 359 passed; 7 failed` (the seven allocation tests below, all but
+  `defaults_do_not_move_with_stock_location_or_row_order`, which the baseline already
+  met). A frozen copy of that tree gave the same seven failures.
+- Red before the own-location fix: `a_default_box_another_line_emptied_keeps_its_location_and_sort_place`
+  failed with `B still names its box`, `left: ""`, `right: "box2·1"`.
+- Client red: the new JS tests against the previous sources: 4 failing (the `pickTaken`
+  export missing, and the guard, refresh and picked-from source tests).
+- Handler and claims tests were written with their new functions; their red was a compile
   failure only, not a behavioural one.
-- Green: the four mandatory checks and `scripts/check-fast` (see the final report).
+- Green, on the source commits through `2c8a9a0d` (bq, database URLs unset; rerun by the
+  coordinator, all exit 0):
+  - `cargo test --manifest-path pokoin-rust/Cargo.toml -p pokoin-external --locked`:
+    `test result: ok. 381 passed; 0 failed; 0 ignored` (lib), the other targets ok;
+  - `cargo test --manifest-path pokoin-rust/Cargo.toml -p pokoin-commerce --locked --no-run`:
+    exit 0, last line `Executable tests/zero_picks_flow.rs (...)`;
+  - `node --test market/src/zero-pick.test.js`: `# pass 25`, `# fail 0`;
+  - `node --test src/components/ZeroPack.test.js src/pages/ZeroPicked.test.js` (in
+    `solid/`): `# pass 30`, `# fail 0`;
+  - handler unit tests (`-p pokoin-commerce --lib -- handlers::zero_picks`): `11 passed`;
+  - `scripts/check-fast` (no `--db`): `5 passed, 0 failed, 2 skipped` (shellcheck and
+    actionlint: no shell script or workflow changed); test step "no database, flow tests
+    skip themselves".
 
 ### Test inventory (appended only)
 
-- `zero.rs`: `three_same_product_items_take_three_distinct_boxes`,
-  `a_named_box_is_taken_first_and_repeated_names_spread`,
-  `named_boxes_beat_unnamed_items_of_lower_ids`, `a_quantity_weighs_the_box_but_stays_one_line`,
-  `more_items_than_boxes_reuse_the_lowest_load`, `webhook_lines_stay_and_do_not_count_in_the_load`,
-  `shipments_and_pending_are_independent_scopes`, `defaults_do_not_move_with_stock_location_or_row_order`,
-  `pending_items_spread_over_the_boxes_as_their_own_scope`, `a_named_box_is_honoured_again_on_a_later_pass`,
-  `a_box_another_line_swapped_out_is_taken_for_its_default_line_and_stays_offered`,
-  `the_first_finalize_of_a_sold_out_box_takes_it_from_the_other_lines`,
-  `the_other_line_of_a_split_item_holding_a_box_takes_it`,
-  `multi_copy_finalize_holds_its_quantity_on_the_list`, `picked_listing_ids_cover_every_live_pick`,
-  `a_default_box_another_line_emptied_keeps_its_location_and_sort_place`.
-- `zero_claims.rs`: 7 pure tests (finalize after swap, first finalize blocks others,
-  swap priority, request shortfall, no double subtraction, multi-copy, counting).
-- `zero_picks.rs` (handler): `a_finalize_after_another_lines_swap_took_the_copy_is_refused`,
-  `a_swap_names_the_claim_or_the_shortage_that_stops_it`,
-  `only_the_same_line_replays_a_live_pick_of_its_copy`,
-  `multi_copy_lines_finalize_alone_and_hold_their_quantity`,
-  `every_pick_transaction_says_read_committed_before_its_first_read`.
-- `zero_picks_flow.rs` (Postgres, **compiled only, never run here**):
-  `one_copy_is_claimed_by_one_line_of_the_order`, `two_lines_racing_for_one_sold_copy_get_one_pick`.
-- JS: `zero-pick.test.js` and `ZeroPack.test.js` appended tests (chooser, taken, picked from,
-  undo, `pickTaken`, refresh wiring, guard, `picksUnavailable`).
+45 new tests; no existing test changed except the one authorized chooser assertion and
+its title in `solid/src/components/ZeroPack.test.js` (now "box choice does not depend on
+smart locations: interactive, not done, another box exists; choosing one is the swap
+pick"), which is a rewrite, not a new test.
+
+`pokoin-rust/crates/external/src/cardtrader/zero.rs` (16):
+`three_same_product_items_take_three_distinct_boxes`,
+`a_named_box_is_taken_first_and_repeated_names_spread`,
+`named_boxes_beat_unnamed_items_of_lower_ids`,
+`a_quantity_weighs_the_box_but_stays_one_line`,
+`more_items_than_boxes_reuse_the_lowest_load`,
+`webhook_lines_stay_and_do_not_count_in_the_load`,
+`shipments_and_pending_are_independent_scopes`,
+`defaults_do_not_move_with_stock_location_or_row_order`,
+`pending_items_spread_over_the_boxes_as_their_own_scope`,
+`a_named_box_is_honoured_again_on_a_later_pass`,
+`a_box_another_line_swapped_out_is_taken_for_its_default_line_and_stays_offered`,
+`the_first_finalize_of_a_sold_out_box_takes_it_from_the_other_lines`,
+`the_other_line_of_a_split_item_holding_a_box_takes_it`,
+`multi_copy_finalize_holds_its_quantity_on_the_list`,
+`picked_listing_ids_cover_every_live_pick`,
+`a_default_box_another_line_emptied_keeps_its_location_and_sort_place`.
+
+`pokoin-rust/crates/external/src/cardtrader/zero_claims.rs` (7):
+`a_finalize_after_another_lines_swap_took_the_last_copy_is_refused`,
+`the_first_finalize_of_a_sold_out_box_blocks_the_other_lines`,
+`a_swap_out_of_a_box_other_lines_emptied_is_copy_already_picked`,
+`a_request_larger_than_what_is_left_stays_insufficient_quantity`,
+`swaps_are_never_subtracted_twice`,
+`multi_copy_lines_count_their_quantity`,
+`claims_count_rows_and_finalized_copies`.
+
+`pokoin-rust/crates/commerce/src/handlers/zero_picks.rs` (5):
+`a_finalize_after_another_lines_swap_took_the_copy_is_refused`,
+`a_swap_names_the_claim_or_the_shortage_that_stops_it`,
+`only_the_same_line_replays_a_live_pick_of_its_copy`,
+`multi_copy_lines_finalize_alone_and_hold_their_quantity`,
+`every_pick_transaction_says_read_committed_before_its_first_read`.
+
+`pokoin-rust/crates/commerce/tests/zero_picks_flow.rs` (2, Postgres, compiled only, never
+run here): `one_copy_is_claimed_by_one_line_of_the_order`,
+`two_lines_racing_for_one_sold_copy_get_one_pick`.
+
+`market/src/zero-pick.test.js` (4):
+- "box choices: own box first, every other box, location and available count on each"
+- "picked from: the box a line was taken from, from the stored pick or the click just made"
+- "undo reverses the copies physically picked, not the default box"
+- "pickTaken reads only the server flags of the box the pick would take from"
+
+`solid/src/components/ZeroPack.test.js` (11):
+- "the chooser shows in every interactive view and never gates on smart locations"
+- "the suggested Pick stays one tap next to the chooser; the swap link stays too"
+- "every option shows its location and available count, own box included"
+- "a taken box stays visible but disabled, and a taken default disables Pick too"
+- "read-only tiles and single boxes have no chooser"
+- "picked from another box is named on tiles, list rows and the single image, at once and after reload"
+- "undo reverses the copies physically picked (stored picks), also after a reload"
+- "a taken box is refused before sending, whatever started the pick (button, drag, keyboard)"
+- "after a pick, an undo, a taken refusal or a partial undo the server list is read again"
+- "\"picked from\" is gone as soon as the line is no longer picked"
+- "a failed picked-boxes read is said on the page, and the server stays the guard"
 
 ### Open limits
 
-- No DB flow test ran (no database allowed): the claim flow, race and isolation are proved
-  by unit tests and code reading only. docs/FEATURES.toml says `partial`.
-- Capacity per order, not across orders; a restocked box still counts an older finalize;
-  with every box sold out and more lines than boxes held, the extra lines have no box to
-  pick until an earlier line is undone.
+- No DB flow test ran (no database allowed): unit tests passed and the transaction code
+  was reviewed; database behaviour remains unverified. docs/FEATURES.toml says `partial`.
+- Capacity per order, not across orders; a restocked box still counts an older finalize.
+- The guard is conservative: there is no original stock or sold count per box, so at 0
+  stock it cannot tell how many copies the sales took from that box. After the first
+  finalize on a sold-out box, every other line of the order is refused there, even when
+  each of those lines really sold a copy from it. That includes separate items with their
+  own webhook allocations to that box: line generation and allocations are unchanged, only
+  their pick is refused. A single line of q copies is allowed as the first finalize. The
+  blocked lines wait for an undo or are picked from a box with stock. The remaining
+  quantity says nothing exact about a box's physical history.
 - In the members fallback a swap credits the guessed default, so recorded stock can drift
   from the real boxes (only real allocations remove that).
 - Firestore-only orders (before inventory picks) have no claims.

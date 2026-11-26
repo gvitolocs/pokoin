@@ -137,10 +137,17 @@ finalize of a sold-out box refuses every other line until it is undone, a box of
 swaps of 2 and then 1, and a request larger than what is left stays
 `insufficient_quantity`. A live pick of the same item and copy on another line key is
 refused too, never answered as a replay. Known limits: capacity is per order, not across
-orders; a box restocked after a finalize still counts that finalize; when every box of a
-product is sold out and more lines default to a box than it held, the extra lines have
-no box to pick until an earlier line is undone (the members fallback cannot know which
-box the sale took); orders picked only in Firestore have no claims.
+orders; a box restocked after a finalize still counts that finalize; orders picked only
+in Firestore have no claims.
+
+The guard is conservative, because Pokoin keeps no original stock or sold count per box:
+at 0 stock it cannot tell how many copies the sales took from that box. After the first
+finalize on a sold-out box, every other line of the order is refused on it, even when
+the box really sold one copy to each of those lines. That includes separate items with
+their own webhook allocations to the same box (their lines and allocations are unchanged;
+only the pick is refused). A single line of q copies is allowed as the first finalize.
+Such a line has to wait until the earlier pick is undone, or be picked from a box with
+stock. The remaining quantity says nothing exact about a box's physical history.
 
 ### Picking order
 
