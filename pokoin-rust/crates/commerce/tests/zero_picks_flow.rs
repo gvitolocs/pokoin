@@ -541,3 +541,123 @@ async fn two_lines_racing_for_one_sold_copy_get_one_pick() {
     );
     assert_eq!(live_picks(&pool).await, 1);
 }
+
+/// A copy with an explicit finish: the same card, condition and language as
+/// [`insert`], another foil or variant state.
+async fn insert_finish(
+    pool: &PgPool,
+    qty: i32,
+    status: &str,
+    location: &str,
+    source: &str,
+    foil: &str,
+    variant: &str,
+) -> String {
+    sqlx::query_scalar(
+        "insert into public.marketplace_user_listings (card_id, seller_uid, price_pkn, quantity_available, status, location, source_listing_id, condition, language, foil_state, variant_state, card_name, set_name, collector_number) \
+         values ('202', 'seller-1', 100, $1, $2, $3, $4, 'NM', 'EN', $5, $6, 'Pikachu', 'Base Set', '58/102') returning id::text",
+    )
+    .bind(qty)
+    .bind(status)
+    .bind(location)
+    .bind(source)
+    .bind(foil)
+    .bind(variant)
+    .fetch_one(pool)
+    .await
+    .expect("insert")
+}
+
+#[tokio::test]
+async fn one_line_picks_one_box_and_refuses_another() {
+    let Some((pool, app)) = claims_app("zero_picks_one_line_one_box").await else {
+        return;
+    };
+    let post = |body: Value| send(&app, "POST", "/api/cardtrader-zero-pick", Some(body));
+
+    // One sold copy, two identical ones to pick it from. Line 91 takes box·A.
+    let sold = insert(&pool, 0, "sold_out", "box·S", "ct:901", "NM").await;
+    let first = insert(&pool, 1, "active", "box·A", "ct:901", "NM").await;
+    let second = insert(&pool, 1, "active", "box·B", "ct:901", "NM").await;
+    let (status, swapped) = post(pick("91", &first, &sold, 1, "pick")).await;
+    assert_eq!(status, StatusCode::OK, "{swapped}");
+    assert_eq!(swapped["inventory"], "swapped");
+    assert_eq!(live_picks(&pool).await, 1);
+
+    // The same line, another box: the line already has its copy.
+    let before = live_picks(&pool).await;
+    let mark = last_outbox(&pool).await;
+    let (status, refused) = post(pick("91", &second, &sold, 1, "pick")).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "line_already_picked");
+    assert_eq!(
+        refused["error"],
+        "This line was already picked from another box; undo it first"
+    );
+    assert_eq!(live_picks(&pool).await, before);
+    assert_eq!(last_outbox(&pool).await, mark, "a refused pick writes nothing");
+    assert_eq!(
+        row(&pool, &second).await,
+        (1, "active".into(), "box·B".into()),
+        "the untouched box keeps its copy and its place"
+    );
+    assert_eq!(row(&pool, &first).await.0, 0, "the picked box holds line 91's copy");
+
+    // The request that succeeded is a replay of its own copy, not a second pick.
+    let (status, replay) = post(pick("91", &first, &sold, 1, "pick")).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["inventory"], "unchanged");
+    assert_eq!(replay["pick"]["id"], swapped["pick"]["id"]);
+    assert_eq!(live_picks(&pool).await, 1);
+
+    // Undoing frees the line: box·B may carry it now, and still one row only.
+    let (_, undone) = post(pick("91", &first, &sold, 1, "undo")).await;
+    assert_eq!(undone["inventory"], "restored", "{undone}");
+    let (status, moved) = post(pick("91", &second, &sold, 1, "pick")).await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    assert_eq!(moved["inventory"], "swapped");
+    assert_eq!(live_picks(&pool).await, 1, "one line, one live pick");
+}
+
+#[tokio::test]
+async fn a_pick_must_be_a_copy_of_the_lines_own_finish() {
+    let Some((pool, app)) = claims_app("zero_picks_finish").await else {
+        return;
+    };
+    let post = |body: Value| send(&app, "POST", "/api/cardtrader-zero-pick", Some(body));
+
+    // The order sold the plain printing of the product; the seller also owns a
+    // reverse-holo, a stamped and a graded copy of the same card.
+    let sold = insert_finish(&pool, 0, "sold_out", "box·S", "ct:911", "standard", "").await;
+    let reverse = insert_finish(&pool, 1, "active", "box·R", "ct:911", "reverse", "").await;
+    let stamp = insert_finish(&pool, 1, "active", "box·T", "ct:911", "standard", "stamp").await;
+    let graded = {
+        let id = insert_finish(&pool, 1, "active", "box·G", "ct:911", "standard", "").await;
+        sqlx::query("update public.marketplace_user_listings set graded = true where id = $1::uuid")
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        id
+    };
+    for other in [&reverse, &stamp, &graded] {
+        let (status, body) = post(pick("95", other, &sold, 1, "pick")).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{other} is another card: {body}");
+        assert_eq!(body["code"], "not_identical");
+    }
+    assert_eq!(live_picks(&pool).await, 0, "a refused finish writes nothing");
+    for other in [&reverse, &stamp, &graded] {
+        let (quantity, status, _) = row(&pool, other).await;
+        assert_eq!(
+            (quantity, status.as_str()),
+            (1, "active"),
+            "the refused copy is untouched"
+        );
+    }
+    // A copy of the sold printing is the swap the line may make.
+    let plain = insert_finish(&pool, 1, "active", "box·P", "ct:911", "standard", "").await;
+    let (status, swapped) = post(pick("95", &plain, &sold, 1, "pick")).await;
+    assert_eq!(status, StatusCode::OK, "{swapped}");
+    assert_eq!(swapped["inventory"], "swapped");
+    assert_eq!(row(&pool, &plain).await.0, 0);
+}
