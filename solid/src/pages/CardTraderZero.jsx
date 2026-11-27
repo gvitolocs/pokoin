@@ -584,6 +584,11 @@ function ZeroDesk(props) {
           Picked boxes could not be read, so boxes other lines took are not marked taken. A pick from one is still refused when you save it.
         </p>
       </Show>
+      <Show when={data()?.listingsUnavailable === true}>
+        <p class="ct-token-hint is-warn zero-picks-unavailable" role="status">
+          Your inventory could not be read, so no box is marked taken and a picked box shows no location. A pick from a box that has no copy left is still refused when you save it.
+        </p>
+      </Show>
 
       <Show when={notConnected()}>
         <EmptyDesk title="Connect CardTrader first" lede="The Zero list comes from your CardTrader seller orders. Paste your CardTrader API token in Settings.">
@@ -661,7 +666,6 @@ function ZeroDesk(props) {
               preview={props.preview}
               view={view()}
               sortFields={sortFields()}
-              smartLocations={smartLocations()}
               onChanged={refreshLines}
             />
           )}

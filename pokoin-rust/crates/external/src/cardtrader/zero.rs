@@ -2093,11 +2093,21 @@ pub fn apply_picks_with(list: &mut Value, picks: &HashMap<String, Value>, pg: &P
 /// `line_already_picked`). A line
 /// picked from another box than its own gets `pickedFrom`
 /// (`[{listingId, location, quantity}]`). A line whose own box a live pick
-/// emptied and cleared keeps that box's location (from the pick row), so it
-/// does not lose its box or its sort place. Runs after [`apply_picks_with`]
-/// and before the sort; the pending list has no picks and is left as it is.
-pub fn annotate_claims(list: &mut Value, rows: &[Value], pg: &PgPicks) {
+/// emptied and cleared keeps naming its own box for the sort and the CSV, and
+/// gets that box's location back as `homeLocation` for the label the chooser
+/// shows. Runs after [`apply_picks_with`] and before the sort; the pending list
+/// has no picks and is left as it is.
+///
+/// `rows` is the seller's listing read: `None` when it failed. Then nothing is
+/// annotated at all — no `ownTaken`, no `candidates[].taken`, no recovered
+/// location — because a list that cannot see the stock must not call a box with
+/// copies taken. The response says `listingsUnavailable` and the pick handler
+/// stays the guard.
+pub fn annotate_claims(list: &mut Value, rows: Option<&[Value]>, pg: &PgPicks) {
     use crate::cardtrader::zero_claims::{line_picked_elsewhere, taken, BoxClaims, ClaimKind};
+    let Some(rows) = rows else {
+        return;
+    };
     let index = ListingIndex::new(rows);
     let mut cleared: HashMap<String, String> = HashMap::new();
     for pick in pg.values().flat_map(|lines| lines.values()).flatten() {
@@ -2231,16 +2241,18 @@ pub fn annotate_claims(list: &mut Value, rows: &[Value], pg: &PgPicks) {
                 })
                 .collect();
             // A live pick (another line's, or this line's own finalize) emptied
-            // this line's box and cleared its location: the line still names
-            // that box (same listing and key),
-            // so it keeps the location the pick stored. The sort stamps the
-            // slot from it afterwards.
-            if !own.is_empty() && text(line.get("location"), 120).is_empty() {
+            // this line's box and cleared its location. The line still names
+            // that box: `location`, the slot and the CSV stay the listing's own,
+            // as before any pick was recorded, and `homeLocation` carries the
+            // location the pick stored for the label of the line's own copy.
+            let mut home_location = text(line.get("location"), 120);
+            if !own.is_empty() && home_location.is_empty() {
                 if let Some(from) = cleared.get(&own) {
-                    line["location"] = json!(from);
+                    home_location = from.clone();
                 }
             }
             line["ownTaken"] = json!(own_taken);
+            line["homeLocation"] = json!(home_location);
             line["candidates"] = json!(candidates);
             line["pickedFrom"] = json!(picked_from);
         }
@@ -2852,19 +2864,23 @@ pub async fn zero_list(
             listing_ids.push(id);
         }
     }
-    // No status filter: a sold_out row still says which box the copy left.
+    // No status filter: a sold_out row still says which box the copy left. A
+    // failed read stays missing (`None`) rather than becoming an empty list: the
+    // taken flags and the picked-box locations are then skipped, and the page
+    // says so (`listingsUnavailable`).
     let (rows, listings_ms) = timed(async {
         if source_ids.is_empty() && listing_ids.is_empty() {
-            Vec::new()
+            Some(Vec::new())
         } else {
             db.query("pokemon", LISTINGS_SQL, &[json!(uid), json!(source_ids), json!(listing_ids)])
                 .await
-                .unwrap_or_default()
+                .ok()
         }
     })
     .await;
+    let listings_unavailable = rows.is_none();
     timings.add("listings", listings_ms);
-    split_lines(&mut list, &rows, &allocations, &games);
+    split_lines(&mut list, rows.as_deref().unwrap_or_default(), &allocations, &games);
 
     // Power Tools overlay; never fails the CardTrader list.
     let mut power_tools = json!({ "connected": false });
@@ -2918,7 +2934,7 @@ pub async fn zero_list(
     }
     power_tools["picking"] = picking;
     apply_picks_with(&mut list, &picks, &pg_picks);
-    annotate_claims(&mut list, &rows, &pg_picks);
+    annotate_claims(&mut list, rows.as_deref(), &pg_picks);
     sort_for_picking_with(&mut list, &settings.sorting_fields);
     mark_pt_mismatches(&mut list);
     let ct_user = ct_doc.data.pointer("/metadata/user").cloned().unwrap_or(json!({}));
@@ -2939,6 +2955,7 @@ pub async fn zero_list(
             "powerTools": power_tools,
             "sorting": settings.sorting_json(),
             "picksUnavailable": picks_unavailable,
+            "listingsUnavailable": listings_unavailable,
         }),
         timings,
     ))
@@ -4691,7 +4708,7 @@ mod tests {
         );
         let pg = group_pg_picks(picks);
         apply_picks_with(&mut list, &HashMap::new(), &pg);
-        annotate_claims(&mut list, after, &pg);
+        annotate_claims(&mut list, Some(after), &pg);
         lines(&list)
     }
 
@@ -5000,19 +5017,39 @@ mod tests {
         let mut list = build_zero_list(&[zero_order("1", "paid", items())]);
         split_lines(&mut list, &after, &HashMap::new(), &HashMap::new());
         apply_picks_with(&mut list, &HashMap::new(), &pg);
-        annotate_claims(&mut list, &after, &pg);
+        annotate_claims(&mut list, Some(&after), &pg);
         sort_for_picking_with(&mut list, &fields);
         let picked = by_item(&list);
+        // The recovered box is a label for the line's own copy, never the line's
+        // location: `location`, the slot and the sort stay what the same rows
+        // give without the annotation (the state at the base of this change).
+        let mut plain = build_zero_list(&[zero_order("1", "paid", items())]);
+        split_lines(&mut plain, &after, &HashMap::new(), &HashMap::new());
+        sort_for_picking_with(&mut plain, &fields);
+        let plain = by_item(&plain);
+        let walk = |lines: HashMap<String, Value>| -> Vec<String> {
+            let mut seq: Vec<String> = lines
+                .values()
+                .map(|line| format!("{}|{}", line["itemId"], line["location"]))
+                .collect();
+            seq.sort();
+            seq
+        };
         let b = &picked["12"];
         assert_eq!(
             (b["listingId"].clone(), b["lineKey"].clone()),
             (json!(N2), json!(format!("12@{N2}")))
         );
-        assert_eq!(b["location"], "box2·1", "B still names its box");
+        assert_eq!(b["homeLocation"], "box2·1", "B still names the box of its copy");
         assert_eq!(b["ownTaken"], true);
-        for key in ["sortLocation", "slot", "locationSource"] {
-            assert_eq!(b[key], unpicked["12"][key], "B keeps its sort place: {key}");
+        for key in ["location", "sortLocation", "slot", "locationSource"] {
+            assert_eq!(b[key], plain["12"][key], "B keeps its un-annotated {key}");
         }
+        assert_eq!(
+            walk(by_item(&list)),
+            walk(by_item(&plain)),
+            "the order and the box column of the list do not move"
+        );
         // The other defaults keep their boxes; A says where it was picked from.
         for id in ["11", "13"] {
             assert_eq!(picked[id]["listingId"], unpicked[id]["listingId"]);
@@ -5029,7 +5066,69 @@ mod tests {
         let mut list = build_zero_list(&[zero_order("1", "paid", items())]);
         split_lines(&mut list, &bare, &HashMap::new(), &HashMap::new());
         apply_picks_with(&mut list, &HashMap::new(), &pg);
-        annotate_claims(&mut list, &bare, &pg);
-        assert_eq!(by_item(&list)["13"]["location"], "");
+        annotate_claims(&mut list, Some(&bare), &pg);
+        let bare = &by_item(&list)["13"];
+        assert_eq!(bare["location"], "");
+        assert_eq!(bare["homeLocation"], "", "a box nobody picked has no home");
+    }
+
+    #[test]
+    fn a_missing_listing_read_invents_no_box_state() {
+        // The listing read failed: the lines stay as the split built them. No
+        // copy is called taken, no box location is recovered, and the pick
+        // handler is left as the only guard.
+        let rows = three_boxes();
+        let items = || {
+            vec![
+                item("11", "101", 1, 10),
+                item("12", "101", 1, 10),
+                item("13", "101", 1, 10),
+            ]
+        };
+        let pg = group_pg_picks(&[live_pick(
+            "11",
+            &format!("11@{N1}"),
+            N2,
+            N1,
+            "swap",
+            1,
+            "box2·1",
+        )]);
+        let mut list = build_zero_list(&[zero_order("1", "paid", items())]);
+        split_lines(&mut list, &rows, &HashMap::new(), &HashMap::new());
+        apply_picks_with(&mut list, &HashMap::new(), &pg);
+        let mut before = build_zero_list(&[zero_order("1", "paid", items())]);
+        split_lines(&mut before, &rows, &HashMap::new(), &HashMap::new());
+        apply_picks_with(&mut before, &HashMap::new(), &pg);
+        annotate_claims(&mut list, None, &pg);
+        for line in lines(&list) {
+            let item_id = text(line.get("itemId"), 40);
+            assert!(
+                line.get("ownTaken").is_none(),
+                "{item_id} claims nothing about its box: {line}"
+            );
+            assert!(
+                line.get("pickedFrom").is_none(),
+                "{item_id} names no picked box: {line}"
+            );
+            assert!(
+                line.get("homeLocation").is_none(),
+                "{item_id} recovers no location: {line}"
+            );
+            for candidate in line["candidates"].as_array().unwrap() {
+                assert!(
+                    candidate.get("taken").is_none(),
+                    "{item_id} calls {candidate} neither taken nor free"
+                );
+            }
+            // The split's own fields are untouched: the boxes it offered stand.
+            let untouched = lines(&before)
+                .into_iter()
+                .find(|l| text(l.get("itemId"), 40) == item_id)
+                .unwrap();
+            for key in ["listingId", "location", "candidates", "picked", "quantity"] {
+                assert_eq!(line[key], untouched[key], "{item_id} keeps {key}");
+            }
+        }
     }
 }
