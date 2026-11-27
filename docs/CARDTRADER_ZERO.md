@@ -114,7 +114,10 @@ product, items are taken in natural `itemId` order, in two stages:
    (`created_at`, then id).
 
 An item of quantity q stays one line and adds q to its box's load; with more items than
-boxes the loads wrap. `event` items and single-member products are not counted. The
+boxes the loads wrap. A `members` item spreads; a single-member product is not counted.
+An `event` item is not spread either — its allocation names its box — but the copies its
+allocation names are charged into that box's load first, so a `members` line of the same
+product does not land on a box whose only copy the sale already took. The
 inputs are only the member set, the names, the item ids and quantities: stock, status,
 locations, picks, sort settings, Smart locations and the response order never move a
 default, so `lineKey` stays the same across reloads. A changed member set (a listing

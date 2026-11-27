@@ -735,8 +735,11 @@ fn split_item(
 /// identical items of a product spread over its boxes instead of all naming
 /// the oldest one.
 ///
-/// Items with a webhook allocation and products with a single member are not
-/// counted. The others are taken in natural `itemId` order, in two stages:
+/// An allocated item is not spread itself, but the copies its allocation names
+/// are charged into those boxes' load before anything spreads: a members line
+/// does not land on a box whose only copy the sale already took. Products with a
+/// single member are not counted. The rest are taken in natural `itemId` order,
+/// in two stages:
 /// 1. an item that names a member gets it only while that member's load is
 ///    the lowest of the product (the current pass still has its copy);
 /// 2. every other item gets the member with the lowest load, oldest first on
@@ -773,6 +776,11 @@ fn default_members(
         .collect();
     eligible.sort_by(|a, b| id_cmp(&a.0, &b.0));
     let mut load: HashMap<String, i64> = HashMap::new();
+    for charged in items.iter().filter_map(|item| allocations.get(&text(item.get("itemId"), 40))) {
+        for allocation in charged {
+            *load.entry(allocation.listing_id.clone()).or_default() += allocation.quantity.max(0);
+        }
+    }
     let mut out: HashMap<String, String> = HashMap::new();
     let lowest = |members: &[&Value], load: &HashMap<String, i64>| {
         members
@@ -4515,7 +4523,7 @@ mod tests {
     }
 
     #[test]
-    fn webhook_lines_stay_and_do_not_count_in_the_load() {
+    fn event_allocations_count_in_the_load_the_members_spread_around() {
         let rows = three_boxes();
         let mut list = build_zero_list(&[zero_order(
             "1",
@@ -4541,12 +4549,67 @@ mod tests {
         )]);
         split_lines(&mut list, &rows, &allocations, &HashMap::new());
         let out = lines(&list);
-        assert_eq!(listing_ids(&out), vec![N1, N1, N2]);
+        assert_eq!(listing_ids(&out), vec![N1, N2, N3]);
         assert_eq!(
             field(&out, "allocation"),
             vec!["event", "members", "members"]
         );
         assert_eq!(out[0]["quantity"], 2);
+    }
+
+    #[test]
+    fn the_members_defaults_of_a_finalized_event_line_stay_where_the_charge_put_them() {
+        let before = three_boxes();
+        // The event line's finalize left box1·1 empty: the pick cleared it.
+        let after = vec![
+            stocked(N1, 0, "sold_out", "", "2026-09-01T00:00:00.000Z"),
+            before[1].clone(),
+            before[2].clone(),
+        ];
+        let allocations = HashMap::from([(
+            "11".to_string(),
+            vec![
+                Allocation {
+                    listing_id: N1.into(),
+                    quantity: 1,
+                },
+                Allocation {
+                    listing_id: N1.into(),
+                    quantity: 1,
+                },
+            ],
+        )]);
+        let picks = [live_pick(
+            "11",
+            &format!("11@{N1}"),
+            N1,
+            N1,
+            "finalize",
+            2,
+            "box1·1",
+        )];
+        let out = annotated(
+            vec![
+                item("11", "101", 2, 10),
+                item("12", "101", 1, 10),
+                item("13", "101", 1, 10),
+            ],
+            &before,
+            &after,
+            &picks,
+            &allocations,
+        );
+        // The members lines avoid the box the allocation charged, before the
+        // finalize and after it: `annotated` already proved the pick itself
+        // moved no default.
+        assert_eq!(listing_ids(&out), vec![N1, N2, N3]);
+        assert_eq!(
+            field(&out, "allocation"),
+            vec!["event", "members", "members"]
+        );
+        assert_eq!(out[0]["ownTaken"], false, "its own pick is not a claim");
+        assert_eq!(candidate(&out[0], N2)["taken"], true, "line 11 has its box");
+        assert_eq!(out[1]["ownTaken"], false, "N2 still holds line 12's copy");
     }
 
     #[test]
