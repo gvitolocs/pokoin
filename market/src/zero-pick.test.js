@@ -479,19 +479,19 @@ test('chooser: a taken box is disabled, an already picked line keeps its own box
   assert.equal(pickChoices({ ...line, location: '', homeLocation: 'box·1' }).ownBox.label, 'box·1');
 });
 
-test('chooser: copies that would read alike get a disambiguator', () => {
+test('chooser: copies that would read alike are numbered, not left identical', () => {
   const line = {
     listingId: 'L1',
     location: 'box·1',
     candidates: [
-      { listingId: 'L2', location: '', condition: 'NM', language: 'EN' },
+      { listingId: 'L2', location: '' },
       { listingId: 'L3', location: '' },
       { listingId: 'L4', location: 'box·9' },
       { listingId: 'L5', location: 'box·9' },
     ],
   };
   assert.deepEqual(pickChoices(line).choices.map((entry) => entry.label), [
-    'No location · NM en',
+    'No location',
     'No location · copy 2',
     'box·9',
     'box·9 · copy 2',

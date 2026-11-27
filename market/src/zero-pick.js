@@ -366,9 +366,9 @@ export function pickTaken(line, listingId = '') {
  *   a box the pick handler refuses. The line's own box is never a choice: its
  *   main button, label and undo already are it.
  * - `label` is the copy's location, `No location` when it has none. Copies that
- *   would read alike get a disambiguator (the first one's condition and language
- *   when the list carries them, then `· copy 2`, `· copy 3`) so no two buttons of
- *   one line say the same thing.
+ *   would read alike — two identical listings in one box — are numbered (`· copy 2`,
+ *   `· copy 3`) so no two buttons of one line say the same thing. Their finish is
+ *   never the disambiguator: the list offers only copies of the line's own finish.
  * - `taken` is the server's flag for that box; the own box is off for
  *   the whole line through `pickLine`.
  * - `pickLine` is whether the line's own button is off, `ownBox` the label the
@@ -386,7 +386,6 @@ export function pickChoices(line, options = {}) {
   if (!enabled || !Array.isArray(line?.candidates) || line.candidates.length === 0) {
     return { choices: [], disabled: true, pickLine: ownTaken, ownBox };
   }
-  const raw = new Map((line.candidates || []).map((entry) => [String(entry?.listingId || ''), entry]));
   const named = lineChoices(line).filter((copy) => String(copy.listingId || '') !== own);
   const labelText = (copy) => (copy.location || '').trim() || 'No location';
   const times = new Map();
@@ -402,8 +401,7 @@ export function pickChoices(line, options = {}) {
     if ((times.get(label) ?? 0) > 1) {
       const nth = (shown.get(label) ?? 0) + 1;
       shown.set(label, nth);
-      const facet = nth === 1 ? finishFacetLabel(raw.get(String(copy.listingId || ''))) : '';
-      text = facet ? `${label} · ${facet}` : nth === 1 ? label : `${label} · copy ${nth}`;
+      if (nth > 1) text = `${label} · copy ${nth}`;
     }
     choices.push({
       listingId: String(copy.listingId || ''),
@@ -419,15 +417,6 @@ export function pickChoices(line, options = {}) {
     pickLine: ownTaken,
     ownBox,
   };
-}
-
-/** The copy's condition/language, for a label that would otherwise repeat. */
-function finishFacetLabel(copy) {
-  const bits = [copy?.condition, copy?.language]
-    .map((value) => String(value || '').trim())
-    .filter(Boolean);
-  if (bits.length !== 2) return '';
-  return `${bits[0]} ${bits[1].toLowerCase()}`;
 }
 
 /** `alsoIn` as display text (strings, or `{location}` objects). */
