@@ -1980,16 +1980,9 @@ const PICKS_SQL: &str = "select id, order_id, item_id, line_key, listing_id::tex
      from public.cardtrader_zero_picks \
      where seller_uid = $1 and order_id = any($2::text[]) and state = 'picked' order by id";
 
-/// Picked rows of the weekly orders. A missing table (migration not applied
-/// yet) or a failed read is no rows: the Firestore picks answer instead.
-pub async fn read_pg_picks(db: &crate::db::DbPools, uid: &str, list: &Value) -> PgPicks {
-    read_pg_picks_checked(db, uid, list)
-        .await
-        .unwrap_or_default()
-}
-
-/// [`read_pg_picks`], None when the read failed: the list then says
-/// `picksUnavailable` instead of showing every box as free. Display only;
+/// Picked rows of the weekly orders, `None` when the read failed: the list then
+/// says `picksUnavailable` instead of showing every box as free. A missing table
+/// (migration not applied yet) is an empty answer, not a failure. Display only;
 /// the pick handler checks the claims on the writer.
 pub async fn read_pg_picks_checked(
     db: &crate::db::DbPools,

@@ -83,6 +83,7 @@ const PICK_ERRORS = {
   insufficient_quantity: 'That box has fewer copies than this line.',
   allocated_copy_gone: 'The sold copy is no longer in your inventory, so this pick cannot be undone.',
   copy_already_picked: "That box's copy was already picked for another line; choose another box",
+  line_already_picked: 'This line was already picked from another box; undo it first',
 };
 
 function pickErrorMessage(err) {
