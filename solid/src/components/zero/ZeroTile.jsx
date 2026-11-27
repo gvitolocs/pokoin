@@ -3,8 +3,6 @@ import { inventoryListingHref } from '@market/inventory-listings.js';
 import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } from '@market/listing-meta.js';
 import {
   alsoInLabels,
-  lineChoices,
-  lineCopies,
   lineIsFoil,
   lineIsReverse,
   lineKeyOf,
@@ -14,6 +12,7 @@ import {
   lineSetText,
   lineTextFacets,
   locationTakeText,
+  pickChoices,
   rarityBadge,
 } from '@market/zero-pick.js';
 import ScanImage from '../ScanImage.jsx';
@@ -56,10 +55,9 @@ export default function ZeroTile(props) {
   const interactive = () => Boolean(props.onPick);
   const rarity = () => rarityBadge(item().rarity);
   const flag = () => (item().language ? listingLanguageFlag(item().language) : null);
-  const copies = () => lineCopies(item());
   const also = () => alsoInLabels(item());
-  const others = () => lineChoices(item()).filter((choice) => !choice.own);
-  const choose = () => interactive() && !done() && copies().length > 0;
+  const chooser = () => pickChoices(item(), { enabled: interactive() && !done() });
+  const choose = () => chooser().choices.length > 0;
   const ownTaken = () => Boolean(item().ownTaken);
   const comment = () => String(item().comment || '').trim();
   return (
@@ -161,24 +159,21 @@ export default function ZeroTile(props) {
             type="button"
             draggable="false"
             disabled={props.busy || (ownTaken() && !done())}
-            title={ownTaken() && !done() ? "That box's copy was already picked for another line; choose another box" : undefined}
+            title={ownTaken() && !done() ? "That box's copy was already picked for another line; choose another box" : `Pick from ${chooser().ownBox.label || 'the box this line names'}`}
             aria-pressed={done() ? 'true' : 'false'}
             onClick={() => (done() ? props.onUndo(item()) : props.onPick(item()))}
           >
             {props.busy ? 'Saving…' : done() ? 'Undo' : 'Pick'}
+            <Show when={!done() && item().quantityAvailable != null}> ({item().quantityAvailable} available)</Show>
+            <Show when={ownTaken() && !done()}> · taken</Show>
           </button>
           <Show when={choose()}>
-            <div class="zero-box-choice" role="group" aria-label="Pick from box">
-              <span class="thread-meta">Pick from:</span>
-              <button class="btn ghost" type="button" disabled={props.busy || ownTaken()} onClick={() => props.onPick(item())}>
-                {lineLocation(item()) || 'No location'}
-                <Show when={item().quantityAvailable != null}> ({item().quantityAvailable} available)</Show>
-                <Show when={ownTaken()}> · taken</Show>
-              </button>
-              <For each={others()}>
+            <div class="zero-box-choice" role="group" aria-label="Pick from another box">
+              <span class="thread-meta">Other copies:</span>
+              <For each={chooser().choices}>
                 {(copy) => (
                   <button class="btn ghost" type="button" disabled={props.busy || copy.taken} onClick={() => props.onPick(item(), copy.listingId)}>
-                    {copy.location || 'No location'}
+                    {copy.label}
                     <Show when={copy.quantityAvailable != null}> ({copy.quantityAvailable} available)</Show>
                     <Show when={copy.taken}> · taken</Show>
                   </button>
@@ -186,7 +181,7 @@ export default function ZeroTile(props) {
               </For>
             </div>
           </Show>
-          <Show when={!done() && copies().length}>
+          <Show when={!done() && choose()}>
             <button class="zero-issue-link" type="button" disabled={props.busy} onClick={() => props.onSwap(item())}>
               Picked from another box…
             </button>

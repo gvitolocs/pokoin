@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
-import { lineChoices, lineKeyOf, lineLocation, lineLocationFromPt, lineQuantity } from '@market/zero-pick.js';
+import { lineKeyOf, lineLocation, lineLocationFromPt, lineQuantity, pickChoices } from '@market/zero-pick.js';
 import ScanImage from '../ScanImage.jsx';
 import { FacetBadges, IssueBadge, lineImage, linePrice, lineWhere, PtPlace, TakeBits } from './zero-bits.jsx';
 
@@ -123,18 +123,13 @@ export default function PickingMode(props) {
               <Show when={linePrice(line())}><p class="zero-card-price">{linePrice(line())}</p></Show>
               <Show when={line().powerTools?.bin}><p class="thread-meta">PT bin {line().powerTools.bin}</p></Show>
               <Show when={props.pickedFromOf?.(line())}><p class="zero-picked-from">{props.pickedFromOf(line())}</p></Show>
-              <Show when={props.onPick && !props.isDone(line()) && lineChoices(line()).length}>
-                <div class="zero-box-choice" role="group" aria-label="Pick from box">
-                  <span class="thread-meta">Pick from:</span>
-                  <button class="btn ghost" type="button" disabled={props.isBusy?.(line()) || Boolean(line().ownTaken)} onClick={() => props.onPick(line())}>
-                    {lineLocation(line()) || 'No location'}
-                    <Show when={line().quantityAvailable != null}> ({line().quantityAvailable} available)</Show>
-                    <Show when={line().ownTaken}> · taken</Show>
-                  </button>
-                  <For each={lineChoices(line()).filter((choice) => !choice.own)}>
+              <Show when={props.onPick && !props.isDone(line()) && pickChoices(line(), { enabled: true }).choices.length}>
+                <div class="zero-box-choice" role="group" aria-label="Pick from another box">
+                  <span class="thread-meta">Other copies:</span>
+                  <For each={pickChoices(line(), { enabled: true }).choices}>
                     {(copy) => (
                       <button class="btn ghost" type="button" disabled={props.isBusy?.(line()) || copy.taken} onClick={() => props.onPick(line(), copy.listingId)}>
-                        {copy.location || 'No location'}
+                        {copy.label}
                         <Show when={copy.quantityAvailable != null}> ({copy.quantityAvailable} available)</Show>
                         <Show when={copy.taken}> · taken</Show>
                       </button>

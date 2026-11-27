@@ -1,5 +1,5 @@
 import { createSignal, For, Show, untrack } from 'solid-js';
-import { ISSUE_NOTE_MAX, ISSUE_TYPES } from '@market/zero-pick.js';
+import { ISSUE_NOTE_MAX, ISSUE_TYPES, lineLocation } from '@market/zero-pick.js';
 import { useDialogFocus } from '../../lib/dialog-focus.js';
 import { LocationText } from './zero-bits.jsx';
 
@@ -108,14 +108,14 @@ export function SwapDialog(props) {
   return (
     <ZeroDialog titleId="zero-swap-title" title="Picked from another box" onClose={props.onClose}>
       <p class="thread-meta">
-        {props.line.name} · sold copy in <LocationText item={props.line} />. Pick the box the copy actually came from:
+        {props.line.name} · sold copy in {props.line.homeLocation || lineLocation(props.line) || 'No location'}. Pick the box the copy actually came from:
         that copy leaves your inventory and the sold one goes back on sale.
       </p>
       <div class="zero-swap-list">
         <For each={props.copies}>
           {(copy) => (
             <button class="btn ghost" type="button" disabled={props.busy || copy.taken} onClick={() => props.onChoose(copy.listingId)}>
-              {copy.location || 'No location'}
+              {copy.label}
               <Show when={copy.quantityAvailable != null}> · {copy.quantityAvailable} available</Show>
               <Show when={copy.taken}> · taken</Show>
             </button>

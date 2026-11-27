@@ -587,7 +587,7 @@ export function ShipmentPanel(props) {
         {(line) => (
           <Loading fallback={null}><SwapDialog
             line={line()}
-            copies={lineChoices(line()).filter((choice) => !choice.own)}
+            copies={pickChoices(line(), { enabled: true }).choices}
             busy={isBusy(line())}
             onChoose={(listingId) => { setSwapKey(''); onPick(line(), listingId); }}
             onClose={() => setSwapKey('')}

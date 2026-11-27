@@ -126,9 +126,14 @@ test('Apply sort: local, save on Pokoin, PT dry run then confirmed write with ex
 });
 
 test('box choice does not depend on smart locations: interactive, not done, another box exists; choosing one is the swap pick', () => {
+  // The chooser's options come from pickChoices, enabled only for an interactive
+  // line that is not done; no smart-locations term reaches the tile.
+  const chooser = tile.match(/const chooser = [^\n]*/)?.[0] || '';
   const choose = tile.match(/const choose = [^\n]*/)?.[0] || '';
-  assert.match(choose, /const choose = \(\) => interactive\(\) && !done\(\) && copies\(\)\.length > 0;/);
+  assert.match(choose, /const choose = \(\) => chooser\(\)\.choices\.length > 0;/);
+  assert.match(chooser, /pickChoices\(item\(\), \{ enabled: interactive\(\) && !done\(\) \}\)/);
   assert.doesNotMatch(choose, /smartLocations/);
+  assert.doesNotMatch(chooser, /smartLocations/);
   assert.match(tile, /props\.onPick\(item\(\), copy\.listingId\)/);
   assert.match(list, /props\.onPick\(line\(\), copy\.listingId\)/);
   assert.match(dialogs, /props\.onChoose\(copy\.listingId\)/);
@@ -202,22 +207,25 @@ test('the chooser shows in every interactive view and never gates on smart locat
   assert.doesNotMatch(tile, /smartLocations/);
   assert.doesNotMatch(list, /smartLocations/);
   assert.doesNotMatch(picking, /smartLocations/);
-  // Images (both layouts) and the list use the same options: own box first, then the others.
-  assert.match(tile, /lineChoices\(item\(\)\)\.filter\(\(choice\) => !choice\.own\)/);
-  assert.match(list, /lineChoices\(line\(\)\)/);
-  assert.match(list, /!props\.printOnly && !props\.readOnly && !done\(\) && lineChoices\(line\(\)\)\.length/);
+  // Images (both layouts) and the list ask the one chooser for the other
+  // copies; the own box the Pick button already is never repeats in the group.
+  assert.match(tile, /pickChoices\(item\(\), \{ enabled: interactive\(\) && !done\(\) \}\)/);
+  assert.match(tile, /<For each=\{chooser\(\)\.choices\}>/);
+  assert.doesNotMatch(tile, /lineChoices/);
+  assert.match(list, /pickChoices\(line\(\), \{ enabled: true \}\)\.choices/);
+  assert.match(list, /!props\.printOnly && !props\.readOnly && !done\(\) && pickChoices\(line\(\), \{ enabled: true \}\)\.choices\.length/);
   // Single image: the same buttons, wired to the same pick-from-a-box call.
-  assert.match(picking, /lineChoices\(line\(\)\)/);
+  assert.match(picking, /pickChoices\(line\(\), \{ enabled: true \}\)\.choices/);
   assert.match(picking, /props\.onPick\(line\(\), copy\.listingId\)/);
   assert.match(pack, /<PickingMode\s+inline[\s\S]*?onPick=\{onPick\}/);
 });
 
 test('the suggested Pick stays one tap next to the chooser; the swap link stays too', () => {
-  assert.match(tile, /props\.onPick\(item\(\)\)\}/);
+  assert.match(tile, /: props\.onPick\(item\(\)\)\)/);
   assert.match(tile, /'zero-pick-main'/);
   assert.doesNotMatch(tile, /<Show when=\{!choose\(\)\}>\s*<button\s+class=\{\['btn', 'zero-pick-main'/);
   assert.match(tile, /Picked from another box…/);
-  assert.match(tile, /!done\(\) && copies\(\)\.length\}/);
+  assert.match(tile, /!done\(\) && choose\(\)\}/);
   assert.match(list, /Other box…/);
   assert.match(pack, /onChoose=\{\(listingId\) => \{ setSwapKey\(''\); onPick\(line\(\), listingId\); \}\}/);
 });
@@ -246,10 +254,13 @@ test('a taken box stays visible but disabled, and a taken default disables Pick 
 
 test('read-only tiles and single boxes have no chooser', () => {
   assert.match(tile, /const interactive = \(\) => Boolean\(props\.onPick\);/);
-  assert.match(tile, /const choose = \(\) => interactive\(\)/);
+  // A read-only or already picked line enables nothing, and a line the list
+  // named no other box for has no options at all (pickChoices, tested in
+  // market/src/zero-pick.test.js).
+  assert.match(tile, /const chooser = \(\) => pickChoices\(item\(\), \{ enabled: interactive\(\) && !done\(\) \}\);/);
+  assert.match(tile, /const choose = \(\) => chooser\(\)\.choices\.length > 0;/);
   assert.match(pack, /return <ZeroTile item=\{props\.item\} horizontal=\{props\.horizontal\} \/>;/);
   assert.match(list, /readOnly/);
-  assert.match(tile, /copies\(\)\.length > 0/);
 });
 
 test('picked from another box is named on tiles, list rows and the single image, at once and after reload', () => {
@@ -293,4 +304,8 @@ test('"picked from" is gone as soon as the line is no longer picked', () => {
 test('a failed picked-boxes read is said on the page, and the server stays the guard', () => {
   assert.match(page, /<Show when=\{data\(\)\?\.picksUnavailable === true\}>/);
   assert.match(page, /Picked boxes could not be read, so boxes other lines took are not marked taken\. A pick from one is still refused when you save it\./);
+  // A failed listing read says so too: the taken flags and the picked-box
+  // location are then absent, never invented.
+  assert.match(page, /<Show when=\{data\(\)\?\.listingsUnavailable === true\}>/);
+  assert.match(page, /Your inventory could not be read, so no box is marked taken and a picked box shows no location\./);
 });
