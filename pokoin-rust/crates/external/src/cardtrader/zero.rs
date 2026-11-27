@@ -534,6 +534,44 @@ impl<'a> ListingIndex<'a> {
     }
 }
 
+/// What makes two of the seller's rows the same copy for a Zero picking line:
+/// the card plus its finish and condition facets, compared exactly as the pick
+/// handler does (`pokoin-commerce` `zero_picks::identity`, which calls this).
+///
+/// Condition and language ignore case and blanks; the flags read a JSON `true`.
+/// A row that carries no value for a facet has the empty one, so a list built
+/// from rows without the columns still matches itself.
+pub fn listing_identity(row: &Value) -> [String; 9] {
+    let facet = |key: &str| text(row.get(key), 40).trim().to_uppercase();
+    let flag = |key: &str| (row.get(key) == Some(&Value::Bool(true))).then(|| '1').unwrap_or('0');
+    [
+        text(row.get("card_id"), 80),
+        facet("condition"),
+        facet("language"),
+        flag("reverse").to_string(),
+        flag("first_edition").to_string(),
+        flag("signed").to_string(),
+        flag("graded").to_string(),
+        facet("foil_state"),
+        facet("variant_state"),
+    ]
+}
+
+/// The members of one product that are the same copy as `base` (the line's own
+/// row, unknown when the index does not hold it): a line is never defaulted
+/// onto, nor offered, a copy of another finish or condition than its own.
+fn same_identity<'a>(members: &[&'a Value], base: Option<&Value>) -> Vec<&'a Value> {
+    let Some(base) = base else {
+        return members.to_vec();
+    };
+    let want = listing_identity(base);
+    members
+        .iter()
+        .copied()
+        .filter(|row| listing_identity(row) == want)
+        .collect()
+}
+
 fn slot_json(slot: &Slot) -> Value {
     json!({ "box": slot.box_name, "stack": slot.stack, "position": slot.position })
 }
@@ -645,16 +683,16 @@ fn line_members<'i, 'a>(line: &Value, index: &'i ListingIndex<'a>) -> Option<&'i
 /// Identical copies a line could also be picked from: the other members of
 /// its CardTrader product (members fallback, or a grouped product), the
 /// listing the item names first, then oldest; the line's own listing excluded;
-/// only rows still holding copies (`quantity_available > 0`, active or paused).
+/// only rows still holding copies (`quantity_available > 0`, active or paused)
+/// and only copies of the line's own identity ([`listing_identity`]).
 fn line_candidates(line: &Value, index: &ListingIndex) -> Vec<Value> {
     let own = text(line.get("listingId"), 80);
     let named = text(line.get("namedListingId"), 80);
     let Some(members) = line_members(line, index) else {
         return Vec::new();
     };
-    let mut rows: Vec<&Value> = members
-        .iter()
-        .copied()
+    let mut rows: Vec<&Value> = same_identity(members, index.by_id.get(&own).copied())
+        .into_iter()
         .filter(|row| text(row.get("id"), 80) != own)
         .filter(|row| i64_field(row, &["quantity_available"]).unwrap_or(0) > 0)
         .filter(|row| matches!(text(row.get("status"), 20).as_str(), "active" | "paused"))
@@ -706,13 +744,15 @@ fn split_item(
 ///
 /// An item of quantity q stays one line and adds q to its box's load. Only
 /// the member set, the names, the item ids and quantities count: stock,
-/// status, locations, picks and the response order never move a default.
+/// status, locations, picks and the response order never move a default. The
+/// member set is the copies of the named listing's own identity
+/// ([`listing_identity`]), so a default never lands on another finish.
 fn default_members(
     items: &[Value],
     index: &ListingIndex,
     allocations: &HashMap<String, Vec<Allocation>>,
 ) -> HashMap<String, String> {
-    let mut eligible: Vec<(String, &Vec<&Value>, String, i64)> = items
+    let mut eligible: Vec<(String, Vec<&Value>, String, i64)> = items
         .iter()
         .filter_map(|item| {
             let item_id = text(item.get("itemId"), 40);
@@ -722,22 +762,19 @@ fn default_members(
             {
                 return None;
             }
+            let named = text(item.get("listingId"), 80);
             let members = index
                 .members
                 .get(&text(item.get("productId"), 80))
+                .map(|rows| same_identity(rows, index.by_id.get(&named).copied()))
                 .filter(|rows| rows.len() > 1)?;
-            Some((
-                item_id,
-                members,
-                text(item.get("listingId"), 80),
-                quantity_of(item).max(0),
-            ))
+            Some((item_id, members, named, quantity_of(item).max(0)))
         })
         .collect();
     eligible.sort_by(|a, b| id_cmp(&a.0, &b.0));
     let mut load: HashMap<String, i64> = HashMap::new();
     let mut out: HashMap<String, String> = HashMap::new();
-    let lowest = |members: &Vec<&Value>, load: &HashMap<String, i64>| {
+    let lowest = |members: &[&Value], load: &HashMap<String, i64>| {
         members
             .iter()
             .map(|row| load.get(&text(row.get("id"), 80)).copied().unwrap_or(0))
@@ -790,7 +827,17 @@ fn split_item_lines(
         }
     }
     let product = text(item.get("productId"), 80);
-    if let Some(members) = index.members.get(&product).filter(|rows| !rows.is_empty()) {
+    if let Some(group) = index.members.get(&product).filter(|rows| !rows.is_empty()) {
+        // Only the copies of the line's own listing can carry this line; a
+        // different printing is neither its default nor an "also in" box. The
+        // default is its own listing when the item named none.
+        let baseline = if named.is_empty() {
+            default.map(|id| id.as_str()).unwrap_or("")
+        } else {
+            named.as_str()
+        };
+        let filtered = same_identity(group, index.by_id.get(baseline).copied());
+        let members: &[&Value] = if filtered.is_empty() { group } else { &filtered };
         if members.len() == 1 {
             let row = members[0];
             return vec![make_line(item, Some(row), &text(row.get("id"), 80), quantity, "listing", Vec::new())];
@@ -2469,8 +2516,14 @@ pub async fn blueprint_games(db: &crate::db::DbPools, list: &Value) -> HashMap<S
         .collect()
 }
 
+/// The listing columns the Zero list reads. The identity facets are here so a
+/// copy of another finish, condition, language, reverse, first edition, signed
+/// or graded state is never offered or defaulted onto a line (see
+/// `listing_identity` and `pokoin-commerce` `zero_picks::identity`, which compares
+/// the same columns).
 const LISTINGS_SQL: &str = "select id::text as id, card_id, source_listing_id, location, collector_number, card_image_url, \
-       marketplace_game, status, quantity_available, card_name, \
+       marketplace_game, status, quantity_available, card_name, condition, language, reverse, first_edition, signed, \
+       graded, foil_state, variant_state, \
        to_char(created_at at time zone 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') as created_at \
      from public.marketplace_user_listings \
      where seller_uid = $1 and (source_listing_id = any($2::text[]) or id::text = any($3::text[]))";
@@ -4346,6 +4399,47 @@ mod tests {
             assert_eq!(offered.len(), 2, "{line}");
             assert!(!offered.contains(&own));
         }
+    }
+
+    #[test]
+    fn a_copy_of_another_finish_is_neither_a_default_nor_a_choice() {
+        let mut rows = three_boxes();
+        // N3 is the reverse-holo printing of the same product; N1 and N2 are plain.
+        rows[2]["foil_state"] = json!("reverse");
+        let out = split_one(vec![item("11", "101", 1, 10), item("12", "101", 1, 10)], &rows);
+        // The two plain lines spread over the two plain boxes.
+        assert_eq!(listing_ids(&out), vec![N1, N2]);
+        for line in &out {
+            let offered: Vec<&str> = line["candidates"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| c["listingId"].as_str().unwrap())
+                .collect();
+            assert!(!offered.contains(&N3), "the foil copy is a choice: {line}");
+            assert_eq!(
+                line["alsoIn"].as_array().unwrap().len(),
+                1,
+                "the foil copy is an also-in box: {line}"
+            );
+        }
+        // A line whose own copy is the foil one has no plain choice either.
+        let out = split_one(vec![named_item("13", 1, N3)], &rows);
+        assert_eq!(listing_ids(&out), vec![N3]);
+        assert_eq!(out[0]["candidates"], json!([]));
+        assert_eq!(out[0]["alsoIn"], json!([]));
+        // A condition or language of its own is the same refusal.
+        let mut rows = three_boxes();
+        rows[1]["language"] = json!("JP");
+        let out = split_one(vec![item("11", "101", 1, 10), item("12", "101", 1, 10)], &rows);
+        assert_eq!(listing_ids(&out), vec![N1, N3]);
+        // Case and blanks are no difference: two rows of one identity.
+        let mut rows = three_boxes();
+        rows[0]["language"] = json!(" en ");
+        rows[1]["language"] = json!("EN");
+        let out = split_one(vec![item("11", "101", 1, 10), item("12", "101", 1, 10)], &rows);
+        assert_eq!(listing_ids(&out), vec![N1, N2]);
+        assert!(offers(&out[0], N2), "case and blanks are not another copy: {}", out[0]);
     }
 
     #[test]

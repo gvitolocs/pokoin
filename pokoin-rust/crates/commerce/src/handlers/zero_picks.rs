@@ -124,19 +124,15 @@ pub fn parse_pick_body(body: &Value) -> Result<PickBody, ApiError> {
 
 // ------------------------------------------------------------ planning
 
-/// The facets that make two copies the same card for a buyer.
-pub fn identity(row: &Value) -> (String, String, String, bool, bool, bool, bool) {
-    let upper = |key: &str| live::field(row, key, 40).trim().to_uppercase();
-    let flag = |key: &str| row[key] == true;
-    (
-        live::field(row, "card_id", 80),
-        upper("condition"),
-        upper("language"),
-        flag("reverse"),
-        flag("first_edition"),
-        flag("signed"),
-        flag("graded"),
-    )
+/// The facets that make two copies the same card for a buyer: the card, its
+/// condition and language, and the finish facets — reverse holographic, first
+/// edition, signed, graded, `foil_state` and `variant_state`. A plain copy is
+/// not the foil one, so a swap may not stand in for it.
+///
+/// The same comparison the Zero list makes when it offers a box
+/// (`pokoin-external` `zero::listing_identity`), from the same row columns.
+pub fn identity(row: &Value) -> [String; 9] {
+    ct_zero::listing_identity(row)
 }
 
 fn quantity_of(row: &Value) -> i64 {
@@ -809,6 +805,42 @@ mod tests {
         let mut lower = allocated.clone();
         lower["condition"] = json!(" nm ");
         assert!(plan_pick(&request("pick", Some(B), 1), &picked, Some(&lower), None).is_ok());
+    }
+
+    #[test]
+    fn the_finish_is_part_of_the_identity() {
+        // A plain copy never stands in for the foil one the sale sold.
+        let picked = listing(3, "active", "box·2");
+        let mut allocated = listing(0, "sold_out", "box·1");
+        allocated["id"] = json!(B);
+        for (key, value) in [
+            ("foil_state", json!("reverse")),
+            ("foil_state", json!("holo")),
+            ("variant_state", json!("stamp")),
+            ("graded", json!(true)),
+        ] {
+            let mut foil = allocated.clone();
+            foil[key] = value;
+            assert_eq!(
+                plan_pick(&request("pick", Some(B), 1), &picked, Some(&foil), None)
+                    .unwrap_err()
+                    .code
+                    .as_deref(),
+                Some("not_identical"),
+                "{key}={value}"
+            );
+        }
+        // The same finish on both copies stays a swap, and an absent column on
+        // both is the empty finish, not a difference.
+        let mut both = allocated.clone();
+        both["foil_state"] = json!("standard");
+        let mut both_picked = picked.clone();
+        both_picked["foil_state"] = json!("standard");
+        assert_eq!(
+            plan_pick(&request("pick", Some(B), 1), &both_picked, Some(&both), None).unwrap(),
+            Plan::Swap { quantity: 1, clear_location: false }
+        );
+        assert!(plan_pick(&request("pick", Some(B), 1), &picked, Some(&allocated), None).is_ok());
     }
 
     #[test]
