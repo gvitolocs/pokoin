@@ -2523,8 +2523,18 @@ pub async fn apply_pt_sort(
 // ------------------------------------------------------------ route
 
 /// Blueprint id → game, for ids found in exactly one game catalog. One bulk
-/// query per catalog, four at a time; a missing or failing catalog is skipped.
+/// query per catalog for the ids the in-process games cache has never seen,
+/// eight catalogs at a time; a missing or failing catalog is skipped.
 pub async fn blueprint_games(db: &crate::db::DbPools, list: &Value) -> HashMap<String, String> {
+    blueprint_games_served(db, list).await.0
+}
+
+/// `blueprint_games` with the number of ids the cache answered, which the
+/// `games_cache` timing reports.
+async fn blueprint_games_served(
+    db: &crate::db::DbPools,
+    list: &Value,
+) -> (HashMap<String, String>, usize) {
     let ids: Vec<String> = all_items(list)
         .iter()
         .map(|item| text(item.get("blueprintId"), 80))
@@ -2533,34 +2543,49 @@ pub async fn blueprint_games(db: &crate::db::DbPools, list: &Value) -> HashMap<S
         .into_iter()
         .collect();
     if ids.is_empty() {
-        return HashMap::new();
+        return (HashMap::new(), 0);
     }
-    let ids = json!(ids);
-    let results: Vec<(String, Vec<Value>)> = futures_util::stream::iter(crate::powertools_games::catalogs())
-        .map(|(game, table)| {
-            let ids = ids.clone();
-            async move {
-                let sql = format!("select id::text as id from {table} where id = any($1::text[]::bigint[])");
-                let rows = db.query(&game, &sql, &[ids]).await.unwrap_or_default();
-                (game, rows)
-            }
-        })
-        .buffer_unordered(8)
-        .collect()
-        .await;
-    let mut found: HashMap<String, HashSet<String>> = HashMap::new();
-    for (game, rows) in results {
-        for row in rows {
-            let id = text(row.get("id"), 40);
-            if !id.is_empty() {
-                found.entry(id).or_default().insert(game.clone());
-            }
+    let now = Instant::now();
+    let mut merge = merge_cached_games(&ids, &games_cache_read(&ids), now);
+    if merge.stale.is_empty() {
+        return (merge.found, merge.served);
+    }
+    let ids = json!(merge.stale.clone());
+    let results: Vec<(String, ApiResult<Vec<Value>>)> =
+        futures_util::stream::iter(crate::powertools_games::catalogs())
+            .map(|(game, table)| {
+                let ids = ids.clone();
+                async move {
+                    let sql = format!(
+                        "select id::text as id from {table} where id = any($1::text[]::bigint[])"
+                    );
+                    let rows = db.query(&game, &sql, &[ids]).await;
+                    (game, rows)
+                }
+            })
+            .buffer_unordered(8)
+            .collect()
+            .await;
+    // Which catalogs answered decides what may be kept: an id a catalog did
+    // not answer proves nothing about that catalog.
+    let mut rows: Vec<(String, Vec<String>)> = Vec::new();
+    let mut failed: Vec<String> = Vec::new();
+    for (game, result) in results {
+        match result {
+            Ok(found) => rows.push((
+                game,
+                found
+                    .iter()
+                    .map(|row| text(row.get("id"), 40))
+                    .filter(|id| !id.is_empty())
+                    .collect(),
+            )),
+            Err(_) => failed.push(game),
         }
     }
-    found
-        .into_iter()
-        .filter_map(|(id, games)| (games.len() == 1).then(|| (id, games.into_iter().next().unwrap_or_default())))
-        .collect()
+    merge_queried_games(&mut merge, &rows, &failed);
+    games_cache_store(&merge.store, now);
+    (merge.found, merge.served)
 }
 
 /// The listing columns the Zero list reads. The identity facets are here so a
@@ -2646,6 +2671,135 @@ fn ct_cache() -> &'static TtlCache<Arc<Vec<Value>>> {
 fn pt_cache() -> &'static TtlCache<PtReads> {
     static CACHE: OnceLock<TtlCache<PtReads>> = OnceLock::new();
     CACHE.get_or_init(TtlCache::default)
+}
+
+/// How long a negative blueprint id answer is kept: a new set import can add an
+/// id no catalog held when it was asked.
+const ZERO_GAMES_NEGATIVE_TTL: Duration = Duration::from_secs(600);
+/// Blueprint ids kept before the games cache is cleared instead of grown.
+const ZERO_GAMES_CACHE_MAX: usize = 200_000;
+
+/// What [`games_cache`] says about one blueprint id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum GamesAnswer {
+    /// The one game catalog holding it. A blueprint id belongs to one catalog
+    /// for good, so this never expires.
+    Known(String),
+    /// No catalog held it, or more than one did. Kept for
+    /// [`ZERO_GAMES_NEGATIVE_TTL`].
+    Unknown,
+}
+
+/// Blueprint id → catalog, in this process only. A CardTrader blueprint id
+/// names one product of one game for good, so the bulk per-catalog query only
+/// ever has to run for ids this process has never seen.
+fn games_cache() -> &'static Mutex<HashMap<String, (Instant, GamesAnswer)>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, GamesAnswer)>>> = OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+/// The cached answers of `ids`, an expired negative included: whether one
+/// still counts is [`merge_cached_games`]'s call.
+fn games_cache_read(ids: &[String]) -> HashMap<String, (Instant, GamesAnswer)> {
+    let Ok(cache) = games_cache().lock() else {
+        return HashMap::new();
+    };
+    ids.iter()
+        .filter_map(|id| cache.get(id).map(|entry| (id.clone(), entry.clone())))
+        .collect()
+}
+
+/// Keep what one round proved, clearing the whole cache at the bound rather
+/// than growing past it.
+fn games_cache_store(store: &[(String, GamesAnswer)], now: Instant) {
+    let Ok(mut cache) = games_cache().lock() else {
+        return;
+    };
+    games_cache_apply(&mut cache, store, now);
+}
+
+/// [`games_cache_store`] on a given map, so the bound is testable.
+fn games_cache_apply(
+    cache: &mut HashMap<String, (Instant, GamesAnswer)>,
+    store: &[(String, GamesAnswer)],
+    now: Instant,
+) {
+    if !store.is_empty() && cache.len() + store.len() > ZERO_GAMES_CACHE_MAX {
+        cache.clear();
+    }
+    for (id, answer) in store {
+        cache.insert(id.clone(), (now, answer.clone()));
+    }
+}
+
+/// What one `blueprint_games` call answers, and what it leaves to the catalogs.
+#[derive(Clone, Debug, Default)]
+struct GamesMerge {
+    /// blueprint id → game, exactly what `blueprint_games` returns.
+    found: HashMap<String, String>,
+    /// ids the cache answered, positive or negative.
+    served: usize,
+    /// ids the cache could not answer: the ones to query.
+    stale: Vec<String>,
+    /// answers this round proved, for the cache.
+    store: Vec<(String, GamesAnswer)>,
+}
+
+/// The cached half of `blueprint_games`. A negative is reused until it is
+/// [`ZERO_GAMES_NEGATIVE_TTL`] old, so a set imported since then still lands in
+/// the answer.
+fn merge_cached_games(
+    ids: &[String],
+    cached: &HashMap<String, (Instant, GamesAnswer)>,
+    now: Instant,
+) -> GamesMerge {
+    let mut merge = GamesMerge::default();
+    for id in ids {
+        match cached.get(id) {
+            Some((_, GamesAnswer::Known(game))) => {
+                merge.found.insert(id.clone(), game.clone());
+                merge.served += 1;
+            }
+            Some((at, GamesAnswer::Unknown))
+                if now.saturating_duration_since(*at) < ZERO_GAMES_NEGATIVE_TTL =>
+            {
+                merge.served += 1
+            }
+            _ => merge.stale.push(id.clone()),
+        }
+    }
+    merge
+}
+
+/// The queried half: `rows` are the ids each catalog holds, `failed` the
+/// catalogs whose query did not answer. An id in one catalog maps to it and in
+/// none or several is a negative; both judgements rest on a silent catalog
+/// holding nothing, so while one failed nothing is kept. A unique mapping is
+/// still returned, as it was before the cache existed.
+fn merge_queried_games(merge: &mut GamesMerge, rows: &[(String, Vec<String>)], failed: &[String]) {
+    let queried: HashSet<&String> = merge.stale.iter().collect();
+    let mut games: HashMap<&String, Vec<String>> = HashMap::new();
+    for (game, ids) in rows {
+        for id in ids.iter().filter(|id| queried.contains(id)) {
+            games.entry(id).or_default().push(game.clone());
+        }
+    }
+    let complete = failed.is_empty();
+    let mut found: Vec<(String, String)> = Vec::new();
+    let mut store: Vec<(String, GamesAnswer)> = Vec::new();
+    for id in &merge.stale {
+        let held = games.get(id).map(Vec::as_slice).unwrap_or_default();
+        if let [game] = held {
+            found.push((id.clone(), game.clone()));
+            if complete {
+                store.push((id.clone(), GamesAnswer::Known(game.clone())));
+            }
+        } else if complete {
+            store.push((id.clone(), GamesAnswer::Unknown));
+        }
+    }
+    merge.found.extend(found);
+    merge.store = store;
 }
 
 /// One lock per seller around the CardTrader / Power Tools reads: concurrent
@@ -2767,7 +2921,8 @@ async fn picking_articles(
 /// orders beside Power Tools `user/order` + picking lists, then the webhook
 /// allocations, blueprint games, picks and getArticlesToPick, then the
 /// listing rows. CardTrader and Power Tools reads are cached per seller for
-/// [`ZERO_CACHE_TTL`]; `options.power_tools = false` skips Power Tools.
+/// [`ZERO_CACHE_TTL`], a blueprint id's game catalog for the life of the
+/// process. `options.power_tools = false` skips Power Tools.
 pub async fn zero_list(
     ct: &crate::cardtrader::client::CardTraderClient,
     firestore: &dyn crate::firebase::FirestoreStore,
@@ -4297,6 +4452,137 @@ mod tests {
         timings.add("total", 900.0);
         timings.ct_cached = true;
         assert_eq!(timings.header(), "ct_orders;dur=812.4, total;dur=900.0, ct_cache;desc=hit");
+    }
+
+    fn game_ids(list: &[&str]) -> Vec<String> {
+        list.iter().map(|id| id.to_string()).collect()
+    }
+
+    #[test]
+    fn a_cached_blueprint_id_leaves_nothing_to_query() {
+        let at = Instant::now();
+        let cached = HashMap::from([
+            ("1".to_string(), (at, GamesAnswer::Known("pokemon".into()))),
+            ("2".to_string(), (at, GamesAnswer::Unknown)),
+        ]);
+        let merge = merge_cached_games(&game_ids(&["1", "2"]), &cached, at);
+        assert_eq!(merge.found.get("1").map(String::as_str), Some("pokemon"));
+        assert!(!merge.found.contains_key("2"));
+        assert_eq!(merge.served, 2, "a kept negative is an answer too");
+        assert!(
+            merge.stale.is_empty(),
+            "every id is cached, so no catalog is queried"
+        );
+    }
+
+    #[test]
+    fn a_blueprint_id_one_catalog_holds_is_kept_for_the_process() {
+        let at = Instant::now();
+        let mut merge = merge_cached_games(&game_ids(&["1"]), &HashMap::new(), at);
+        let rows = vec![("pokemon".to_string(), game_ids(&["1"]))];
+        merge_queried_games(&mut merge, &rows, &[]);
+        assert_eq!(
+            merge.found,
+            HashMap::from([("1".to_string(), "pokemon".to_string())])
+        );
+        assert_eq!(
+            merge.store,
+            vec![("1".to_string(), GamesAnswer::Known("pokemon".into()))]
+        );
+        // A blueprint id belongs to one catalog for good: no expiry is asked.
+        let cached = HashMap::from([("1".to_string(), (at, GamesAnswer::Known("pokemon".into())))]);
+        let a_day_later =
+            merge_cached_games(&game_ids(&["1"]), &cached, at + Duration::from_secs(86_400));
+        assert_eq!(a_day_later.served, 1);
+        assert!(a_day_later.stale.is_empty());
+    }
+
+    #[test]
+    fn a_blueprint_id_two_catalogs_hold_is_a_negative_with_an_expiry() {
+        let at = Instant::now();
+        let mut merge = merge_cached_games(&game_ids(&["1"]), &HashMap::new(), at);
+        let rows = vec![
+            ("pokemon".to_string(), game_ids(&["1"])),
+            ("magic".to_string(), game_ids(&["1"])),
+        ];
+        merge_queried_games(&mut merge, &rows, &[]);
+        assert!(
+            merge.found.is_empty(),
+            "an id two catalogs hold maps to no game, as it did before"
+        );
+        assert_eq!(merge.store, vec![("1".to_string(), GamesAnswer::Unknown)]);
+        let cached = HashMap::from([("1".to_string(), (at, GamesAnswer::Unknown))]);
+        let young = merge_cached_games(
+            &game_ids(&["1"]),
+            &cached,
+            at + ZERO_GAMES_NEGATIVE_TTL - Duration::from_secs(1),
+        );
+        assert_eq!(
+            young.served, 1,
+            "the negative still answers just inside the expiry"
+        );
+        assert!(young.stale.is_empty());
+    }
+
+    #[test]
+    fn a_blueprint_negative_older_than_the_expiry_is_queried_again() {
+        let at = Instant::now();
+        let cached = HashMap::from([("1".to_string(), (at, GamesAnswer::Unknown))]);
+        let merge = merge_cached_games(&game_ids(&["1"]), &cached, at + ZERO_GAMES_NEGATIVE_TTL);
+        assert_eq!(merge.served, 0);
+        assert_eq!(
+            merge.stale,
+            game_ids(&["1"]),
+            "a set imported since is found again"
+        );
+    }
+
+    #[test]
+    fn an_id_a_failed_catalog_could_still_hold_is_not_cached() {
+        let at = Instant::now();
+        let rows = vec![
+            ("pokemon".to_string(), game_ids(&["1"])),
+            ("magic".to_string(), Vec::new()),
+        ];
+        // 'yugioh' never answered: 1 may sit there too and 2 may be its only
+        // catalog, so neither answer is proven.
+        let mut merge = merge_cached_games(&game_ids(&["1", "2"]), &HashMap::new(), at);
+        merge_queried_games(&mut merge, &rows, &game_ids(&["yugioh"]));
+        assert_eq!(
+            merge.found.get("1").map(String::as_str),
+            Some("pokemon"),
+            "the answer of the query itself is unchanged"
+        );
+        assert!(
+            merge.store.is_empty(),
+            "nothing is kept while a catalog is silent"
+        );
+    }
+
+    #[test]
+    fn a_full_games_cache_is_cleared_rather_than_grown() {
+        let at = Instant::now();
+        let mut cache: HashMap<String, (Instant, GamesAnswer)> = (0..ZERO_GAMES_CACHE_MAX)
+            .map(|i| (i.to_string(), (at, GamesAnswer::Unknown)))
+            .collect();
+        games_cache_apply(
+            &mut cache,
+            &[("200000".to_string(), GamesAnswer::Known("pokemon".into()))],
+            at,
+        );
+        assert_eq!(
+            cache.len(),
+            1,
+            "the bound clears the cache instead of growing it"
+        );
+        assert!(cache.contains_key("200000"));
+        let mut room = HashMap::from([("1".to_string(), (at, GamesAnswer::Unknown))]);
+        games_cache_apply(&mut room, &[("2".to_string(), GamesAnswer::Unknown)], at);
+        assert_eq!(
+            room.len(),
+            2,
+            "below the bound the answers simply join the cache"
+        );
     }
 
     struct FakeRemotes {
