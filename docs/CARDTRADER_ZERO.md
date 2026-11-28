@@ -483,10 +483,17 @@ page waited for it with nothing on screen. Now:
   60 s per seller. A refresh still reuses a read under 3 s old: the overlay request
   right after it. One lock per seller makes concurrent requests share one fetch.
   Picks, allocations and listing rows are never cached.
+- **Blueprint games cache.** A CardTrader blueprint id belongs to one game catalog
+  for good, so an id found in exactly one catalog is kept in-process for the life of
+  the process and only the ids never seen are queried. An id found in none or in
+  several is kept 10 minutes (a new set import can still add it), the table holds at
+  most 200,000 ids and is cleared at the bound, and nothing is kept when a catalog
+  query failed, since that catalog could have answered either way.
 - **Timings.** The response carries `Server-Timing` (`docs`, `ct_orders`,
   `pt_orders`, `allocations`, `games`, `picks`, `pt_articles`, `listings`, `total`,
-  plus `ct_cache`/`pt_cache` on a hit). The API logs `zero_list_timing` with the
-  same steps.
+  plus `ct_cache`/`pt_cache` on a hit and `games_cache;desc=<count>`, the blueprint
+  ids the games cache answered). The API logs `zero_list_timing` with the same steps
+  (`ct_cached`, `pt_cached`, `games_cache`).
 - **Rendering.** Tiles and rows use `content-visibility: auto`. The print-only list
   is rendered only while printing. Picking mode and the dialogs load on first use,
   and images decode async.
