@@ -30,6 +30,20 @@ export function formatAssetsValue(pkn, currency = sellerListCurrency()) {
 }
 
 /**
+ * A PKN valuation as the seller desks write it: PKN counts stay plain digits with
+ * the unit (never a thousands separator), everything else goes through the Assets
+ * formatter. An empty code means the display currency has not been read yet, and
+ * then there is no amount to write — the caller shows a placeholder rather than
+ * guessing a unit the seller may not use.
+ */
+export function assetsAmountLabel(pkn, code) {
+  const clean = String(code || '').trim().toUpperCase();
+  if (!clean) return '';
+  const value = Number.isFinite(Number(pkn)) ? Number(pkn) : 0;
+  return clean === 'PKN' ? `${formatPknNumber(value)} PKN` : formatAssetsValue(value, clean);
+}
+
+/**
  * Buyer-facing listing price. Sellers who take card payments only show the
  * buyer's local currency first, PKN in brackets: €13.21 (2642 PKN).
  */

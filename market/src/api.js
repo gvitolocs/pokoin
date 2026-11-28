@@ -1070,6 +1070,45 @@ export function fetchPortfolioHistory(token) {
 }
 
 /**
+ * The seller's custom collections: saved lists, their segment defs and their
+ * per-day values. Same answer from all three calls, so a save or a delete
+ * replaces the state instead of asking for it again.
+ */
+export function fetchPortfolioCollections(token) {
+  return getJson('/api/marketplace-portfolio-collections', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+}
+
+/** `{ id?, name, items }` from `saveBody`; the id comes back in `saved`. */
+export function savePortfolioCollection(token, body) {
+  return getJson('/api/marketplace-portfolio-collections?action=save', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+  });
+}
+
+export function deletePortfolioCollection(token, id) {
+  return getJson('/api/marketplace-portfolio-collections?action=delete', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ id }),
+    cache: 'no-store',
+  });
+}
+
+/**
  * Dashboard top movers: the seller's own printings that moved most inside the
  * chart's window. `days` is that window in days, or "max".
  */

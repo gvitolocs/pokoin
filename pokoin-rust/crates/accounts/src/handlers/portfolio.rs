@@ -6,12 +6,13 @@
 //!   the current basis answers the request at once and is recomputed behind it.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::{json, Map, Value as Json};
+use tracing::Instrument;
 
 use crate::domain::portfolio_catalog::{
     catalog_select_sql, is_undefined_table, listing_join_sql, react_image_urls, urls_join_sql,
@@ -72,7 +73,7 @@ const GAME_CATALOG_SQL: &str = "\
   where card_id = any($1::bigint[])";
 
 /// A `bigint` column that arrived as text, or nothing when it is not an id.
-fn numeric_id(text: &str) -> Option<i64> {
+pub(crate) fn numeric_id(text: &str) -> Option<i64> {
     if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
@@ -126,9 +127,9 @@ fn games_to_price(rows: &[Json]) -> (Vec<(String, Vec<i64>)>, Vec<String>) {
 }
 
 /// One game's catalog rows and the sold prices of the blueprints they named.
-struct GamePrices {
-    catalog: Vec<Json>,
-    sold: Vec<Json>,
+pub(crate) struct GamePrices {
+    pub(crate) catalog: Vec<Json>,
+    pub(crate) sold: Vec<Json>,
 }
 
 /// How long one game's own database may take. A seller with a Riftbound collection
@@ -146,12 +147,51 @@ enum GameScope {
     PokemonOnly,
 }
 
+/// A read that runs on a task another thread polls: the boxed future every market
+/// seam in this file hands back, so the same call works for a database and for a
+/// test's paused clock.
+pub(crate) type BoxFuture<'a, T> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
+
+/// What one game's database answered, or the reason it did not.
+pub(crate) type GameOutcome = std::result::Result<GamePrices, String>;
+
+/// What the task that asked one game answers with: the game, whether it answered
+/// inside [`OTHER_GAME_TIMEOUT`], and what its database said.
+type GameAnswer = (
+    String,
+    std::result::Result<GameOutcome, tokio::time::error::Elapsed>,
+);
+
 /// One game's own database, which is where its catalog and its sold medians live
 /// (see [docs/GAMES.md](docs/GAMES.md)). A card id is only unique inside it.
 ///
-/// The failure is the reason alone, not an [`ApiError`]: the only caller logs it
-/// and holds that game's cards unpriced, so nothing of it ever becomes an HTTP
-/// answer.
+/// This is the only part of [`price_other_games_from`] that reaches the network, so
+/// it is the part a test replaces: the window of a market read is then proven on a
+/// paused tokio clock rather than on a socket and a wall clock. A unit-test binary
+/// runs its tests on parallel threads over one shared process environment and one
+/// shared host, so neither the configuration of a game's database nor the time a
+/// request spent waiting is something it may assert on.
+pub(crate) trait GamePriceSource: Send + Sync + 'static {
+    fn read<'a>(&'a self, game: String, card_ids: Vec<i64>) -> BoxFuture<'a, GameOutcome>;
+}
+
+/// The real source: the per-game pool [`game_db`] resolves for the game's own URL.
+///
+/// It owns its `DomainState` handle because a read is spawned onto the shared runtime
+/// and so must outlive the request that asked for it; `DomainState` is a handful of
+/// `Arc`s, which is what the old per-task `state.clone()` cost as well.
+struct DatabaseGames {
+    state: DomainState,
+}
+
+impl GamePriceSource for DatabaseGames {
+    fn read<'a>(&'a self, game: String, card_ids: Vec<i64>) -> BoxFuture<'a, GameOutcome> {
+        let state = &self.state;
+        Box::pin(async move { read_game_prices(state, &game, &card_ids).await })
+    }
+}
+
 async fn read_game_prices(
     state: &DomainState,
     game: &str,
@@ -195,7 +235,38 @@ async fn read_game_prices(
 /// Pokémon join matched on their card id, and neither the series nor any other game
 /// is affected. [`games_to_price`] lists the games that never get asked at all, and
 /// they are cleared the same way.
-async fn price_other_games(state: &DomainState, rows: &mut [Json], sold: &mut Vec<Json>) {
+///
+/// The games that are asked are asked **at the same time**: one slow card server
+/// costs this request its own timeout, never the sum of every game the seller
+/// collects, which is what one read after another would have cost. The window that
+/// bounds it is proven by `three_slow_games_are_asked_at_the_same_time` below with a
+/// source that spends virtual time, so the assertion is about this scheduling and
+/// not about a machine's speed. Each read runs in the **request's own span**, so what
+/// a game's database logs lands in the trace the edge prints for that request rather
+/// than in a detached one; and the games are awaited by name, so a task that dies is
+/// the one line above and not also the timeout line.
+///
+/// [`price_other_games`] is this with the real, database-backed source.
+pub(crate) async fn price_other_games(
+    state: &DomainState,
+    rows: &mut [Json],
+    sold: &mut Vec<Json>,
+) {
+    price_other_games_from(
+        &Arc::new(DatabaseGames {
+            state: state.clone(),
+        }),
+        rows,
+        sold,
+    )
+    .await;
+}
+
+pub(crate) async fn price_other_games_from<S: GamePriceSource>(
+    source: &Arc<S>,
+    rows: &mut [Json],
+    sold: &mut Vec<Json>,
+) {
     let (priced, cleared) = games_to_price(rows);
     for game in cleared {
         // This game's database was never asked, so the blueprint, set and product
@@ -203,8 +274,42 @@ async fn price_other_games(state: &DomainState, rows: &mut [Json], sold: &mut Ve
         // game's card. Without them the cards are held and unpriced.
         apply_catalog_rows(&game, rows, &[]);
     }
+    // What one spawned game read, kept beside the game's own name: a task that dies
+    // cannot hand its name back, and the name is what its rows are cleared by.
+    let mut joins: Vec<(String, tokio::task::JoinHandle<GameAnswer>)> = Vec::new();
     for (game, ids) in priced {
-        match tokio::time::timeout(OTHER_GAME_TIMEOUT, read_game_prices(state, &game, &ids)).await {
+        let source = source.clone();
+        let name = game.clone();
+        let answer = async move {
+            let outcome =
+                tokio::time::timeout(OTHER_GAME_TIMEOUT, source.read(game.clone(), ids)).await;
+            (game, outcome)
+        }
+        // The request's own span, not a detached one: the line a game's read writes
+        // belongs to the trace the edge prints for the request that asked for it.
+        .instrument(tracing::Span::current());
+        joins.push((name, tokio::spawn(answer)));
+    }
+    for (game, answer) in joins {
+        // The task names its own game too; the name kept here is the one that is
+        // still known when the task has nothing to say.
+        let (_, outcome) = match answer.await {
+            Ok(done) => done,
+            // Logged once, with the name this side kept: there is no second pass over
+            // the games that never answered, so a death is not also reported as a
+            // timeout. Its rows are still cleared — no card keeps an unconfirmed
+            // blueprint because a spawn failed.
+            Err(error) => {
+                tracing::error!(
+                    %error,
+                    game = %game,
+                    "a portfolio game pricing task did not answer; its cards stay unpriced"
+                );
+                apply_catalog_rows(&game, rows, &[]);
+                continue;
+            }
+        };
+        match outcome {
             Ok(Ok(prices)) => {
                 apply_catalog_rows(&game, rows, &prices.catalog);
                 sold.extend(prices.sold);
@@ -1284,6 +1389,191 @@ mod tests {
         let (priced, cleared) = games_to_price(&rows);
         assert!(priced.is_empty(), "{priced:?}");
         assert!(cleared.is_empty(), "{cleared:?}");
+    }
+
+    /// A game database that costs the test whatever it says: it spends virtual time
+    /// and then answers with one catalog row per card id, so the window of a market
+    /// read is a fact about this scheduling rather than about this machine.
+    struct SlowGames {
+        /// What a game that answers takes to do it.
+        spent: std::time::Duration,
+        /// Games that never answer: their task sleeps past any window, and the only
+        /// thing that ends it is its own timeout.
+        silent: BTreeSet<String>,
+        /// Games whose task dies instead of returning, the shape of a read that
+        /// panics on the way out.
+        panicking: BTreeSet<String>,
+    }
+
+    impl GamePriceSource for SlowGames {
+        fn read<'a>(&'a self, game: String, card_ids: Vec<i64>) -> BoxFuture<'a, GameOutcome> {
+            let never = self.silent.contains(&game) || self.panicking.contains(&game);
+            let spent = if never {
+                std::time::Duration::from_secs(365 * 24 * 60 * 60)
+            } else {
+                self.spent
+            };
+            let answers = !self.panicking.contains(&game);
+            Box::pin(async move {
+                if !answers {
+                    panic!("the {game} read died on the way out");
+                }
+                tokio::time::sleep(spent).await;
+                let catalog: Vec<Json> = card_ids
+                    .iter()
+                    .map(|id| {
+                        json!({
+                            "card_id": id.to_string(),
+                            "blueprint_id": "1777",
+                            "set_name": format!("{game} — first set"),
+                            "product_type": "card",
+                        })
+                    })
+                    .collect();
+                let sold = catalog
+                    .iter()
+                    .map(|row| {
+                        json!({
+                            "game": game.clone(),
+                            "blueprint_id": row_text(row, "blueprint_id"),
+                            "day": "2026-10-07",
+                            "median_cents": 900,
+                        })
+                    })
+                    .collect();
+                Ok(GamePrices { catalog, sold })
+            })
+        }
+    }
+
+    /// One Pokémon card and one card of each of three games, all of the same public
+    /// card id: the Pokémon join matched the same blueprint everywhere, so only a
+    /// game's own catalog can say what its card really is.
+    fn one_card_across_three_games() -> Vec<Json> {
+        let mut rows = vec![json!({
+            "card_id": "77", "blueprint_id": "999", "quantity": 2,
+            "game": "pokemon", "set_code": "sv1",
+        })];
+        for game in ["riftbound", "gundam", "lorcana"] {
+            rows.push(json!({
+                "card_id": "77", "blueprint_id": "999", "quantity": 1, "game": game,
+            }));
+        }
+        rows
+    }
+
+    /// The one slice a game's cards are held in, so a test can name what it is keyed
+    /// on: a slice starting `unpriced|` is a card whose blueprint was taken back
+    /// because its game did not answer, and one starting with a blueprint id is a
+    /// card that game's own catalog priced.
+    fn held_slice(rows: &[Json], game: &str) -> String {
+        let groups = segment_holdings(rows);
+        let holdings = groups
+            .get(&format!("game:{game}"))
+            .unwrap_or_else(|| panic!("{game} holds nothing of {groups:?}"));
+        assert_eq!(holdings.len(), 1, "{game} split into {holdings:?}");
+        holdings[0].key.clone()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn three_slow_games_are_asked_at_the_same_time() {
+        // The cost finding, tested rather than argued: three card servers that each
+        // take three seconds cost this request nine seconds one after another and
+        // three seconds together. Nothing here is a socket or a wall clock — a unit
+        // test binary shares one process environment and one machine across its
+        // threads, so it can prove a schedule and nothing else.
+        let source = Arc::new(SlowGames {
+            spent: std::time::Duration::from_secs(3),
+            silent: BTreeSet::new(),
+            panicking: BTreeSet::new(),
+        });
+        let mut rows = one_card_across_three_games();
+        let mut sold = Vec::new();
+        let started = tokio::time::Instant::now();
+        price_other_games_from(&source, &mut rows, &mut sold).await;
+
+        assert_eq!(
+            started.elapsed(),
+            std::time::Duration::from_secs(3),
+            "three games that each take three seconds were asked one after another"
+        );
+        assert_eq!(sold.len(), 3, "{sold:?}");
+        for game in ["riftbound", "gundam", "lorcana"] {
+            let key = held_slice(&rows, game);
+            assert_eq!(key.split('|').next().unwrap(), "1777", "{game}");
+        }
+        // The Pokémon card keeps the blueprint its own catalog joined; only the rows
+        // of the games that answered were rewritten.
+        assert_eq!(rows[0]["blueprint_id"], json!("999"), "{rows:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_game_that_never_answers_is_cleared_at_its_timeout() {
+        // A card server that has stopped responding costs this request the one window
+        // it is given and nothing more, and its cards are held unpriced rather than
+        // priced off another game's card.
+        let source = Arc::new(SlowGames {
+            spent: std::time::Duration::from_secs(1),
+            silent: ["gundam".to_string()].into_iter().collect(),
+            panicking: BTreeSet::new(),
+        });
+        let mut rows = one_card_across_three_games();
+        let mut sold = Vec::new();
+        let started = tokio::time::Instant::now();
+        price_other_games_from(&source, &mut rows, &mut sold).await;
+
+        assert_eq!(
+            started.elapsed(),
+            OTHER_GAME_TIMEOUT,
+            "a game that never answered was waited on past its own window"
+        );
+        assert_eq!(sold.len(), 2, "{sold:?}");
+        assert!(
+            held_slice(&rows, "gundam").starts_with("unpriced|"),
+            "a game that never answered is priced by {}",
+            held_slice(&rows, "gundam")
+        );
+        for game in ["riftbound", "lorcana"] {
+            assert!(
+                !held_slice(&rows, game).starts_with("unpriced|"),
+                "{game} lost its prices to a game that never answered"
+            );
+        }
+        assert_eq!(rows[0]["blueprint_id"], json!("999"), "{rows:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_game_whose_read_panics_is_cleared_and_the_others_are_applied() {
+        // A task that dies takes its own answer with it and no other: the games that
+        // did answer are still priced, the one that died is cleared like any game that
+        // did not answer, and this request does not wait on a task that is gone.
+        let source = Arc::new(SlowGames {
+            spent: std::time::Duration::from_secs(1),
+            silent: BTreeSet::new(),
+            panicking: ["lorcana".to_string()].into_iter().collect(),
+        });
+        let mut rows = one_card_across_three_games();
+        let mut sold = Vec::new();
+        let started = tokio::time::Instant::now();
+        price_other_games_from(&source, &mut rows, &mut sold).await;
+
+        assert_eq!(
+            started.elapsed(),
+            std::time::Duration::from_secs(1),
+            "the games that answered were held up by a task that can no longer answer"
+        );
+        assert_eq!(sold.len(), 2, "{sold:?}");
+        assert!(
+            held_slice(&rows, "lorcana").starts_with("unpriced|"),
+            "a game whose task died is priced by {}",
+            held_slice(&rows, "lorcana")
+        );
+        for game in ["riftbound", "gundam"] {
+            assert!(
+                !held_slice(&rows, game).starts_with("unpriced|"),
+                "{game} lost its prices to a task that died"
+            );
+        }
     }
 
     #[test]

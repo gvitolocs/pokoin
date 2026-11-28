@@ -25,6 +25,10 @@ import {
   subscribeSegments,
 } from '@market/portfolio-segments-cache.js';
 import { normalizeSegments } from '@market/portfolio-segments.js';
+import {
+  PREVIEW_COLLECTIONS,
+  previewCollectionsFrom,
+} from '@market/portfolio-collections-preview.js';
 import { previewSegmentsFrom } from '@market/portfolio-segments-preview.js';
 import { normalizeMovers } from '@market/portfolio-movers.js';
 import { loadPortfolioMovers, peekPortfolioMovers } from '@market/portfolio-movers-cache.js';
@@ -39,6 +43,7 @@ import '@market/seller-home.css';
 import { DashboardBoundary, SellerDashboardView } from '../components/dashboard/SellerDashboardView.jsx';
 import SignedIn from '../components/SignedIn.jsx';
 import { loadOwnerBook } from '../lib/owner-book.js';
+import { createCollectionsBook } from '../lib/collections-book.js';
 import { accountProfile, availablePkn } from '../stores/account.js';
 import { authUid, getBearer, signedIn } from '../stores/auth.js';
 import { buyerPending, sellerCurrency } from '../stores/buyer.js';
@@ -209,6 +214,21 @@ function moverHref(mover) {
 function PreviewDashboard() {
   // Fixtures only, but the movers window still follows the chart's own range.
   const [previewRange, setPreviewRange] = createSignal(DEFAULT_MOVER_RANGE);
+  // The two fixture lists, priced off the same preview series the graph draws.
+  // A save or a delete writes memory only: the preview asks the API nothing,
+  // so the Collections level and the editor are reviewable without an account.
+  const collections = createCollectionsBook({
+    previewAnswer: (rows, seeding) => previewCollectionsFrom(
+      previewHistorySeries(),
+      // Only the very first ask lays the two fixture lists out. After that the
+      // desk answers with what it holds, so a seller who deletes the last one
+      // sees the empty level instead of the layout refilling itself.
+      seeding ? PREVIEW_COLLECTIONS : rows,
+    ),
+  });
+  // The fixture answers at once, and an answer is a signal write: after this
+  // render, not during it. Nothing changes the source, so it answers once.
+  createEffect(() => 'preview', () => { collections.load('preview'); });
   return (
     <SellerDashboardView
       previewBanner
@@ -228,6 +248,7 @@ function PreviewDashboard() {
       moverCurrency="DKK"
       onHistoryRange={setPreviewRange}
       segments={normalizeSegments(previewSegmentsFrom(previewHistorySeries()))}
+      collections={collections}
       moverHrefFor={moverHref}
       historySeries={previewHistorySeries()}
       loading={false}
@@ -272,6 +293,10 @@ function LiveDashboard() {
   // the day rows, so the table reads its own side cache.
   const [segments, setSegments] = createSignal(untrack(() => peekSegments(uid())));
   const [segmentsPending, setSegmentsPending] = createSignal(untrack(() => Boolean(signedIn() && !peekSegments(uid()))));
+  // The seller's saved lists are theirs alone and answer on their own: the
+  // request is not chained to the history, so a slow book never delays the
+  // table and a collections failure never takes the graph down.
+  const collections = createCollectionsBook();
   const [moversPending, setMoversPending] = createSignal(true);
   // The chart owns the window; the movers sheet prices whatever it shows.
   const [moverRange, setMoverRange] = createSignal(DEFAULT_MOVER_RANGE);
@@ -414,6 +439,16 @@ function LiveDashboard() {
     };
   });
 
+  // The saved collections, keyed on the seller and on nothing else: the book
+  // is not the value graph's, so a slow or failed read never delays the
+  // history and a late answer for a switched account is dropped by the store.
+  createEffect(
+    () => sellerUid(),
+    (id) => {
+      collections.load(id);
+    },
+  );
+
   // Top movers over the window the chart is showing, one request per window.
   createEffect(
     () => [sellerUid(), moverRange().days],
@@ -482,6 +517,7 @@ function LiveDashboard() {
         historyPending={historyPending()}
         segments={segments()}
         segmentsPending={segmentsPending()}
+        collections={collections}
         listed={listed()}
         listingRows={listingRows()}
         listingsLoading={!listingsLoaded()}

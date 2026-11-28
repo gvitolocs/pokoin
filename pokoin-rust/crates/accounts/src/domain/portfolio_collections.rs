@@ -1,0 +1,2420 @@
+//! Custom collections — the seller's own named lists of cards and the value
+//! series of each one.
+//!
+//! A collection is a list the seller writes by hand: it may hold cards they do
+//! not own, and it keeps no record of when anything was acquired, so its daily
+//! series is a backtest of one basket. The pricing rules are therefore *the same
+//! functions* the main graph uses — [`crate::domain::portfolio_history`]'s slice
+//! keys, sold price book and carry-forward — fed with rows shaped like the stock
+//! rows of [`crate::domain::portfolio_history::HOLDINGS_SQL`] rather than database
+//! rows. Nothing here queries a database or speaks HTTP;
+//! [`crate::handlers::portfolio_collections`] does.
+//!
+//! Stored one document per collection in Firestore `portfolio_collections`, read
+//! back by a `uid` equality query, so no composite index is needed.
+
+use std::collections::HashMap;
+
+use serde_json::{json, Map, Value as Json};
+
+use crate::error::ApiError;
+use crate::firestore::{
+    new_document_id, DocData, Document, FieldValue, Firestore, Query as FirestoreQuery, Value,
+};
+
+use super::collection::iso_timestamp;
+use super::marketplace_game::{is_pokemon_ingest_game, normalize_ingest_game};
+use super::poko_market_math::{normalize_language, CONDITIONS};
+use super::portfolio_history::{
+    add_utc_days, condition_key, holding_slices, language_key, last_sold_for, num, round2,
+    sold_slice_key, value_holdings_on, Holding, PricePoint, HISTORY_DAYS, PRICE_BASIS,
+};
+use super::portfolio_segments::POKEMON;
+
+/// `ApiError` is wide, so every fallible function here hands the refusal over
+/// boxed and the handler answers from the unboxed error, as
+/// [`crate::handlers::poko_market`]'s boxed tools do — including the helpers called
+/// inside [`Firestore::run_transaction`], whose body fixes its error to an unboxed
+/// `ApiError`: each moves the refusal out of its box at that one boundary, never
+/// rebuilds it.
+type Result<T> = std::result::Result<T, Box<ApiError>>;
+
+/// Firestore collection of the seller's own card lists: one document per
+/// collection, found by `uid`.
+pub const COLLECTION: &str = "portfolio_collections";
+
+/// How many lists one seller keeps. Past this the dashboard draws more lines than
+/// a screen shows and the graph stops being readable.
+pub const MAX_COLLECTIONS: usize = 20;
+/// How many cards one list holds — the ceiling an active seller's whole stock is
+/// expected to stay inside.
+pub const MAX_ITEMS: usize = 300;
+/// How many copies of one card, the same ceiling a listing carries.
+pub const MAX_QUANTITY: i64 = 999;
+/// How long a collection name is.
+pub const MAX_NAME_LEN: usize = 40;
+/// How long a card or set title stored for display is.
+pub const MAX_DISPLAY_LEN: usize = 120;
+
+/// The `group` every collection def carries, so the client draws the lists as one
+/// block beside the era and set blocks.
+pub const GROUP: &str = "collection";
+
+/// One query for a seller's collections. [`MAX_COLLECTIONS`] is the real ceiling;
+/// the headroom keeps a document written under an older, looser limit readable.
+const READ_LIMIT: i64 = 64;
+
+/// The facet a saved item takes when the client leaves it out. Both are already the
+/// vocabulary their own rule answers with — `NM` is one of
+/// [`crate::domain::poko_market_math::CONDITIONS`] and `EN` one of its `LANGUAGES` —
+/// so the round trip is the slice the price book is filed under either way.
+const DEFAULT_CONDITION: &str = "NM";
+const DEFAULT_LANGUAGE: &str = "EN";
+
+/// How long either facet may be written, counted before anything is normalised: a
+/// card name pasted into the condition field is a mistake, not a slice, and no price
+/// key is ever that long.
+const MAX_FACET_LEN: usize = 24;
+
+/// Every slice's sold medians, oldest first — the one book the main series and
+/// all of this seller's collections are priced out of.
+pub type Book = HashMap<String, Vec<PricePoint>>;
+
+/// The segment key one collection draws under, beside the era and set keys of
+/// [`crate::domain::portfolio_segments`].
+pub fn segment_key(id: &str) -> String {
+    format!("collection:{id}")
+}
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+fn name_missing_error() -> Box<ApiError> {
+    Box::new(
+        ApiError::bad_request(format!(
+            "A collection needs a name of 1–{MAX_NAME_LEN} characters."
+        ))
+        .with_code("collection_name_required"),
+    )
+}
+
+fn limit_error() -> Box<ApiError> {
+    Box::new(
+        ApiError::bad_request(format!(
+            "You can keep {MAX_COLLECTIONS} collections. Delete one first."
+        ))
+        .with_code("collection_limit"),
+    )
+}
+
+fn items_limit_error() -> Box<ApiError> {
+    Box::new(
+        ApiError::bad_request(format!("A collection holds at most {MAX_ITEMS} cards."))
+            .with_code("collection_items_limit"),
+    )
+}
+
+/// The refused card is named by its position in the request, which is the only
+/// way a seller finds it in a list of 300.
+fn item_error(index: usize) -> Box<ApiError> {
+    Box::new(
+        ApiError::bad_request(format!(
+            "Collection card {} needs a card id of 1–12 digits and a quantity of \
+             1–{MAX_QUANTITY}.",
+            index + 1
+        ))
+        .with_code("collection_item_invalid"),
+    )
+}
+
+fn items_shape_error() -> Box<ApiError> {
+    Box::new(
+        ApiError::bad_request("The cards of a collection must be a list.")
+            .with_code("collection_item_invalid"),
+    )
+}
+
+/// A facet of one card the price book has no slice for. The card is named by its
+/// position, like [`item_error`], because a list of 300 is found line by line.
+fn facet_error(facet: &str, index: usize) -> Box<ApiError> {
+    Box::new(
+        ApiError::bad_request(format!(
+            "Collection card {} has a {facet} the price book has no slice for.",
+            index + 1
+        ))
+        .with_code("collection_item_invalid"),
+    )
+}
+
+/// An unknown id, an already-deleted id and another seller's id answer this, so a
+/// collection id never leaks through an error.
+fn missing_error() -> Box<ApiError> {
+    Box::new(ApiError::not_found("Collection not found.").with_code("collection_not_found"))
+}
+
+fn name_taken_error() -> Box<ApiError> {
+    Box::new(
+        ApiError::conflict("You already have a collection with that name.")
+            .with_code("collection_name_taken"),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Text and fields
+// ---------------------------------------------------------------------------
+
+/// Control characters out, ends trimmed, inner whitespace runs collapsed to one
+/// space, so a pasted title draws the way the seller typed it. A line break between
+/// two words is a space, not a glue: `Charizard\n  ex` is "Charizard ex".
+pub fn clean_text(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_whitespace() || !character.is_control())
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn text_of(value: Option<&Json>) -> String {
+    match value {
+        Some(Json::String(text)) => text.clone(),
+        Some(Json::Number(number)) => number.to_string(),
+        _ => String::new(),
+    }
+}
+
+fn bool_of(object: &Map<String, Json>, key: &str) -> bool {
+    object.get(key).and_then(Json::as_bool).unwrap_or(false)
+}
+
+/// A collection name: cleaned, and 1 to [`MAX_NAME_LEN`] characters.
+pub fn sanitize_name(value: Option<&Json>) -> Result<String> {
+    let name = clean_text(&text_of(value));
+    if name.is_empty() || name.chars().count() > MAX_NAME_LEN {
+        return Err(name_missing_error());
+    }
+    Ok(name)
+}
+
+/// Display-only text (a card or a set title): cleaned and capped, never refused.
+pub fn sanitize_display(value: Option<&Json>) -> String {
+    clean_text(&text_of(value))
+        .chars()
+        .take(MAX_DISPLAY_LEN)
+        .collect()
+}
+
+/// A public `card_id`: at most 12 ASCII digits, and not zero. Leading zeros come
+/// off, so `0012` is stored, answered, merged and looked up as the `12` the catalog
+/// carries — two spellings of one card must not become two lines that each price.
+fn sanitize_card_id(value: Option<&Json>) -> Option<String> {
+    let text = text_of(value);
+    let text = text.trim();
+    if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let digits = text.trim_start_matches('0');
+    if digits.is_empty() || digits.len() > 12 {
+        return None;
+    }
+    Some(digits.to_string())
+}
+
+/// An owned quantity: a whole number 1..=[`MAX_QUANTITY`], or one when the field
+/// is absent.
+fn sanitize_quantity(value: Option<&Json>) -> Option<i64> {
+    let quantity = match value {
+        None | Some(Json::Null) => 1,
+        Some(Json::Number(number)) => match number.as_i64() {
+            Some(whole) => whole,
+            None => {
+                let float = number.as_f64()?;
+                if float.fract() != 0.0 {
+                    return None;
+                }
+                float as i64
+            }
+        },
+        Some(Json::String(text)) => text.trim().parse().ok()?,
+        Some(_) => return None,
+    };
+    (1..=MAX_QUANTITY).contains(&quantity).then_some(quantity)
+}
+
+/// A facet a stored document carries that a body would be refused for: kept, so the
+/// seller still sees the line they wrote, and capped so it cannot bloat the answer.
+fn kept_facet(raw: &str) -> String {
+    clean_text(raw).chars().take(MAX_FACET_LEN).collect()
+}
+
+/// The condition an item is stored and answered with: one of
+/// [`crate::domain::poko_market_math::CONDITIONS`], the scale the listing forms and
+/// the sold rows are filed in. [`condition_key`] is the accept-list, so `Near Mint`,
+/// `near mint` and `NM` are one slice and `poor`, `PO` and `Poor` one more; a wear
+/// phrase it does not understand names no slice, so a body is refused and a stored
+/// card keeps its line at nothing.
+fn sanitize_condition(value: Option<&Json>, at: Where) -> Result<String> {
+    let raw = text_of(value);
+    if clean_text(&raw).is_empty() {
+        return Ok(DEFAULT_CONDITION.to_string());
+    }
+    if raw.chars().count() > MAX_FACET_LEN {
+        return at.refused("condition", || kept_facet(&raw));
+    }
+    let key = condition_key(&raw);
+    match CONDITIONS.iter().find(|name| condition_key(name) == key) {
+        Some(name) => Ok((*name).to_string()),
+        None => at.refused("condition", || kept_facet(&raw)),
+    }
+}
+
+/// The language an item is stored and answered with, as the code the sold book is
+/// filed under: `English`, `english`, `en` and `EN` are the one `EN` slice, `ja` and
+/// `Japanese` the one `JP`, `zh-tw` the one `ZHT`. The marketplace's own normalizer is
+/// the accept-list, and a code that is not two or three ASCII letters keys no slice at
+/// all — so a body is refused rather than filed under a key no sale has, and a stored
+/// card keeps its line at nothing.
+///
+/// The rule is the *shape* of the code, deliberately, and not membership in the
+/// normalizer's `LANGUAGES`: that list is what *it* can answer, which is narrower than
+/// what the marketplace files sales under. The seller's own picker offers `TH` and `VI`
+/// (`market/src/card-desk.js`, `LIST_LANGS`) and the sold writer files a Thai listing
+/// under `TH` (`apps/cardtrader-sold/src/listing.rs`), so a closed list would answer
+/// `collection_item_invalid` to a card its own database prices, and lock a list that
+/// already stores one out of ever being saved again.
+fn sanitize_language(value: Option<&Json>, at: Where) -> Result<String> {
+    let raw = text_of(value);
+    if clean_text(&raw).is_empty() {
+        return Ok(DEFAULT_LANGUAGE.to_string());
+    }
+    if raw.chars().count() > MAX_FACET_LEN {
+        return at.refused("language", || kept_facet(&raw));
+    }
+    let guess = normalize_language(&raw);
+    let code = if guess.matched {
+        guess.code.to_string()
+    } else {
+        language_key(&raw)
+    };
+    let letters = code.bytes().all(|byte| byte.is_ascii_alphabetic());
+    if !letters || code.len() < 2 || code.len() > 3 {
+        return at.refused("language", || kept_facet(&raw));
+    }
+    Ok(code)
+}
+
+/// What [`crate::firestore::new_document_id`] writes: an id outside that shape
+/// cannot exist, and sending it to the REST API would answer a 400 that reads as
+/// a server failure. The store's own marker shape — `__` on both ends, as
+/// `__namespace__` and the Datastore conversion ids are spelled — is refused with
+/// it, so a name the backend reserves for itself never even reaches it: the caller
+/// gets the same 404 it gets for a list that is not there.
+pub fn is_collection_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 32
+        && !is_reserved_id(value)
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
+/// A name the Firestore wire gives its own markers, so it is never a list id — not
+/// even the two characters alone, which is what a truncated marker looks like.
+fn is_reserved_id(value: &str) -> bool {
+    value.starts_with("__") && value.ends_with("__")
+}
+
+/// Where a card of a collection was read from: a `?action=save` body, named by its
+/// position, or a stored document. A body refuses anything the price book has no
+/// slice for; a document keeps it, so a list written under an older or wider rule
+/// still draws its line — held and unpriced — instead of losing the card.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Where {
+    Body(usize),
+    Stored,
+}
+
+impl Where {
+    /// The refusal of a card that is not a card at all: a body names the position,
+    /// which is the only way a seller finds it in a list of 300; a stored document
+    /// has no position, and [`Item::stored`] drops the refusal either way.
+    fn unusable(self) -> Box<ApiError> {
+        item_error(match self {
+            Where::Body(index) => index,
+            Where::Stored => 0,
+        })
+    }
+
+    /// The refusal this source answers for a facet it cannot use. Only a body
+    /// refuses: a stored card is kept whatever it says.
+    fn refused(self, facet: &str, kept: impl FnOnce() -> String) -> Result<String> {
+        match self {
+            Where::Body(index) => Err(facet_error(facet, index)),
+            Where::Stored => Ok(kept()),
+        }
+    }
+}
+
+/// The game an item is stored, answered and priced by: the id the platform's own
+/// game table carries, so a listing written `one-piece` and one written
+/// `One Piece` find the `one_piece` database, and Pokémon when the client says
+/// nothing. A game the table does not list has no database to price from: a body
+/// is refused, and a stored row is kept because
+/// [`crate::domain::portfolio_segments::game_of`] reads it as `unknown` — held and
+/// unpriced, never looked up in the Pokémon catalog by a card id that only looks
+/// alike.
+fn sanitize_game(value: Option<&Json>, at: Where) -> Result<String> {
+    let raw = text_of(value);
+    if clean_text(&raw).is_empty() {
+        return Ok(POKEMON.to_string());
+    }
+    let game = normalize_ingest_game(&raw);
+    if !game.is_empty() {
+        return Ok(game);
+    }
+    // The compacted alias list folds an accent to an underscore, so the platform's
+    // own game misses its own alias; the name as written still matches.
+    if is_pokemon_ingest_game(&raw.to_ascii_lowercase()) {
+        return Ok(POKEMON.to_string());
+    }
+    at.refused("game", || clean_text(&raw))
+}
+
+// ---------------------------------------------------------------------------
+// Items
+// ---------------------------------------------------------------------------
+
+/// One card of one collection, as stored: what the card *is*, never what it is
+/// worth. Every price is computed on the read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Item {
+    pub game: String,
+    pub card_id: String,
+    pub condition: String,
+    pub language: String,
+    pub reverse: bool,
+    pub first_edition: bool,
+    pub graded: bool,
+    pub quantity: i64,
+    /// Display only: stored and answered, never used to find a price.
+    pub name: String,
+    pub set_name: String,
+}
+
+impl Item {
+    /// One card as a `?action=save` body names it, or the error naming which card
+    /// was refused.
+    pub fn from_input(value: &Json, index: usize) -> Result<Self> {
+        let object = value.as_object().ok_or_else(|| item_error(index))?;
+        Self::read(object, Where::Body(index))
+    }
+
+    /// One card as a stored document holds it. `None` only for a card that cannot
+    /// be drawn at all — no id, no usable quantity — never for a facet: a list
+    /// written before a rule existed keeps every line it has.
+    pub fn stored(value: &Json) -> Option<Self> {
+        value
+            .as_object()
+            .and_then(|object| Self::read(object, Where::Stored).ok())
+    }
+
+    fn read(object: &Map<String, Json>, at: Where) -> Result<Self> {
+        let card_id = sanitize_card_id(object.get("cardId").or_else(|| object.get("card_id")))
+            .ok_or_else(|| at.unusable())?;
+        let quantity = sanitize_quantity(object.get("quantity")).ok_or_else(|| at.unusable())?;
+        Ok(Self {
+            game: sanitize_game(object.get("game"), at)?,
+            card_id,
+            condition: sanitize_condition(object.get("condition"), at)?,
+            language: sanitize_language(object.get("language"), at)?,
+            reverse: bool_of(object, "reverse"),
+            first_edition: bool_of(object, "firstEdition") || bool_of(object, "first_edition"),
+            graded: bool_of(object, "graded"),
+            quantity,
+            name: sanitize_display(object.get("name")),
+            set_name: sanitize_display(object.get("setName").or_else(|| object.get("set_name"))),
+        })
+    }
+
+    /// The stored and answered shape. Every key here is one [`Item::from_input`]
+    /// reads, so a document round-trips through the sanitiser unchanged.
+    pub fn to_json(&self) -> Json {
+        json!({
+            "game": self.game,
+            "cardId": self.card_id,
+            "condition": self.condition,
+            "language": self.language,
+            "reverse": self.reverse,
+            "firstEdition": self.first_edition,
+            "graded": self.graded,
+            "quantity": self.quantity,
+            "name": self.name,
+            "setName": self.set_name,
+        })
+    }
+
+    /// The same item plus its price on the reported day. `null` when its slice has
+    /// never sold — the gap the `cardsPriced` count of the series misses.
+    pub fn to_priced_json(&self, price_pkn: Option<f64>) -> Json {
+        let mut item = self.to_json();
+        if let Some(object) = item.as_object_mut() {
+            object.insert("pricePkn".into(), price_pkn.map_or(Json::Null, num));
+        }
+        item
+    }
+
+    /// A row in the shape `HOLDINGS_SQL` answers, so the sold machinery prices a
+    /// collection unchanged. `blueprint_id` is empty until the handler resolves it
+    /// out of the card's own game.
+    pub fn row(&self) -> Json {
+        json!({
+            "game": self.game,
+            "card_id": self.card_id,
+            "blueprint_id": "",
+            "condition": self.condition,
+            "language": self.language,
+            "reverse": self.reverse,
+            "first_edition": self.first_edition,
+            "graded": self.graded,
+            "quantity": self.quantity,
+        })
+    }
+
+    /// Two items of one slice sell for one price, so they are one line.
+    fn is_same_slice(&self, other: &Item) -> bool {
+        self.game == other.game
+            && self.card_id == other.card_id
+            && self.condition == other.condition
+            && self.language == other.language
+            && self.reverse == other.reverse
+            && self.first_edition == other.first_edition
+            && self.graded == other.graded
+    }
+}
+
+/// Items of the same slice merge into the first of them: quantities add, capped
+/// at [`MAX_QUANTITY`], position kept.
+pub fn merge_items(items: Vec<Item>) -> Vec<Item> {
+    let mut merged: Vec<Item> = Vec::with_capacity(items.len());
+    for item in items {
+        match merged.iter_mut().find(|kept| kept.is_same_slice(&item)) {
+            Some(kept) => {
+                kept.quantity = kept
+                    .quantity
+                    .saturating_add(item.quantity)
+                    .min(MAX_QUANTITY);
+            }
+            None => merged.push(item),
+        }
+    }
+    merged
+}
+
+/// Every card of a save, each refused by its own index, then merged by slice.
+pub fn sanitize_items(values: &[Json]) -> Result<Vec<Item>> {
+    if values.len() > MAX_ITEMS {
+        return Err(items_limit_error());
+    }
+    let mut items = Vec::with_capacity(values.len());
+    for (index, value) in values.iter().enumerate() {
+        items.push(Item::from_input(value, index)?);
+    }
+    Ok(merge_items(items))
+}
+
+// ---------------------------------------------------------------------------
+// Collections
+// ---------------------------------------------------------------------------
+
+/// One stored collection, with the timestamps it was written with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Collection {
+    pub id: String,
+    pub name: String,
+    pub items: Vec<Item>,
+    /// ISO 8601 UTC, empty when the document carries no timestamp.
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl Collection {
+    pub fn key(&self) -> String {
+        segment_key(&self.id)
+    }
+}
+
+fn stored_iso(document: &Document, field: &str) -> String {
+    document
+        .get(field)
+        .and_then(|value| iso_timestamp(&value))
+        .unwrap_or_default()
+}
+
+/// A stored document as a collection. A card with no id or no usable quantity is
+/// dropped one by one rather than failing the read: a document written before a
+/// limit existed must still show the seller the cards in it that are fine. Every
+/// other oddity of a stored card — a game the platform stopped listing, a facet no
+/// slice carries — is kept, so the line stays on the graph at nothing rather than
+/// disappearing.
+///
+/// The items are merged by slice like a write's are, because two stored rows can
+/// name one slice after a rule changed underneath them: a `0012` and a `12` written
+/// before the zeros came off, or two copies one later sanitiser folds into one
+/// facet. Read apart they price the same sales twice and the graph counts the card
+/// twice; merged they are one line with the copies added.
+pub fn collection_from_document(document: &Document) -> Collection {
+    let items = match document.get("items") {
+        Some(Value::Array(values)) => merge_items(
+            values
+                .iter()
+                .filter_map(|value| Item::stored(&value.to_plain_json()))
+                .collect(),
+        ),
+        _ => Vec::new(),
+    };
+    Collection {
+        id: document.id(),
+        name: clean_text(&document.get_str("name"))
+            .chars()
+            .take(MAX_NAME_LEN)
+            .collect(),
+        items,
+        created_at: stored_iso(document, "createdAt"),
+        updated_at: stored_iso(document, "updatedAt"),
+    }
+}
+
+/// The document a collection is stored as. The whole document is written on every
+/// save, so a field an earlier write set and this one dropped cannot linger.
+pub fn doc_data(
+    uid: &str,
+    name: &str,
+    items: &[Item],
+    created_at_ms: i64,
+    updated_at_ms: i64,
+) -> DocData {
+    DocData::new()
+        .string("uid", uid)
+        .string("name", name)
+        .array(
+            "items",
+            items
+                .iter()
+                .map(|item| Value::from_plain_json(&item.to_json()))
+                .collect(),
+        )
+        .timestamp("createdAt", created_at_ms)
+        .timestamp("updatedAt", updated_at_ms)
+}
+
+/// The document, but only when it is this seller's. A Firestore miss (`Ok(None)`)
+/// and another seller's document answer the same way, so an id never leaks.
+pub fn owned_document<'a>(document: Option<&'a Document>, uid: &str) -> Option<&'a Document> {
+    document.filter(|document| document.get_str("uid") == uid)
+}
+
+/// What a `?action=save` body asks for: the list to write, already cleaned and
+/// merged, and the id it replaces when the client sent one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Save {
+    pub id: Option<String>,
+    pub name: String,
+    pub items: Vec<Item>,
+}
+
+impl Save {
+    pub fn from_body(body: &Json) -> Result<Self> {
+        let name = sanitize_name(body.get("name"))?;
+        let id = match body.get("id") {
+            None | Some(Json::Null) => None,
+            Some(value) => {
+                let text = clean_text(&text_of(Some(value)));
+                if text.is_empty() {
+                    None
+                } else if is_collection_id(&text) {
+                    Some(text)
+                } else {
+                    // An id outside the shape Firestore writes cannot exist, and
+                    // asking for it must read as "not yours", not as a bad request.
+                    return Err(missing_error());
+                }
+            }
+        };
+        let items = match body.get("items") {
+            None | Some(Json::Null) => Vec::new(),
+            Some(Json::Array(values)) => sanitize_items(values)?,
+            Some(_) => return Err(items_shape_error()),
+        };
+        Ok(Self { id, name, items })
+    }
+}
+
+/// What a `?action=delete` body names. An id that is absent or not a string gets
+/// the same 404 every other seller's id answers with: the request cannot say which
+/// list it means, and saying so must not distinguish it from a list that is not
+/// yours.
+pub fn delete_body_id(body: &Json) -> Result<String> {
+    let text = match body.get("id") {
+        None | Some(Json::Null) => String::new(),
+        Some(value @ Json::String(_)) => clean_text(&text_of(Some(value))),
+        Some(_) => return Err(missing_error()),
+    };
+    if text.is_empty() {
+        return Err(missing_error());
+    }
+    Ok(text)
+}
+
+/// Two names the seller would read as one list. The compare is case-insensitive
+/// because the dashboard draws names as titles, so `Vault` and `VAULT` are the same
+/// line to whoever looks at the graph.
+pub fn names_collide(a: &str, b: &str) -> bool {
+    a.to_lowercase() == b.to_lowercase()
+}
+
+/// This seller's collections, oldest first — the order the graph draws them in.
+/// Firestore answers a `where_eq` query in document-id order and the auto ids are
+/// not monotonic, so the stored creation time is what orders them.
+pub async fn list_collections(firestore: &Firestore, uid: &str) -> Result<Vec<Collection>> {
+    let documents = firestore
+        .run_query(
+            &FirestoreQuery::collection(COLLECTION)
+                .where_eq("uid", uid)
+                .limit(READ_LIMIT),
+        )
+        .await?;
+    Ok(sorted_collections(
+        documents.iter().map(collection_from_document),
+    ))
+}
+
+/// The order every answer of this route lists the seller's lists in, and the filter
+/// that drops a document with no id. Both the store read and a write's in-memory
+/// after-state go through it, so a committed save answers the same order a re-read
+/// would.
+fn sorted_collections(items: impl Iterator<Item = Collection>) -> Vec<Collection> {
+    let mut collections: Vec<Collection> = items
+        .filter(|collection| !collection.id.is_empty())
+        .collect();
+    sort_collections(&mut collections);
+    collections
+}
+
+fn sort_collections(collections: &mut [Collection]) {
+    collections.sort_by(|a, b| {
+        a.created_at
+            .cmp(&b.created_at)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+}
+
+/// The lists one answer values: at most [`MAX_COLLECTIONS`], oldest first.
+///
+/// The store read and a write's after-state already hand the lists over in that
+/// order, so this is only the cut. A read reaches further than the allowance on
+/// purpose — the write check has to count what it would overwrite or evict — but
+/// pricing a seller's whole history on every request is not a thing the answer does:
+/// the ceiling is the same one a save refuses at, and what goes past it is the
+/// newest, never a hole in the middle.
+pub fn valued_collections(collections: &[Collection]) -> &[Collection] {
+    &collections[..collections.len().min(MAX_COLLECTIONS)]
+}
+
+/// The document path of one list — what a transaction reads and writes it at.
+fn doc_path(id: &str) -> String {
+    format!("{COLLECTION}/{id}")
+}
+
+/// Why this save cannot be written, decided from the lists the transaction read.
+/// The replaced document is not compared against itself: a rename keeps one list.
+///
+/// It refuses in the module's boxed [`Result`] rather than the transaction body's
+/// unboxed one — a fallible function returning a wide `ApiError` by value is the
+/// thing [`crate::error`] exists to avoid — and the body unboxes what it gets.
+fn check_save(collections: &[Collection], existing: Option<&Document>, save: &Save) -> Result<()> {
+    let replaced = existing.map(Document::id);
+    for collection in collections {
+        if replaced.as_deref() == Some(collection.id.as_str()) {
+            continue;
+        }
+        if names_collide(&collection.name, &save.name) {
+            return Err(name_taken_error());
+        }
+    }
+    if existing.is_none() && collections.len() >= MAX_COLLECTIONS {
+        return Err(limit_error());
+    }
+    Ok(())
+}
+
+/// The document a write commits, read back as a collection without another trip to
+/// the store: the same [`doc_data`] bytes go to the store and into the answer, so a
+/// committed save answers exactly what a re-read would — same timestamps, same
+/// merged lines, same reader.
+fn written_collection(
+    id: &str,
+    uid: &str,
+    name: &str,
+    items: &[Item],
+    created_at_ms: i64,
+    updated_at_ms: i64,
+) -> Collection {
+    let data = doc_data(uid, name, items, created_at_ms, updated_at_ms);
+    let mut fields = Map::new();
+    for (key, value) in &data.fields {
+        if let FieldValue::Value(value) = value {
+            fields.insert(key.clone(), value.to_json());
+        }
+    }
+    collection_from_document(&Document {
+        name: doc_path(id),
+        create_time: None,
+        update_time: None,
+        fields: Some(fields),
+    })
+}
+
+/// The lists of the transaction's read with this write applied in memory — a
+/// replace in its place, a new list where the creation order puts it.
+fn place_written(collections: &mut Vec<Collection>, written: Collection) {
+    let id = written.id.clone();
+    match collections.iter_mut().find(|slot| slot.id == id) {
+        Some(slot) => *slot = written,
+        None => {
+            collections.push(written);
+            sort_collections(collections);
+        }
+    }
+}
+
+/// Write one collection and answer the seller's lists as they are *after* it, with
+/// the id written. `id` replaces in place, keeping the creation time it was written
+/// with.
+///
+/// The reads (the list being replaced and every other list of this seller), the
+/// checks (ownership, the name, the cap) and the write are **one transaction**, so
+/// two saves that would each fit alone cannot both land: whichever commits second
+/// sees the other's document or has its commit aborted for reading a collection that
+/// moved, retries from the top, and is refused. A replace of a document someone
+/// deleted in between is the same story — its read is inside the transaction, so the
+/// retry finds nothing and answers the 404 rather than resurrecting the list.
+///
+/// Nothing is read again after the commit: the answer is the state the transaction
+/// read, with this write applied to it in memory, so a store that fails one call
+/// later cannot turn a write that did happen into an error the client would retry.
+///
+/// The two write forms are the two cases, not one form with a flag: a replace
+/// `update`s and a create `create`s, so the commit itself carries the precondition
+/// the read only checked — `exists` for the one, `!exists` for the other. A replace
+/// then cannot write a list back from nothing even if the store had answered the
+/// read differently from the commit.
+pub async fn apply_save(
+    firestore: &Firestore,
+    uid: &str,
+    save: &Save,
+    now_ms: i64,
+) -> Result<(Vec<Collection>, String)> {
+    let firestore = firestore.clone();
+    let uid = uid.to_string();
+    let save = save.clone();
+    firestore
+        .run_transaction(move |transaction| {
+            let uid = uid.clone();
+            let save = save.clone();
+            Box::pin(async move {
+                let existing = match save.id.as_deref() {
+                    None => None,
+                    Some(id) => {
+                        let reference = transaction.doc(&doc_path(id));
+                        let document = transaction.get_doc(&reference).await?;
+                        Some(
+                            owned_document(document.as_ref(), &uid)
+                                .cloned()
+                                .ok_or_else(|| *missing_error())?,
+                        )
+                    }
+                };
+                let documents = transaction
+                    .get_query(
+                        &FirestoreQuery::collection(COLLECTION)
+                            .where_eq("uid", uid.as_str())
+                            .limit(READ_LIMIT),
+                    )
+                    .await?;
+                let mut collections =
+                    sorted_collections(documents.iter().map(collection_from_document));
+                check_save(&collections, existing.as_ref(), &save).map_err(|error| *error)?;
+                let created_at_ms = existing
+                    .as_ref()
+                    .and_then(|document| document.get_timestamp_millis("createdAt"))
+                    .unwrap_or(now_ms);
+                let data = doc_data(&uid, &save.name, &save.items, created_at_ms, now_ms);
+                let id = match &existing {
+                    Some(document) => {
+                        let id = document.id();
+                        let reference = transaction.doc(&doc_path(&id));
+                        transaction.update(&reference, data)?;
+                        id
+                    }
+                    None => {
+                        let id = new_document_id();
+                        let reference = transaction.doc(&doc_path(&id));
+                        transaction.create(&reference, data)?;
+                        id
+                    }
+                };
+                place_written(
+                    &mut collections,
+                    written_collection(&id, &uid, &save.name, &save.items, created_at_ms, now_ms),
+                );
+                Ok((collections, id))
+            })
+        })
+        .await
+        .map_err(Box::new)
+}
+
+/// Delete one collection and answer the lists that remain. An id that is not this
+/// seller's answers the same 404 as an id that never was, and the read that decides
+/// it is inside the transaction: a list deleted after that read is not quietly
+/// written back, the commit aborts and the retry answers 404.
+pub async fn delete_collection(
+    firestore: &Firestore,
+    uid: &str,
+    id: &str,
+) -> Result<Vec<Collection>> {
+    if !is_collection_id(id) {
+        return Err(missing_error());
+    }
+    let firestore = firestore.clone();
+    let uid = uid.to_string();
+    let id = id.to_string();
+    firestore
+        .run_transaction(move |transaction| {
+            let uid = uid.clone();
+            let id = id.clone();
+            Box::pin(async move {
+                let reference = transaction.doc(&doc_path(&id));
+                let document = transaction.get_doc(&reference).await?;
+                if owned_document(document.as_ref(), &uid).is_none() {
+                    return Err(*missing_error());
+                }
+                let documents = transaction
+                    .get_query(
+                        &FirestoreQuery::collection(COLLECTION)
+                            .where_eq("uid", uid.as_str())
+                            .limit(READ_LIMIT),
+                    )
+                    .await?;
+                let mut collections =
+                    sorted_collections(documents.iter().map(collection_from_document));
+                transaction.delete(&reference);
+                collections.retain(|collection| collection.id != id);
+                Ok(collections)
+            })
+        })
+        .await
+        .map_err(Box::new)
+}
+
+// ---------------------------------------------------------------------------
+// The backtest
+// ---------------------------------------------------------------------------
+
+/// Every item of every collection as one row list, each collection keeping its
+/// range inside it. The handler resolves blueprints into the flat list once — that
+/// is what a non-Pokémon card's own database is asked for, and one pass over all
+/// the rows is what keeps the per-game caps and timeouts of the main series — and
+/// the series and the answered prices read the ranges back out.
+#[derive(Debug, Clone, Default)]
+pub struct Rows {
+    all: Vec<Json>,
+    ranges: Vec<(String, usize, usize)>,
+}
+
+impl Rows {
+    pub fn new(collections: &[Collection]) -> Self {
+        let mut all: Vec<Json> = Vec::new();
+        let mut ranges: Vec<(String, usize, usize)> = Vec::with_capacity(collections.len());
+        for collection in collections {
+            let start = all.len();
+            for item in &collection.items {
+                all.push(item.row());
+            }
+            ranges.push((collection.id.clone(), start, all.len() - start));
+        }
+        Self { all, ranges }
+    }
+
+    /// Every row, for the blueprint resolution and the sold query.
+    pub fn rows(&self) -> &[Json] {
+        &self.all
+    }
+
+    pub fn rows_mut(&mut self) -> &mut Vec<Json> {
+        &mut self.all
+    }
+
+    /// `(collection id, its rows)` in the order the collections came in.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &[Json])> {
+        self.ranges
+            .iter()
+            .map(|(id, start, len)| (id.as_str(), &self.all[*start..*start + *len]))
+    }
+
+    /// The segment keys, in the same order.
+    pub fn keys(&self) -> Vec<String> {
+        self.ranges
+            .iter()
+            .map(|(id, _, _)| segment_key(id))
+            .collect()
+    }
+}
+
+/// Write a resolved blueprint onto a row. Empty is an answer too: a card of a game
+/// whose catalog could not be read holds unpriced rather than borrowing a Pokémon
+/// price off a colliding id.
+pub fn set_blueprint(row: &mut Json, blueprint: &str) {
+    if let Some(object) = row.as_object_mut() {
+        object.insert("blueprint_id".into(), json!(blueprint));
+    }
+}
+
+/// The day the series is drawn from: the earliest sold print of any slice of any
+/// collection, never older than the window the dashboard draws, and `today` when
+/// nothing has ever sold.
+pub fn series_start(rows: &Rows, book: &Book, today: &str) -> String {
+    let floor = add_utc_days(today, -(HISTORY_DAYS - 1));
+    let mut start = today.to_string();
+    for row in rows.rows() {
+        let day = book
+            .get(&sold_slice_key(row))
+            .and_then(|points| points.first())
+            .map(|point| point.day.as_str())
+            .unwrap_or("");
+        if !day.is_empty() {
+            let day = day.max(floor.as_str());
+            if day < start.as_str() {
+                start = day.to_string();
+            }
+        }
+    }
+    start
+}
+
+/// What every collection held on `day`, out of holdings that are already keyed, as
+/// one `segments` map, or nothing when no collection held anything.
+///
+/// A slice key is a fact about a row — its blueprint, condition, language, foil and
+/// edition — never about a day, so it is built once per collection by
+/// [`collection_holdings`] and this reads what that produced. A window of up to
+/// [`HISTORY_DAYS`] days drawing the same keys again per day is the same work done
+/// four hundred times over.
+pub fn day_segments_on(
+    holdings: &[(String, Vec<Holding>)],
+    book: &Book,
+    day: &str,
+) -> Option<Json> {
+    let mut segments = Map::new();
+    for (id, held) in holdings {
+        if let Some(value) = value_holdings_on(held, book, day) {
+            segments.insert(
+                segment_key(id),
+                json!([
+                    num(round2(value.cards_value_pkn)),
+                    value.cards_priced,
+                    value.cards_held,
+                ]),
+            );
+        }
+    }
+    (!segments.is_empty()).then(|| json!({ "date": day, "segments": segments }))
+}
+
+/// Every collection's holdings, each group keyed once for the whole request.
+pub fn collection_holdings(rows: &Rows) -> Vec<(String, Vec<Holding>)> {
+    rows.iter()
+        .map(|(id, item_rows)| (id.to_string(), holding_slices(item_rows)))
+        .collect()
+}
+
+/// [`day_segments_on`] for rows, which keys them first: what one day of one list
+/// costs, asked directly.
+pub fn day_segments(rows: &Rows, book: &Book, day: &str) -> Option<Json> {
+    day_segments_on(&collection_holdings(rows), book, day)
+}
+
+/// The daily series of every collection at once, from [`series_start`] to `today`.
+///
+/// Nothing of it is stored: a list changes the moment the seller edits it, and a
+/// stored copy of a basket the seller deleted is a graph of nothing. A day no
+/// collection appears in is left out, and an empty collection never enters
+/// `segments` while keeping its def.
+pub fn collection_days(rows: &Rows, book: &Book, today: &str) -> Vec<Json> {
+    let holdings = collection_holdings(rows);
+    let mut days = Vec::new();
+    let mut day = series_start(rows, book, today);
+    for _ in 0..=HISTORY_DAYS {
+        if day.as_str() > today {
+            break;
+        }
+        if let Some(entry) = day_segments_on(&holdings, book, &day) {
+            days.push(entry);
+        }
+        let next = add_utc_days(&day, 1);
+        if next.is_empty() || next.as_str() <= day.as_str() {
+            break;
+        }
+        day = next;
+    }
+    days
+}
+
+/// The day the answer reports prices as of: the last day of the series, or `today`
+/// when there is no series at all.
+pub fn last_day(days: &[Json], today: &str) -> String {
+    days.last()
+        .and_then(|day| day.get("date"))
+        .and_then(Json::as_str)
+        .unwrap_or(today)
+        .to_string()
+}
+
+fn iso_or_null(value: &str) -> Json {
+    value
+        .is_empty()
+        .then_some(Json::Null)
+        .unwrap_or(json!(value))
+}
+
+/// The `collections` array: what each list holds, each card with its price on
+/// `day`.
+pub fn collections_json(
+    collections: &[Collection],
+    rows: &Rows,
+    book: &Book,
+    day: &str,
+) -> Vec<Json> {
+    collections
+        .iter()
+        .zip(rows.iter())
+        .map(|(collection, (_, item_rows))| {
+            let items = collection
+                .items
+                .iter()
+                .zip(item_rows.iter())
+                .map(|(saved, row)| {
+                    saved.to_priced_json(last_sold_for(row, book, day).map(|point| point.pkn))
+                })
+                .collect::<Vec<_>>();
+            json!({
+                "id": collection.id,
+                "name": collection.name,
+                "createdAt": iso_or_null(&collection.created_at),
+                "updatedAt": iso_or_null(&collection.updated_at),
+                "items": items,
+            })
+        })
+        .collect()
+}
+
+/// The ordered list the client draws: one def per collection, in creation order,
+/// whether or not any day carries it.
+pub fn collection_defs(collections: &[Collection]) -> Vec<Json> {
+    collections
+        .iter()
+        .map(|collection| {
+            json!({
+                "key": collection.key(),
+                "group": GROUP,
+                "label": collection.name,
+            })
+        })
+        .collect()
+}
+
+/// What the client is held to, so its own form can bound the same numbers.
+pub fn limits() -> Json {
+    json!({
+        "collections": MAX_COLLECTIONS,
+        "items": MAX_ITEMS,
+        "quantity": MAX_QUANTITY,
+        "name": MAX_NAME_LEN,
+    })
+}
+
+/// The whole answer body, keys in the order the contract lists them. `day` is what
+/// each item's `pricePkn` is read as of — the last day of `days`.
+pub fn answer_body(
+    collections: &[Collection],
+    rows: &Rows,
+    book: &Book,
+    days: &[Json],
+    day: &str,
+    saved: Option<&str>,
+) -> Json {
+    let mut body = Map::new();
+    body.insert("priceBasis".into(), json!(PRICE_BASIS));
+    body.insert("limits".into(), limits());
+    if let Some(saved) = saved {
+        body.insert("saved".into(), json!(saved));
+    }
+    body.insert(
+        "collections".into(),
+        json!(collections_json(collections, rows, book, day)),
+    );
+    body.insert("segmentDefs".into(), json!(collection_defs(collections)));
+    body.insert("days".into(), json!(days));
+    Json::Object(body)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::portfolio_history::sold_price_book;
+    use crate::domain::portfolio_segments::{game_of, POKEMON, UNKNOWN_GAME};
+    use crate::firestore::FieldValue;
+
+    fn input(card: &str, quantity: i64) -> Json {
+        json!({ "cardId": card, "quantity": quantity })
+    }
+
+    fn item(card: &str) -> Item {
+        Item::from_input(&input(card, 1), 0).unwrap()
+    }
+
+    fn collection(id: &str, name: &str, created_at: &str, items: Vec<Item>) -> Collection {
+        Collection {
+            id: id.into(),
+            name: name.into(),
+            items,
+            created_at: created_at.into(),
+            updated_at: created_at.into(),
+        }
+    }
+
+    /// A sold row of one blueprint and facet, the shape `sold_price_book` reads.
+    fn sold_row(card: &str, blueprint: &str, graded: bool, day: &str, pkn: f64) -> Json {
+        json!({
+            "game": "pokemon",
+            "card_id": card,
+            "blueprint_id": blueprint,
+            "condition": "NM",
+            "language": "en",
+            "reverse": false,
+            "first_edition": false,
+            "graded": graded,
+            "observed_day": day,
+            "median_pkn": pkn,
+        })
+    }
+
+    fn book_of(sold: &[Json]) -> Book {
+        sold_price_book(sold)
+    }
+
+    /// A `Rows` whose Pokémon cards resolved to the blueprints given, so a test
+    /// writes exactly what the handler writes after its catalog reads.
+    fn resolved(collections: &[Collection], blueprints: &[(&str, &str)]) -> Rows {
+        let mut rows = Rows::new(collections);
+        for row in rows.rows_mut() {
+            let card = row
+                .get("card_id")
+                .and_then(Json::as_str)
+                .unwrap_or("")
+                .to_string();
+            if let Some((_, blueprint)) = blueprints.iter().find(|(id, _)| *id == card) {
+                set_blueprint(row, blueprint);
+            }
+        }
+        rows
+    }
+
+    fn document(uid: &str, name: &str, created: &str, items: Vec<Json>) -> Document {
+        let mut fields = Map::new();
+        fields.insert("uid".into(), json!({ "stringValue": uid }));
+        fields.insert("name".into(), json!({ "stringValue": name }));
+        fields.insert(
+            "createdAt".into(),
+            json!({ "stringValue": format!("{created}.000Z") }),
+        );
+        fields.insert(
+            "updatedAt".into(),
+            json!({ "stringValue": format!("{created}.000Z") }),
+        );
+        fields.insert("items".into(), json!({ "arrayValue": { "values": items } }));
+        Document {
+            name: format!("projects/p/databases/(default)/documents/{COLLECTION}/c{created}"),
+            create_time: None,
+            update_time: None,
+            fields: Some(fields),
+        }
+    }
+
+    fn stored_item(card: &str, quantity: i64) -> Json {
+        json!({
+            "mapValue": {
+                "fields": {
+                    "cardId": { "stringValue": card },
+                    "quantity": { "integerValue": quantity.to_string() },
+                    "condition": { "stringValue": "NM" },
+                    "language": { "stringValue": "EN" },
+                    "reverse": { "booleanValue": false },
+                    "firstEdition": { "booleanValue": false },
+                    "graded": { "booleanValue": false },
+                    "game": { "stringValue": "pokemon" },
+                    "name": { "stringValue": "  Charizard  " },
+                    "setName": { "stringValue": "Base Set" }
+                }
+            }
+        })
+    }
+
+    // -- the sanitiser ------------------------------------------------------
+
+    #[test]
+    fn names_are_cleaned_and_bounded() {
+        assert_eq!(
+            sanitize_name(Some(&json!("  Dawn   Runs  "))).unwrap(),
+            "Dawn Runs"
+        );
+        assert_eq!(
+            sanitize_name(Some(&json!("a\u{1}b\u{7f}c"))).unwrap(),
+            "abc"
+        );
+        assert_eq!(
+            sanitize_name(Some(&json!("Newline\nTitle"))).unwrap(),
+            "Newline Title"
+        );
+        assert_eq!(
+            sanitize_name(Some(&json!("x".repeat(MAX_NAME_LEN))))
+                .unwrap()
+                .chars()
+                .count(),
+            MAX_NAME_LEN
+        );
+        let too_long = sanitize_name(Some(&json!("x".repeat(MAX_NAME_LEN + 1)))).unwrap_err();
+        assert_eq!(too_long.code(), Some("collection_name_required"));
+        assert_eq!(too_long.status(), axum::http::StatusCode::BAD_REQUEST);
+        for missing in [
+            None,
+            Some(&json!("")),
+            Some(&json!("   ")),
+            Some(&json!("\n\t")),
+        ] {
+            assert_eq!(
+                sanitize_name(missing).unwrap_err().code(),
+                Some("collection_name_required")
+            );
+        }
+    }
+
+    #[test]
+    fn display_text_is_capped_never_refused() {
+        assert_eq!(
+            sanitize_display(Some(&json!("a".repeat(MAX_DISPLAY_LEN + 40))))
+                .chars()
+                .count(),
+            MAX_DISPLAY_LEN
+        );
+        assert_eq!(sanitize_display(Some(&json!("  Girafarig  "))), "Girafarig");
+        assert_eq!(sanitize_display(Some(&json!(12))), "12");
+        assert_eq!(sanitize_display(None), "");
+    }
+
+    #[test]
+    fn items_take_their_facet_defaults_and_ids() {
+        let saved = Item::from_input(&json!({ "cardId": "42" }), 0).unwrap();
+        assert_eq!(saved.card_id, "42");
+        assert_eq!(saved.condition, "NM");
+        assert_eq!(saved.language, "EN");
+        assert_eq!(saved.quantity, 1);
+        assert_eq!(saved.game, POKEMON);
+        assert!(!(saved.reverse || saved.first_edition || saved.graded));
+        assert_eq!(saved.name, "");
+
+        // A facet key read back is the same key, so a stored item prices as the fresh
+        // one did.
+        assert_eq!(saved.condition, condition_key(&saved.condition));
+        assert_eq!(saved.language, language_key(&saved.language));
+
+        // The price book is filed under `en`, so a list that names the language has to
+        // reach the same slice or every card of it comes back held and unpriced.
+        for named in ["English", "english", "EN", "en"] {
+            let item = Item::from_input(&json!({ "cardId": "42", "language": named }), 0).unwrap();
+            assert_eq!(item.language, "EN", "{named} is the English slice");
+        }
+        let japanese =
+            Item::from_input(&json!({ "cardId": "42", "language": "Japanese" }), 0).unwrap();
+        assert_eq!(japanese.language, "JP");
+
+        let explicit = Item::from_input(
+            &json!({
+                "cardId": 42,
+                "game": "One Piece",
+                "condition": "lightly played",
+                "language": "ja",
+                "reverse": true,
+                "firstEdition": true,
+                "graded": true,
+                "quantity": 3,
+                "name": " Luffy ",
+                "setName": "OP-01"
+            }),
+            0,
+        )
+        .unwrap();
+        assert_eq!(explicit.card_id, "42");
+        assert_eq!(explicit.game, "one_piece");
+        assert_eq!(explicit.condition, "SP");
+        assert_eq!(explicit.language, "JP");
+        assert!(explicit.reverse && explicit.first_edition && explicit.graded);
+        assert_eq!(explicit.quantity, 3);
+        assert_eq!(explicit.name, "Luffy");
+        assert_eq!(explicit.set_name, "OP-01");
+        assert!(
+            Item::from_input(
+                &json!({ "card_id": "7", "quantity": "5", "first_edition": true }),
+                0
+            )
+            .unwrap()
+            .first_edition
+        );
+    }
+
+    #[test]
+    fn a_game_is_the_tables_id_on_a_write_and_kept_verbatim_on_a_read() {
+        // Absent, empty and the Pokémon aliases are all Pokémon.
+        for game in [
+            None,
+            Some(&json!("")),
+            Some(&json!("   ")),
+            Some(&json!("pokemon")),
+            Some(&json!("Pokémon")),
+            Some(&json!("pkmn")),
+        ] {
+            assert_eq!(
+                Item::from_input(&json!({ "cardId": "42", "game": game }), 0)
+                    .unwrap()
+                    .game,
+                POKEMON,
+                "{game:?} is Pokémon"
+            );
+        }
+
+        // An alias of a listed game is the id its database is resolved for.
+        for (written, id) in [("One Piece", "one_piece"), ("ygo", "yugioh")] {
+            assert_eq!(
+                Item::from_input(&json!({ "cardId": "42", "game": written }), 0)
+                    .unwrap()
+                    .game,
+                id,
+                "{written} is {id}"
+            );
+        }
+
+        // A game the platform lists nowhere has no database to price from, so the
+        // write that would store it is refused by card and by facet.
+        for game in ["Not A Game", "keyforge"] {
+            let error = Item::from_input(&json!({ "cardId": "42", "game": game }), 1).unwrap_err();
+            assert_eq!(error.code(), Some("collection_item_invalid"), "{game}");
+            assert!(
+                error.message().contains("game") && error.message().contains("2"),
+                "the card and the facet are named: {}",
+                error.message()
+            );
+        }
+
+        // A stored card of such a game is kept, and its row is `unknown`: held and
+        // unpriced, never looked up in the Pokémon catalog by a card id that only
+        // looks alike.
+        let kept = Item::stored(&json!({ "cardId": "42", "game": "Not A Game" })).unwrap();
+        assert_eq!(kept.game, "Not A Game");
+        assert_eq!(game_of(&kept.row()), UNKNOWN_GAME);
+        let rows = Rows::new(&[collection("c1", "Vault", "2026-09-01T10:00:00", vec![kept])]);
+        let book = book_of(&[sold_row("42", "777", false, "2026-10-01", 50.0)]);
+        assert_eq!(
+            day_segments(&rows, &book, "2026-10-08"),
+            Some(json!({
+                "date": "2026-10-08",
+                "segments": { "collection:c1": [0, 0, 1] },
+            })),
+            "held at nothing, while a Pokémon card of the same id has sold"
+        );
+    }
+
+    /// One sold row of one blueprint, condition and day, as `sold_price_book` reads it.
+    fn sold_condition(condition: &str, day: &str, pkn: f64) -> Json {
+        json!({
+            "game": "pokemon",
+            "card_id": "42",
+            "blueprint_id": "777",
+            "condition": condition,
+            "language": "en",
+            "reverse": false,
+            "first_edition": false,
+            "graded": false,
+            "observed_day": day,
+            "median_pkn": pkn,
+        })
+    }
+
+    /// The same row of blueprint 777 filed under one language instead of the other
+    /// facet: what `cardtrader_sold_daily` holds for a print of that language.
+    fn sold_language(language: &str, day: &str, pkn: f64) -> Json {
+        json!({
+            "game": "pokemon",
+            "card_id": "42",
+            "blueprint_id": "777",
+            "condition": "NM",
+            "language": language,
+            "reverse": false,
+            "first_edition": false,
+            "graded": false,
+            "observed_day": day,
+            "median_pkn": pkn,
+        })
+    }
+
+    #[test]
+    fn the_five_conditions_are_the_scale_the_sold_book_is_filed_in() {
+        for (spelled, name) in [
+            ("NM", "NM"),
+            ("nm", "NM"),
+            ("mint", "NM"),
+            ("Near Mint", "NM"),
+            ("SP", "SP"),
+            ("excellent", "SP"),
+            ("lightly played", "SP"),
+            ("MP", "MP"),
+            ("good", "MP"),
+            ("moderately played", "MP"),
+            ("PL", "PL"),
+            ("played", "PL"),
+            ("heavily played", "PL"),
+            ("Poor", "Poor"),
+            ("poor", "Poor"),
+            ("PO", "Poor"),
+            ("damaged", "Poor"),
+        ] {
+            let saved =
+                Item::from_input(&json!({ "cardId": "42", "condition": spelled }), 0).unwrap();
+            assert_eq!(saved.condition, name, "{spelled} is the {name} step");
+            assert_eq!(
+                Item::from_input(&saved.to_json(), 0).unwrap(),
+                saved,
+                "what is answered is read back as itself"
+            );
+
+            // The slice key still goes through `condition_key`, so the sold row of
+            // that step is the one the card prices out of.
+            let rows = resolved(
+                &[collection(
+                    "c1",
+                    "Vault",
+                    "2026-09-01T10:00:00",
+                    vec![saved.clone()],
+                )],
+                &[("42", "777")],
+            );
+            let book = book_of(&[sold_condition(&condition_key(name), "2026-10-01", 50.0)]);
+            assert_eq!(
+                day_segments(&rows, &book, "2026-10-08"),
+                Some(json!({
+                    "date": "2026-10-08",
+                    "segments": { "collection:c1": [50, 1, 1] },
+                })),
+                "{spelled} prices under the {} slice",
+                condition_key(name)
+            );
+        }
+
+        // The three spellings of the last step are one slice, so they are one line.
+        let merged = sanitize_items(&[
+            json!({ "cardId": "7", "condition": "poor" }),
+            json!({ "cardId": "7", "condition": "PO" }),
+            json!({ "cardId": "7", "condition": "Poor", "quantity": 2 }),
+        ])
+        .unwrap();
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].condition, "Poor");
+        assert_eq!(merged[0].quantity, 4);
+    }
+
+    #[test]
+    fn a_facet_the_book_has_no_slice_for_is_refused_by_card() {
+        for condition in ["Like New", "Mint Condition", "As Shipped"] {
+            let error = Item::from_input(&json!({ "cardId": "42", "condition": condition }), 3)
+                .unwrap_err();
+            assert_eq!(error.code(), Some("collection_item_invalid"), "{condition}");
+            assert!(
+                error.message().contains("condition") && error.message().contains("4"),
+                "the card and the facet are named: {}",
+                error.message()
+            );
+        }
+        for language in ["Finnish", "中文", "english english english english"] {
+            let error =
+                Item::from_input(&json!({ "cardId": "42", "language": language }), 0).unwrap_err();
+            assert_eq!(error.code(), Some("collection_item_invalid"), "{language}");
+            assert!(error.message().contains("language"), "{}", error.message());
+        }
+
+        // Past the bound, refused before anything is normalised: `Near Mint` padded to
+        // 25 characters is not the NM slice, it is a field that got the wrong text.
+        let padded = format!("{}{}", "Near Mint", " ".repeat(16));
+        assert_eq!(padded.chars().count(), MAX_FACET_LEN + 1);
+        let condition =
+            Item::from_input(&json!({ "cardId": "42", "condition": &padded }), 0).unwrap_err();
+        assert!(
+            condition.message().contains("condition"),
+            "{}",
+            condition.message()
+        );
+        let language =
+            Item::from_input(&json!({ "cardId": "42", "language": &padded }), 0).unwrap_err();
+        assert!(
+            language.message().contains("language"),
+            "{}",
+            language.message()
+        );
+
+        // A stored document keeps what it holds: the line stays, at nothing, rather
+        // than vanishing from a list written before these rules existed.
+        let kept = Item::stored(&json!({
+            "cardId": "42",
+            "condition": "Like New",
+            "language": "Finnish",
+        }))
+        .unwrap();
+        assert_eq!(kept.condition, "Like New");
+        assert_eq!(kept.language, "Finnish");
+        let rows = resolved(
+            &[collection("c1", "Vault", "2026-09-01T10:00:00", vec![kept])],
+            &[("42", "777")],
+        );
+        let book = book_of(&[sold_condition("NM", "2026-10-01", 50.0)]);
+        assert_eq!(
+            day_segments(&rows, &book, "2026-10-08"),
+            Some(json!({
+                "date": "2026-10-08",
+                "segments": { "collection:c1": [0, 0, 1] },
+            })),
+            "held at nothing rather than priced off the NM sales"
+        );
+    }
+
+    #[test]
+    fn a_language_is_kept_as_the_code_the_sold_book_is_filed_under() {
+        // The accept rule is the shape of the code, so every spelling that reaches one
+        // lands on the key its sales are filed under — and the two codes the seller's
+        // picker offers that the normalizer's own list does not name (`TH`, `VI`) are
+        // kept like the rest, because their sales really are filed under them.
+        for (named, code) in [
+            ("en", "EN"),
+            ("English", "EN"),
+            ("it", "IT"),
+            ("fr", "FR"),
+            ("de", "DE"),
+            ("es", "ES"),
+            ("Spanish", "ES"),
+            ("ja", "JP"),
+            ("Japanese", "JP"),
+            ("pt", "PT"),
+            ("nl", "NL"),
+            ("pl", "PL"),
+            ("ru", "RU"),
+            ("ko", "KO"),
+            ("Korean", "KO"),
+            ("kr", "KO"),
+            ("zh", "ZH"),
+            ("zh-cn", "ZH"),
+            ("zh-tw", "ZHT"),
+            ("traditional chinese", "ZHT"),
+            ("id", "ID"),
+            ("Indonesian", "ID"),
+            ("th", "TH"),
+            ("TH", "TH"),
+            ("vi", "VI"),
+            ("VI", "VI"),
+        ] {
+            let item = Item::from_input(&json!({ "cardId": "42", "language": named }), 0).unwrap();
+            assert_eq!(item.language, code, "{named} is the {code} slice");
+            assert_eq!(
+                language_key(&item.language),
+                item.language,
+                "the stored code is its own slice key, so the book is read at it"
+            );
+        }
+    }
+
+    #[test]
+    fn a_thai_and_a_vietnamese_card_are_stored_and_answered_as_themselves() {
+        let items = [
+            Item::from_input(&json!({ "cardId": "42", "language": "th" }), 0).unwrap(),
+            Item::from_input(&json!({ "cardId": "42", "language": "VI" }), 0).unwrap(),
+        ];
+        for item in items {
+            // What the route wrote is what the store hands back and what a save may
+            // send again: a list that stored a Thai card once refusing to be saved a
+            // second time would trap the seller in their own collection.
+            let round = Item::stored(&item.to_json()).unwrap();
+            assert_eq!(round, item, "{item:?}");
+        }
+
+        let collections = vec![collection(
+            "c1",
+            "Vault",
+            "2026-09-01T10:00:00",
+            [
+                Item::from_input(&json!({ "cardId": "42", "language": "th" }), 0).unwrap(),
+                Item::from_input(&json!({ "cardId": "43", "language": "vi" }), 0).unwrap(),
+            ]
+            .to_vec(),
+        )];
+        let rows = Rows::new(&collections);
+        let answered = collections_json(&collections, &rows, &Book::new(), "2026-10-08");
+        let languages: Vec<String> = answered[0]["items"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|item| item["language"].as_str().map(str::to_string))
+            .collect();
+        assert_eq!(languages, ["TH", "VI"], "{answered:?}");
+    }
+
+    #[test]
+    fn a_thai_card_prices_from_the_sales_filed_under_thai() {
+        let thai = Item::from_input(&json!({ "cardId": "42", "language": "th" }), 0).unwrap();
+        let collections = vec![collection("c1", "Vault", "2026-09-01T10:00:00", vec![thai])];
+        let rows = resolved(&collections, &[("42", "777")]);
+
+        // The English slice of the very same blueprint does not price it: the code is
+        // the slice, and a Thai print is not an English sale.
+        let english = book_of(&[sold_language("EN", "2026-10-01", 50.0)]);
+        assert_eq!(
+            day_segments(&rows, &english, "2026-10-08").unwrap()["segments"]["collection:c1"],
+            json!([0, 0, 1]),
+            "held and unpriced beside an English book, not priced off it"
+        );
+
+        // And the row the sold writer files a Thai listing as (`listing.rs`,
+        // `default_language_for_nationality("thai")`) is the row that prices it — the
+        // reason the picker's `TH` was never a code to refuse.
+        let book = book_of(&[sold_language("TH", "2026-10-01", 50.0)]);
+        assert_eq!(
+            day_segments(&rows, &book, "2026-10-08").unwrap()["segments"]["collection:c1"],
+            json!([50, 1, 1]),
+            "a TH slice the marketplace files sales under priced at nothing"
+        );
+    }
+
+    #[test]
+    fn bad_items_are_refused_by_position() {
+        let cases = vec![
+            json!({}),
+            json!({ "cardId": "" }),
+            json!({ "cardId": "0" }),
+            json!({ "cardId": "00" }),
+            json!({ "cardId": "4a" }),
+            json!({ "cardId": "-7" }),
+            json!({ "cardId": "1.5" }),
+            json!({ "cardId": "1234567890123" }),
+            json!({ "cardId": "42", "quantity": 0 }),
+            json!({ "cardId": "42", "quantity": -3 }),
+            json!({ "cardId": "42", "quantity": MAX_QUANTITY + 1 }),
+            json!({ "cardId": "42", "quantity": 1.5 }),
+            json!({ "cardId": "42", "quantity": "many" }),
+            json!({ "cardId": "42", "quantity": true }),
+            json!("42"),
+            Json::Null,
+        ];
+        for case in cases {
+            let error = Item::from_input(&case, 2).unwrap_err();
+            assert_eq!(error.code(), Some("collection_item_invalid"), "{case}");
+            assert!(
+                error.message().contains("3"),
+                "the position must be named: {}",
+                error.message()
+            );
+        }
+        assert_eq!(
+            sanitize_items(&[input("1", 1), json!({ "condition": "NM" })])
+                .unwrap_err()
+                .message(),
+            item_error(1).message()
+        );
+    }
+
+    #[test]
+    fn a_twelve_digit_id_and_a_quantity_at_the_cap_are_kept() {
+        let saved = Item::from_input(
+            &json!({ "cardId": "123456789012", "quantity": MAX_QUANTITY }),
+            0,
+        )
+        .unwrap();
+        assert_eq!(saved.card_id, "123456789012");
+        assert_eq!(saved.quantity, MAX_QUANTITY);
+    }
+
+    #[test]
+    fn a_padded_card_id_is_the_plain_one_everywhere() {
+        let padded = Item::from_input(&json!({ "cardId": "0012", "quantity": 3 }), 0).unwrap();
+        assert_eq!(
+            padded.card_id, "12",
+            "the catalog carries digits, not padding"
+        );
+        assert_eq!(padded.to_json()["cardId"], json!("12"), "the answer");
+        assert_eq!(
+            padded.row()["card_id"],
+            json!("12"),
+            "and the row the blueprint lookup is asked by"
+        );
+
+        let merged = sanitize_items(&[
+            json!({ "cardId": "0012", "quantity": 3 }),
+            input("12", 4),
+            json!({ "cardId": "0000000000012", "quantity": 1 }),
+        ])
+        .unwrap();
+        assert_eq!(
+            merged.len(),
+            1,
+            "three spellings of one card are one line, not three that each price"
+        );
+        assert_eq!(merged[0].card_id, "12");
+        assert_eq!(merged[0].quantity, 8);
+
+        // The 12-digit bound is on the id, not on how it is spelled: padding never
+        // grows an id past it, and a real 13-digit value stays not a card id.
+        assert_eq!(
+            Item::from_input(&json!({ "cardId": "000000000000123456789012" }), 0)
+                .unwrap()
+                .card_id,
+            "123456789012"
+        );
+        assert!(Item::from_input(&json!({ "cardId": "01234567890123" }), 0).is_err());
+        // Zero has no canonical form, however many zeros spell it.
+        for zero in ["0", "00", "000000000000"] {
+            assert!(
+                Item::from_input(&json!({ "cardId": zero }), 0).is_err(),
+                "{zero} is not a card"
+            );
+        }
+    }
+
+    #[test]
+    fn items_of_one_slice_merge_into_the_first() {
+        let merged = sanitize_items(&[
+            input("7", 2),
+            input("9", 1),
+            json!({ "cardId": "7", "graded": true, "quantity": 4 }),
+            input("7", 5),
+            json!({ "cardId": "7", "language": "ja", "quantity": 1 }),
+        ])
+        .unwrap();
+        assert_eq!(merged.len(), 4);
+        assert_eq!(merged[0].card_id, "7");
+        assert_eq!(merged[0].quantity, 7, "the two loose copies are one line");
+        assert_eq!(merged[1].card_id, "9");
+        assert!(merged[2].graded, "a graded copy is another slice");
+        assert_eq!(merged[2].quantity, 4);
+        assert_eq!(merged[3].language, "JP");
+        assert_eq!(merge_items(Vec::new()), Vec::new());
+
+        let capped = sanitize_items(&[input("7", 600), input("7", 600)]).unwrap();
+        assert_eq!(capped.len(), 1);
+        assert_eq!(capped[0].quantity, MAX_QUANTITY);
+    }
+
+    #[test]
+    fn a_list_is_bounded_by_its_own_count() {
+        assert_eq!(
+            sanitize_items(&vec![input("1", 1); MAX_ITEMS + 1])
+                .unwrap_err()
+                .code(),
+            Some("collection_items_limit")
+        );
+        assert_eq!(
+            sanitize_items(&vec![input("2", 1); MAX_ITEMS])
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(sanitize_items(&[]).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn ids_are_firestore_ids() {
+        assert!(is_collection_id("Ab3dEfGhIjKlMnOpQrSt"));
+        assert!(is_collection_id("my-collection_1"));
+        assert!(!is_collection_id(""));
+        assert!(!is_collection_id("has space"));
+        assert!(!is_collection_id("a/b"));
+        assert!(!is_collection_id(&"x".repeat(33)));
+    }
+
+    #[test]
+    fn a_name_the_store_reserves_is_never_a_list_id() {
+        // Firestore keeps `__…__` for its own marker ids, so such a name addresses no
+        // list — and because the shape check runs before any document read or write,
+        // the store is never asked about it.
+        for reserved in ["__namespace__", "__kind__", "____", "__"] {
+            assert!(!is_collection_id(reserved), "{reserved} is the store's");
+            let error = Save::from_body(&json!({ "id": reserved, "name": "Vault" })).unwrap_err();
+            assert_eq!(
+                error.status(),
+                axum::http::StatusCode::NOT_FOUND,
+                "{reserved}"
+            );
+            assert_eq!(error.code(), Some("collection_not_found"), "{reserved}");
+            assert_eq!(
+                error.body(),
+                missing_error().body(),
+                "a reserved name answers exactly like an absent one"
+            );
+        }
+        // Underscores that do not close the marker are ordinary id characters.
+        assert!(is_collection_id("_id_"));
+        assert!(is_collection_id("__leading"));
+        assert!(is_collection_id("trailing__"));
+    }
+
+    #[test]
+    fn a_name_is_taken_whatever_its_case() {
+        assert!(names_collide("Vault", "vault"));
+        assert!(names_collide("Dawn Runs", "dawn runs"));
+        assert!(!names_collide("Vault", "Vaults"));
+        assert!(
+            !names_collide("Vault", "Vault "),
+            "a stored name is already trimmed"
+        );
+    }
+
+    #[test]
+    fn a_save_body_names_its_list_and_its_cards() {
+        let save = Save::from_body(&json!({
+            "id": " Ab3_ ",
+            "name": "  Vault \u{1} ",
+            "items": [input("11", 1), input("11", 2)],
+        }))
+        .unwrap();
+        assert_eq!(save.id.as_deref(), Some("Ab3_"));
+        assert_eq!(save.name, "Vault");
+        assert_eq!(save.items.len(), 1, "the save merges as the list does");
+        assert_eq!(save.items[0].quantity, 3);
+
+        // A write of a list nobody can have created reads as "not yours".
+        for id in [json!("has space"), json!("a/b"), json!("x".repeat(33))] {
+            let error = Save::from_body(&json!({ "name": "A", "id": id })).unwrap_err();
+            assert_eq!(error.code(), Some("collection_not_found"), "{id}");
+            assert_eq!(error.status(), axum::http::StatusCode::NOT_FOUND);
+        }
+
+        // An absent id, name or list is still a save: a new empty list.
+        let bare = Save::from_body(&json!({ "name": "Wishlist" })).unwrap();
+        assert_eq!(bare.id, None);
+        assert!(bare.items.is_empty());
+        for body in [
+            json!({ "name": "A", "id": Json::Null }),
+            json!({ "name": "A", "items": Json::Null }),
+        ] {
+            assert_eq!(Save::from_body(&body).unwrap().items.len(), 0);
+        }
+
+        assert_eq!(
+            Save::from_body(&json!({ "items": [] })).unwrap_err().code(),
+            Some("collection_name_required")
+        );
+        assert_eq!(
+            Save::from_body(&json!({ "name": "A", "items": json!("11") }))
+                .unwrap_err()
+                .code(),
+            Some("collection_item_invalid")
+        );
+        assert_eq!(
+            Save::from_body(&json!({ "name": "A", "items": { "cardId": "11" } }))
+                .unwrap_err()
+                .code(),
+            Some("collection_item_invalid")
+        );
+    }
+
+    // -- documents and ownership -------------------------------------------
+
+    #[test]
+    fn a_stored_document_round_trips_and_skips_broken_cards() {
+        let source = document(
+            "seller-1",
+            "  Vault \u{0}  ",
+            "2026-09-01T10:00:00",
+            vec![
+                stored_item("11", 2),
+                json!({ "mapValue": { "fields": { "condition": { "stringValue": "NM" } } } }),
+                stored_item("12", 1),
+            ],
+        );
+        let collection = collection_from_document(&source);
+        assert_eq!(collection.id, "c2026-09-01T10:00:00");
+        assert_eq!(collection.name, "Vault");
+        assert_eq!(collection.created_at, "2026-09-01T10:00:00.000Z");
+        assert_eq!(collection.items.len(), 2, "the card with no id is skipped");
+        assert_eq!(collection.items[0].quantity, 2);
+        assert_eq!(collection.items[0].name, "Charizard");
+        assert_eq!(collection.items[1].card_id, "12");
+        assert_eq!(collection.key(), format!("collection:{}", collection.id));
+
+        // What is written is what reads back as the same list.
+        let data = doc_data("seller-1", "Vault", &collection.items, 1, 2);
+        let keys: Vec<&String> = data.fields.keys().collect();
+        assert_eq!(keys, ["uid", "name", "items", "createdAt", "updatedAt"]);
+        let mut written_fields = Map::new();
+        for (key, value) in &data.fields {
+            if let FieldValue::Value(value) = value {
+                written_fields.insert(key.clone(), value.to_json());
+            }
+        }
+        let written = collection_from_document(&Document {
+            name: source.name.clone(),
+            create_time: None,
+            update_time: None,
+            fields: Some(written_fields),
+        });
+        assert_eq!(written.items, collection.items);
+        assert_eq!(written.name, "Vault");
+        assert!(
+            !written.created_at.is_empty(),
+            "the timestamps written by [`doc_data`] read back as timestamps"
+        );
+    }
+
+    #[test]
+    fn a_stored_list_merges_the_rows_that_are_one_slice() {
+        // What a document written before today's rules can hold: one card spelled two
+        // ways, a copy whose condition is the scale's own long name, and a card of
+        // another game that only looks alike by its public id.
+        let long_condition = {
+            let mut row = stored_item("12", 1);
+            row["mapValue"]["fields"]["condition"] = json!({ "stringValue": "Near Mint" });
+            row
+        };
+        let other_game = {
+            let mut row = stored_item("12", 5);
+            row["mapValue"]["fields"]["game"] = json!({ "stringValue": "keyforge" });
+            row
+        };
+        let collection = collection_from_document(&document(
+            "seller-1",
+            "Vault",
+            "2026-09-01T10:00:00",
+            vec![
+                stored_item("0012", 3),
+                stored_item("12", 4),
+                long_condition,
+                other_game,
+            ],
+        ));
+        assert_eq!(
+            collection.items.len(),
+            2,
+            "three spellings of one Pokémon slice, then the card of another game"
+        );
+        assert_eq!(collection.items[0].card_id, "12");
+        assert_eq!(collection.items[0].quantity, 8, "the copies add up");
+        assert_eq!(
+            collection.items[1].game, "keyforge",
+            "a game the table does not list keeps its own line, apart"
+        );
+        assert_eq!(collection.items[1].quantity, 5);
+    }
+
+    #[test]
+    fn only_the_owner_reads_a_document() {
+        let source = document("seller-1", "Vault", "2026-09-01T10:00:00", vec![]);
+        assert!(owned_document(Some(&source), "seller-1").is_some());
+        // Another seller's id and a deleted id are the same answer: no document.
+        assert!(owned_document(Some(&source), "seller-2").is_none());
+        assert!(owned_document(None, "seller-1").is_none());
+        let missing = missing_error();
+        assert_eq!(missing.status(), axum::http::StatusCode::NOT_FOUND);
+        assert_eq!(missing.code(), Some("collection_not_found"));
+        assert_eq!(
+            missing.body(),
+            json!({ "error": "Collection not found.", "code": "collection_not_found" })
+        );
+    }
+
+    #[test]
+    fn a_delete_body_names_its_list() {
+        assert_eq!(
+            delete_body_id(&json!({ "id": " Ab3_ " })).unwrap(),
+            "Ab3_",
+            "the id is cleaned the way every other text field is"
+        );
+        for body in [
+            json!({}),
+            json!({ "id": Json::Null }),
+            json!({ "id": "   " }),
+            json!({ "id": 42 }),
+            json!({ "id": { "v": 1 } }),
+        ] {
+            let error = delete_body_id(&body).unwrap_err();
+            assert_eq!(error.code(), Some("collection_not_found"), "{body}");
+            assert_eq!(error.status(), axum::http::StatusCode::NOT_FOUND);
+        }
+    }
+
+    #[test]
+    fn limit_and_conflict_errors_carry_their_codes() {
+        assert_eq!(limit_error().code(), Some("collection_limit"));
+        assert_eq!(limit_error().status(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(
+            name_taken_error().status(),
+            axum::http::StatusCode::CONFLICT
+        );
+        assert_eq!(name_taken_error().code(), Some("collection_name_taken"));
+        assert_eq!(items_shape_error().code(), Some("collection_item_invalid"));
+        assert_eq!(items_limit_error().code(), Some("collection_items_limit"));
+        assert_eq!(
+            limits(),
+            json!({ "collections": 20, "items": 300, "quantity": 999, "name": 40 })
+        );
+    }
+
+    // -- the series ---------------------------------------------------------
+
+    #[test]
+    fn rows_keep_every_collection_in_its_own_range() {
+        let collections = vec![
+            collection("a", "First", "", vec![item("11"), item("12")]),
+            collection("b", "Second", "", Vec::new()),
+            collection(
+                "c",
+                "Third",
+                "",
+                vec![Item::from_input(&input("11", 3), 0).unwrap()],
+            ),
+        ];
+        let rows = Rows::new(&collections);
+        assert_eq!(rows.rows().len(), 3);
+        assert_eq!(
+            rows.keys(),
+            vec!["collection:a", "collection:b", "collection:c"]
+        );
+        let sizes: Vec<usize> = rows.iter().map(|(_, item_rows)| item_rows.len()).collect();
+        assert_eq!(sizes, vec![2, 0, 1]);
+        assert_eq!(
+            rows.iter().next().unwrap().1[0]
+                .get("blueprint_id")
+                .and_then(Json::as_str),
+            Some(""),
+            "an item starts unpriced"
+        );
+        assert_eq!(
+            holding_slices(rows.iter().nth(2).unwrap().1)[0].qty,
+            3,
+            "the same card in two collections is two holdings"
+        );
+    }
+
+    #[test]
+    fn holdings_ignore_when_a_card_was_acquired() {
+        // No `since` on a collection row, so the holding counts on the first day
+        // of the series: that is the backtest.
+        let collections = vec![collection(
+            "a",
+            "A",
+            "",
+            vec![Item::from_input(&input("11", 2), 0).unwrap()],
+        )];
+        let rows = resolved(&collections, &[("11", "500")]);
+        let book = book_of(&[sold_row("11", "500", false, "2026-01-05", 10.0)]);
+        let days = collection_days(&rows, &book, "2026-02-01");
+        assert_eq!(days.len(), 28, "one entry per day of the sale history");
+        assert_eq!(days[0]["date"], json!("2026-01-05"));
+        assert_eq!(days[0]["segments"]["collection:a"], json!([20, 2, 2]));
+        assert_eq!(days[27]["segments"]["collection:a"], json!([20, 2, 2]));
+        assert_eq!(
+            holding_slices(rows.iter().next().unwrap().1)[0].since,
+            "",
+            "nothing carries a start date"
+        );
+    }
+
+    #[test]
+    fn the_series_starts_at_the_earliest_sale_and_no_older() {
+        let collections = vec![collection("a", "A", "", vec![item("11"), item("12")])];
+        let rows = resolved(&collections, &[("11", "500"), ("12", "600")]);
+        let today = "2026-10-08";
+        let floor = add_utc_days(today, -(HISTORY_DAYS - 1));
+        // 11 sold years ago, 12 recently: the graph spans the whole window.
+        let book = book_of(&[
+            sold_row("11", "500", false, "2020-01-01", 10.0),
+            sold_row("12", "600", false, "2026-10-01", 5.0),
+        ]);
+        assert_eq!(series_start(&rows, &book, today), floor);
+        let days = collection_days(&rows, &book, today);
+        assert_eq!(days.len(), HISTORY_DAYS as usize);
+        assert_eq!(days[0]["date"], json!(floor));
+        assert_eq!(days.last().unwrap()["date"], json!(today));
+        assert_eq!(
+            days[0]["segments"]["collection:a"],
+            json!([10, 1, 2]),
+            "the window opens held and half-priced: the 2020 sale carries across \
+             the whole window, the 2026-10-01 one has not happened yet"
+        );
+        assert_eq!(
+            days.last().unwrap()["segments"]["collection:a"],
+            json!([15, 2, 2])
+        );
+
+        // Nothing has ever sold: today alone, held and unpriced.
+        let empty: Book = HashMap::new();
+        assert_eq!(series_start(&rows, &empty, today), today);
+        let days = collection_days(&rows, &empty, today);
+        assert_eq!(
+            days,
+            vec![json!({ "date": today, "segments": { "collection:a": [0, 0, 2] } })]
+        );
+    }
+
+    #[test]
+    fn price_carries_forward_between_sales() {
+        let collections = vec![collection("a", "A", "", vec![item("11")])];
+        let rows = resolved(&collections, &[("11", "500")]);
+        let book = book_of(&[
+            sold_row("11", "500", false, "2026-10-01", 100.0),
+            sold_row("11", "500", false, "2026-10-05", 140.0),
+        ]);
+        let days = collection_days(&rows, &book, "2026-10-07");
+        let value_of = |date: &str| {
+            days.iter()
+                .find(|day| day["date"] == json!(date))
+                .map(|day| day["segments"]["collection:a"].clone())
+        };
+        assert_eq!(days.first().unwrap()["date"], json!("2026-10-01"));
+        assert_eq!(days.len(), 7);
+        assert_eq!(value_of("2026-10-02"), Some(json!([100, 1, 1])));
+        assert_eq!(
+            value_of("2026-10-04"),
+            Some(json!([100, 1, 1])),
+            "carried forward"
+        );
+        assert_eq!(value_of("2026-10-05"), Some(json!([140, 1, 1])));
+        assert_eq!(value_of("2026-10-07"), Some(json!([140, 1, 1])));
+        assert_eq!(last_day(&days, "2026-10-09"), "2026-10-07");
+        assert_eq!(last_day(&[], "2026-10-09"), "2026-10-09");
+    }
+
+    #[test]
+    fn a_day_is_drawn_from_keyed_holdings_and_never_from_a_row() {
+        // The claim is that a day is read off keys built once per collection, so the
+        // test has to be able to tell that from a series that walks the rows again
+        // every day: the rows move *after* the keys were built, and what the keys say
+        // does not follow them. `day_segments_on` takes no rows at all, which is how
+        // the hoisted path keeps being blind to the change.
+        let collections = vec![
+            collection("a", "A", "", vec![item("11")]),
+            collection("b", "B", "", vec![item("11"), item("12")]),
+        ];
+        let mut rows = resolved(&collections, &[("11", "500"), ("12", "600")]);
+        let book = book_of(&[
+            sold_row("11", "500", false, "2026-10-01", 100.0),
+            sold_row("12", "600", false, "2026-10-02", 60.0),
+        ]);
+        let holdings = collection_holdings(&rows);
+        assert_eq!(
+            holdings.len(),
+            2,
+            "one keyed group per collection, not one per day of the series"
+        );
+        assert_eq!(
+            holdings
+                .iter()
+                .map(|(id, held)| (id.as_str(), held.len()))
+                .collect::<Vec<_>>(),
+            vec![("a", 1), ("b", 2)],
+            "each group is that collection's own slices"
+        );
+
+        let whole = collection_days(&rows, &book, "2026-10-03");
+        let draw = || -> Vec<Json> {
+            (1..=3)
+                .map(|day| format!("2026-10-0{day}"))
+                .filter_map(|each| day_segments_on(&holdings, &book, &each))
+                .collect()
+        };
+        assert_eq!(
+            draw(),
+            whole,
+            "the days drawn from keyed holdings, with no row left in hand, are the series"
+        );
+
+        // Move list `a`'s card to the other blueprint. A series drawn from the rows
+        // follows it — that is the second assertion, and it is what makes the first
+        // one mean something rather than being two ways of computing the same thing.
+        set_blueprint(&mut rows.rows_mut()[0], "600");
+        assert_eq!(
+            draw(),
+            whole,
+            "the keyed holdings were built with the rows and keep their answer"
+        );
+        assert_ne!(
+            collection_days(&rows, &book, "2026-10-03"),
+            whole,
+            "a day rebuilt from the rows would have moved: the two paths are not the same"
+        );
+    }
+
+    #[test]
+    fn facets_price_apart_and_an_empty_list_keeps_its_def() {
+        let collections = vec![
+            collection(
+                "raw",
+                "Raw",
+                "",
+                vec![Item::from_input(&input("11", 2), 0).unwrap()],
+            ),
+            collection(
+                "slab",
+                "Slabs",
+                "",
+                vec![Item::from_input(
+                    &json!({ "cardId": "11", "graded": true, "quantity": 1 }),
+                    0,
+                )
+                .unwrap()],
+            ),
+            collection("wish", "Wishlist", "", Vec::new()),
+        ];
+        let rows = resolved(&collections, &[("11", "500")]);
+        let book = book_of(&[sold_row("11", "500", false, "2026-10-02", 50.0)]);
+        let days = collection_days(&rows, &book, "2026-10-03");
+        assert_eq!(days[0]["segments"]["collection:raw"], json!([100, 2, 2]));
+        assert_eq!(
+            days[0]["segments"]["collection:slab"],
+            json!([0, 0, 1]),
+            "the graded slice is held and unpriced beside the raw one"
+        );
+        assert_eq!(
+            days[0]["segments"].get("collection:wish"),
+            None,
+            "an empty collection holds nothing"
+        );
+        assert_eq!(
+            collection_defs(&collections),
+            vec![
+                json!({ "key": "collection:raw", "group": "collection", "label": "Raw" }),
+                json!({ "key": "collection:slab", "group": "collection", "label": "Slabs" }),
+                json!({ "key": "collection:wish", "group": "collection", "label": "Wishlist" }),
+            ],
+            "a def for every collection, in creation order"
+        );
+        assert_eq!(iso_or_null(""), Json::Null);
+    }
+
+    #[test]
+    fn a_never_sold_card_is_held_and_not_priced() {
+        let collections = vec![collection("a", "A", "", vec![item("11"), item("13")])];
+        let rows = resolved(&collections, &[("11", "500")]);
+        // 13 has a blueprint but no sale of its own; both are held.
+        let book = book_of(&[sold_row("11", "500", false, "2026-10-04", 30.0)]);
+        let days = collection_days(&rows, &book, "2026-10-06");
+        assert_eq!(days[0]["segments"]["collection:a"], json!([30, 1, 2]));
+        let answered = collections_json(&collections, &rows, &book, "2026-10-06");
+        assert_eq!(answered[0]["items"][0]["pricePkn"], json!(30));
+        assert_eq!(
+            answered[0]["items"][1]["pricePkn"],
+            json!(null),
+            "a card that never sold answers unpriced, not zero"
+        );
+    }
+
+    #[test]
+    fn the_answer_body_keeps_the_contract_key_order() {
+        let collections = vec![collection(
+            "a",
+            "A",
+            "2026-09-01T00:00:00.000Z",
+            vec![item("11")],
+        )];
+        let rows = resolved(&collections, &[("11", "500")]);
+        let book = book_of(&[sold_row("11", "500", false, "2026-10-02", 61.5)]);
+        let days = collection_days(&rows, &book, "2026-10-03");
+        let body = answer_body(
+            &collections,
+            &rows,
+            &book,
+            &days,
+            &last_day(&days, "2026-10-03"),
+            Some("a"),
+        );
+        let keys: Vec<&String> = body.as_object().unwrap().keys().collect();
+        assert_eq!(
+            keys,
+            [
+                "priceBasis",
+                "limits",
+                "saved",
+                "collections",
+                "segmentDefs",
+                "days"
+            ]
+        );
+        assert_eq!(body["priceBasis"], json!("ct-last-sold"));
+        assert_eq!(body["saved"], json!("a"));
+        assert_eq!(body["days"], json!(days));
+        assert_eq!(body["collections"][0]["items"][0]["pricePkn"], json!(61.5));
+        assert_eq!(
+            body["collections"][0]["createdAt"],
+            json!("2026-09-01T00:00:00.000Z")
+        );
+        assert_eq!(body["segmentDefs"][0]["key"], json!("collection:a"));
+
+        // A document written without a timestamp answers null, not "".
+        let undated = vec![collection("a", "A", "", vec![item("11")])];
+        let undated_rows = Rows::new(&undated);
+        let body = answer_body(
+            &undated,
+            &undated_rows,
+            &HashMap::new(),
+            &[],
+            "2026-10-03",
+            None,
+        );
+        assert_eq!(body["collections"][0]["createdAt"], Json::Null);
+        assert_eq!(body["collections"][0]["updatedAt"], Json::Null);
+        assert_eq!(body["collections"][0]["items"][0]["pricePkn"], Json::Null);
+
+        // A read has no `saved`.
+        let read = answer_body(&collections, &rows, &book, &days, "2026-10-03", None);
+        let keys: Vec<&String> = read.as_object().unwrap().keys().collect();
+        assert_eq!(
+            keys,
+            ["priceBasis", "limits", "collections", "segmentDefs", "days"]
+        );
+    }
+
+    #[test]
+    fn no_collection_answers_an_empty_graph() {
+        let rows = Rows::new(&[]);
+        let book: Book = HashMap::new();
+        assert_eq!(
+            collection_days(&rows, &book, "2026-10-08"),
+            Vec::<Json>::new()
+        );
+        assert_eq!(rows.keys(), Vec::<String>::new());
+        assert_eq!(
+            collections_json(&[], &rows, &book, "2026-10-08"),
+            Vec::<Json>::new(),
+            "a read of no collections answers no lists"
+        );
+        assert_eq!(collection_defs(&[]), Vec::<Json>::new());
+        let body = answer_body(&[], &rows, &book, &[], "2026-10-08", None);
+        assert_eq!(body["days"], json!([]));
+        assert_eq!(body["collections"], json!([]));
+    }
+}

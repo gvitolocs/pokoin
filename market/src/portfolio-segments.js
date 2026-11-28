@@ -14,7 +14,14 @@ import { GAMES } from './game.js';
 
 export const ALL_LEVEL = 'all';
 
-const GROUPS = new Set(['game', 'type', 'era', 'set']);
+/**
+ * The level of the seller's own named lists. It is not a split of the
+ * collection but a view beside it, so it never appears as a `group` in the
+ * history answer — only in the collections answer nested on the model.
+ */
+export const COLLECTIONS_LEVEL = 'collections';
+
+const GROUPS = new Set(['game', 'type', 'era', 'set', 'collection']);
 /** Only these groups make a level of their own beside `all`. */
 const LEVEL_GROUPS = new Set(['era', 'set', 'type']);
 
@@ -99,19 +106,27 @@ function normalizeSegmentDay(row) {
 }
 
 /**
- * The raw answer as one model, or null when there is nothing to table:
- * a server without `segments`, one without `segmentDefs`, junk.
+ * The answer's `segmentDefs` as defs: junk and repeats dropped, first wins.
+ * Shared with the collections module, which turns saved lists into defs.
  */
-export function normalizeSegments(data) {
-  const rawDefs = Array.isArray(data?.segmentDefs) ? data.segmentDefs : [];
+export function normalizeSegmentDefs(rows) {
   const seen = new Set();
   const defs = [];
-  for (const row of rawDefs) {
+  for (const row of Array.isArray(rows) ? rows : []) {
     const def = normalizeSegmentDef(row);
     if (!def || seen.has(def.key)) continue;
     seen.add(def.key);
     defs.push(def);
   }
+  return defs;
+}
+
+/**
+ * The raw answer as one model, or null when there is nothing to table:
+ * a server without `segments`, one without `segmentDefs`, junk.
+ */
+export function normalizeSegments(data) {
+  const defs = normalizeSegmentDefs(data?.segmentDefs);
   const rows = Array.isArray(data) ? data : (Array.isArray(data?.days) ? data.days : []);
   const byDate = new Map();
   for (const row of rows) {
@@ -124,9 +139,40 @@ export function normalizeSegments(data) {
   return { defs, days };
 }
 
+/**
+ * The custom-collections sub-model nested on a segments model, or null when no
+ * collections answer was supplied at all. Supplied and empty is not null: a
+ * seller with nothing saved still gets the level and the "New collection"
+ * button to start with.
+ */
+export function collectionsModel(model) {
+  const sub = model?.collections;
+  return sub && Array.isArray(sub.defs) && Array.isArray(sub.days) ? sub : null;
+}
+
+/** `model` with the seller's saved lists nested on it, for the Collections level. */
+export function withCollections(model, collections) {
+  if (!model && !collections) return null;
+  return { ...(model || { defs: [], days: [] }), collections: collections || null };
+}
+
+/**
+ * The model the table splits: the history's own, with the seller's saved lists
+ * nested on it only once the history question is over. A level that arrives
+ * first would drop the skeleton and open the desk on Collections while the
+ * graph's read is still out; a history that answered without any split at all
+ * (or failed) is the case where the saved lists are the only level there is.
+ */
+export function joinedSegments({ history = null, pending = false, collections = null } = {}) {
+  return withCollections(history || null, pending ? null : (collections || null));
+}
+
 export function segmentLevels(model) {
   const defs = model?.defs;
-  if (!Array.isArray(defs) || !defs.length) return [];
+  const saved = collectionsModel(model);
+  if (!Array.isArray(defs) || !defs.length) {
+    return saved ? [{ id: COLLECTIONS_LEVEL, label: 'Collections' }] : [];
+  }
   const levels = [{ id: ALL_LEVEL, label: 'All games' }];
   const seen = new Set();
   for (const def of defs) {
@@ -136,6 +182,7 @@ export function segmentLevels(model) {
     seen.add(id);
     levels.push({ id, label: gameName(id) });
   }
+  if (saved) levels.push({ id: COLLECTIONS_LEVEL, label: 'Collections' });
   return levels;
 }
 
@@ -171,17 +218,24 @@ export function segmentWindow(model, range = {}, today = utcDayKey()) {
  * least two games actually hold cards; a one-game collection opens on that
  * game, so a Pokémon-only book starts on Pokémon instead of on a two-row
  * "All games" list of which one row is an empty pile.
+ *
+ * The saved lists are the seller's own level, not a slice of the book, so they
+ * never enter that choice: this answers what it answered before for the same
+ * segments whatever collections exist, and `collections` only when there is no
+ * other level to open on.
  */
 export function defaultSegmentLevel(model) {
   const levels = segmentLevels(model);
+  const book = levels.filter((level) => level.id !== COLLECTIONS_LEVEL);
   const lastDay = (Array.isArray(model?.days) ? model.days : []).at(-1) || null;
   const heldGames = new Set();
   for (const def of model?.defs || []) {
     if (def.group !== 'game') continue;
     if ((lastDay?.segments?.[def.key]?.held || 0) > 0) heldGames.add(def.game);
   }
+  if (!book.length) return levels.length ? COLLECTIONS_LEVEL : ALL_LEVEL;
   if (heldGames.size >= 2) return ALL_LEVEL;
-  const firstGame = levels.find((level) => level.id !== ALL_LEVEL);
+  const firstGame = book.find((level) => level.id !== ALL_LEVEL);
   return firstGame ? firstGame.id : ALL_LEVEL;
 }
 
@@ -218,7 +272,11 @@ function windowChangePct(series) {
 function segmentRow(def, days) {
   const series = days.map((day) => ({ date: day.date, valuePkn: segmentValueAt(day, def.key) }));
   const lastDay = days[days.length - 1] || null;
-  const held = lastDay ? segmentCountAt(lastDay, def.key, 'held') : 0;
+  // A day is normally the only thing that states a count. A saved-list def can
+  // carry one itself (`held`, from the collections answer when that answer has
+  // no days to count in) so a row still says how big the list is; no other
+  // group sets it, so every other row reads 0 as it always did.
+  const held = lastDay ? segmentCountAt(lastDay, def.key, 'held') : Math.max(0, Number(def.held) || 0);
   const priced = lastDay ? segmentCountAt(lastDay, def.key, 'priced') : 0;
   const valuePkn = lastDay ? segmentCountAt(lastDay, def.key, 'valuePkn') : 0;
   const state = held <= 0
@@ -240,8 +298,17 @@ function segmentRow(def, days) {
 /** The table for one level: group title plus its rows, empty groups skipped. */
 export function segmentGroups(model, levelId, window = {}) {
   const defs = Array.isArray(model?.defs) ? model.defs : [];
-  const days = windowedDays(model, window);
   const level = text(levelId) || ALL_LEVEL;
+  if (level === COLLECTIONS_LEVEL) {
+    // The rows come from the collections answer, days and all: the history
+    // model never carries a `collection:*` key.
+    const saved = collectionsModel(model) || { defs: [], days: [] };
+    const rows = (saved.defs || [])
+      .filter((def) => def.group === 'collection')
+      .map((def) => segmentRow(def, windowedDays(saved, window)));
+    return rows.length ? [{ title: 'Collections', rows }] : [];
+  }
+  const days = windowedDays(model, window);
   const wanted = level === ALL_LEVEL
     ? [['Games', (def) => def.group === 'game'], ['Across all games', (def) => def.group === 'type' && def.game === ALL_LEVEL]]
     : [
@@ -267,6 +334,24 @@ export function collectionSeries(model, window = {}) {
     date: day.date,
     valuePkn: numberOrNull(day.cardsValuePkn),
   }));
+}
+
+/**
+ * The same whole-collection line read on the days of `series` rather than on
+ * the model's own — the compare line of a custom collection, whose answer can
+ * carry days the history does not have. Matched by date, and a day the history
+ * model does not carry stays unknown instead of a 0 the chart reads as a loss.
+ */
+export function collectionSeriesOn(model, series) {
+  const byDate = new Map();
+  for (const day of (Array.isArray(model?.days) ? model.days : [])) {
+    const date = text(day?.date);
+    if (date) byDate.set(date, numberOrNull(day.cardsValuePkn));
+  }
+  return (Array.isArray(series) ? series : []).map((point) => {
+    const date = text(point?.date);
+    return { date, valuePkn: byDate.has(date) ? byDate.get(date) : null };
+  });
 }
 
 function valueAt(item) {
