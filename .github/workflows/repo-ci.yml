@@ -46,6 +46,8 @@ jobs:
           gitleaks version
       - name: pre-push hook tests
         run: bash scripts/pre-push-hook.test.sh
+      - name: check-fast gitleaks step tests
+        run: bash scripts/check-fast-gitleaks.test.sh
       - name: auto-deploy-rust tests
         run: bash scripts/auto-deploy-rust.test.sh
       - name: run-flow-tests tests
@@ -121,7 +123,7 @@ jobs:
           fi
           bash scripts/check-features.sh --base "$base"
       - name: shellcheck
-        run: shellcheck scripts/require-ci-green.sh scripts/require-ci-green.test.sh scripts/deploy-gate-callers.test.sh scripts/run-flow-tests.sh scripts/run-flow-tests.test.sh scripts/rust-lints-check.sh scripts/rust-lints-check.test.sh scripts/flow-test-workers-check.sh scripts/flow-test-workers-check.test.sh scripts/check-features.sh scripts/check-features.test.sh scripts/check-migrations.sh scripts/check-migrations.test.sh scripts/k3s-manifest-check.sh scripts/k3s-manifest-check.test.sh .githooks/pre-push scripts/pre-push-hook.test.sh scripts/marketplace-home-purge.sh scripts/marketplace-home-purge.test.sh scripts/lib/load-cf-env.sh scripts/with-cf-env scripts/load-cf-env.test.sh
+        run: shellcheck scripts/require-ci-green.sh scripts/require-ci-green.test.sh scripts/deploy-gate-callers.test.sh scripts/run-flow-tests.sh scripts/run-flow-tests.test.sh scripts/rust-lints-check.sh scripts/rust-lints-check.test.sh scripts/flow-test-workers-check.sh scripts/flow-test-workers-check.test.sh scripts/check-features.sh scripts/check-features.test.sh scripts/check-migrations.sh scripts/check-migrations.test.sh scripts/k3s-manifest-check.sh scripts/k3s-manifest-check.test.sh .githooks/pre-push scripts/pre-push-hook.test.sh scripts/check-fast-gitleaks.test.sh scripts/marketplace-home-purge.sh scripts/marketplace-home-purge.test.sh scripts/lib/load-cf-env.sh scripts/with-cf-env scripts/load-cf-env.test.sh
 
   repo-gate:
     # Add later jobs to `needs`; the loop below checks every job listed there.
