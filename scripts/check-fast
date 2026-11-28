@@ -465,12 +465,14 @@ step_gitleaks() {
     if git show "$base:.gitleaks.toml" >"$tmp/gitleaks-base.toml" 2>/dev/null; then
         cfg=(-c "$tmp/gitleaks-base.toml")
     else
-        # Named explicitly too: gitleaks would otherwise find the branch's own .gitleaks.toml in the working directory.
+        # Named explicitly too: gitleaks reads -c, then GITLEAKS_CONFIG and GITLEAKS_CONFIG_TOML, then
+        # <target path>/.gitleaks.toml. A changed .gitleaks.toml is copied into $scan, so without -c the
+        # branch's own copy would be found there.
         printf '[extend]\nuseDefault = true\n' >"$tmp/gitleaks-base.toml"
         cfg=(-c "$tmp/gitleaks-base.toml")
         REASON="the base commit has no .gitleaks.toml, the gitleaks default rules were used"
     fi
-    gitleaks detect --no-git --no-banner --redact "${cfg[@]}" -s "$scan"
+    gitleaks detect --no-git --no-banner --redact --ignore-gitleaks-allow "${cfg[@]}" -s "$scan"
 }
 
 # ---- run -----------------------------------------------------------------------------------------

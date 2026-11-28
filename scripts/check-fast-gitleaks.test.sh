@@ -216,6 +216,14 @@ else
     bad "d. the missing configuration prints no note"
 fi
 
+# ---- an inline gitleaks:allow marker on the added line does not hide the finding ---------------------------------
+new_repo without
+write_fixture zero.rs DEMO_TOKEN_ENCRYPTION_KEY
+sed -i '/DEMO_TOKEN_ENCRYPTION_KEY/ s|$| // gitleaks:allow|' "$repo/fixtures/zero.rs"
+commit_branch
+run_step fixtures/zero.rs
+expect_fail "an added line ending in gitleaks:allow"
+
 # ---- e. the real repository policy allows the line that reported the false positive ------------------------------
 new_repo real
 write_fixture zero.rs CARDTRADER_TOKEN_ENCRYPTION_KEY
