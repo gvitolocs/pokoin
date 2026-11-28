@@ -534,6 +534,11 @@ impl<'a> ListingIndex<'a> {
     }
 }
 
+/// One compared facet of a copy: trimmed, upper case, blank folded to empty.
+fn identity_facet(value: &Value, key: &str) -> String {
+    text(value.get(key), 40).trim().to_uppercase()
+}
+
 /// What makes two of the seller's rows the same copy for a Zero picking line:
 /// the card plus its finish and condition facets, compared exactly as the pick
 /// handler does (`pokoin-commerce` `zero_picks::identity`, which calls this).
@@ -542,7 +547,7 @@ impl<'a> ListingIndex<'a> {
 /// A row that carries no value for a facet has the empty one, so a list built
 /// from rows without the columns still matches itself.
 pub fn listing_identity(row: &Value) -> [String; 9] {
-    let facet = |key: &str| text(row.get(key), 40).trim().to_uppercase();
+    let facet = |key: &str| identity_facet(row, key);
     let flag = |key: &str| (row.get(key) == Some(&Value::Bool(true))).then(|| '1').unwrap_or('0');
     [
         text(row.get("card_id"), 80),
@@ -560,9 +565,24 @@ pub fn listing_identity(row: &Value) -> [String; 9] {
 /// The members of one product that are the same copy as `base` (the line's own
 /// row, unknown when the index does not hold it): a line is never defaulted
 /// onto, nor offered, a copy of another finish or condition than its own.
-fn same_identity<'a>(members: &[&'a Value], base: Option<&Value>) -> Vec<&'a Value> {
+///
+/// With no own row the line's identity is what the CardTrader item states:
+/// `item`, its picking line or the item it came from, is compared on its
+/// condition and language, which [`zero_item_row`] already maps to the row's
+/// own values. Only a facet the item states and the row both carry is a
+/// difference — a row that records nothing for a facet stays a match, so an
+/// unnamed item still spreads over rows read without those columns.
+fn same_identity<'a>(members: &[&'a Value], base: Option<&Value>, item: &Value) -> Vec<&'a Value> {
     let Some(base) = base else {
-        return members.to_vec();
+        let keeps = |row: &Value, key: &str| {
+            let (want, have) = (identity_facet(item, key), identity_facet(row, key));
+            want.is_empty() || have.is_empty() || have == want
+        };
+        return members
+            .iter()
+            .copied()
+            .filter(|row| keeps(row, "condition") && keeps(row, "language"))
+            .collect();
     };
     let want = listing_identity(base);
     members
@@ -691,7 +711,7 @@ fn line_candidates(line: &Value, index: &ListingIndex) -> Vec<Value> {
     let Some(members) = line_members(line, index) else {
         return Vec::new();
     };
-    let mut rows: Vec<&Value> = same_identity(members, index.by_id.get(&own).copied())
+    let mut rows: Vec<&Value> = same_identity(members, index.by_id.get(&own).copied(), line)
         .into_iter()
         .filter(|row| text(row.get("id"), 80) != own)
         .filter(|row| i64_field(row, &["quantity_available"]).unwrap_or(0) > 0)
@@ -749,7 +769,8 @@ fn split_item(
 /// the member set, the names, the item ids and quantities count: stock,
 /// status, locations, picks and the response order never move a default. The
 /// member set is the copies of the named listing's own identity
-/// ([`listing_identity`]), so a default never lands on another finish.
+/// ([`listing_identity`]) — of what the item states when it names no listing
+/// it owns — so a default never lands on another finish.
 fn default_members(
     items: &[Value],
     index: &ListingIndex,
@@ -769,7 +790,7 @@ fn default_members(
             let members = index
                 .members
                 .get(&text(item.get("productId"), 80))
-                .map(|rows| same_identity(rows, index.by_id.get(&named).copied()))
+                .map(|rows| same_identity(rows, index.by_id.get(&named).copied(), item))
                 .filter(|rows| rows.len() > 1)?;
             Some((item_id, members, named, quantity_of(item).max(0)))
         })
@@ -844,7 +865,7 @@ fn split_item_lines(
         } else {
             named.as_str()
         };
-        let filtered = same_identity(group, index.by_id.get(baseline).copied());
+        let filtered = same_identity(group, index.by_id.get(baseline).copied(), item);
         let members: &[&Value] = if filtered.is_empty() { group } else { &filtered };
         if members.len() == 1 {
             let row = members[0];
