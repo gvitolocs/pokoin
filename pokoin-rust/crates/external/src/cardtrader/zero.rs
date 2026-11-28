@@ -2834,6 +2834,8 @@ pub struct ZeroTimings {
     pub steps: Vec<(&'static str, f64)>,
     pub ct_cached: bool,
     pub pt_cached: bool,
+    /// Blueprint ids `blueprint_games` took from its cache instead of querying.
+    pub games_cached: usize,
     pub lines: usize,
 }
 
@@ -2851,6 +2853,9 @@ impl ZeroTimings {
         if self.pt_cached {
             parts.push("pt_cache;desc=hit".into());
         }
+        if self.games_cached > 0 {
+            parts.push(format!("games_cache;desc={}", self.games_cached));
+        }
         parts.join(", ")
     }
 
@@ -2861,6 +2866,7 @@ impl ZeroTimings {
             lines = self.lines,
             ct_cached = self.ct_cached,
             pt_cached = self.pt_cached,
+            games_cache = self.games_cached,
             deferred,
             steps = %steps,
             "zero_list_timing"
@@ -3017,9 +3023,14 @@ pub async fn zero_list(
             None => None,
         }
     };
-    let ((allocations, alloc_ms), (games, games_ms), ((picks, pg_picks, (settings, _)), picks_ms), (articles, articles_ms)) = tokio::join!(
+    let (
+        (allocations, alloc_ms),
+        ((games, games_cached), games_ms),
+        ((picks, pg_picks, (settings, _)), picks_ms),
+        (articles, articles_ms),
+    ) = tokio::join!(
         timed(read_allocations(firestore, uid, &list)),
-        timed(blueprint_games(db, &list)),
+        timed(blueprint_games_served(db, &list)),
         timed(async {
             tokio::join!(
                 read_picks(firestore, uid, &list),
@@ -3031,6 +3042,7 @@ pub async fn zero_list(
     );
     timings.add("allocations", alloc_ms);
     timings.add("games", games_ms);
+    timings.games_cached = games_cached;
     timings.add("picks", picks_ms);
     if articles.is_some() {
         timings.add("pt_articles", articles_ms);
@@ -4452,6 +4464,14 @@ mod tests {
         timings.add("total", 900.0);
         timings.ct_cached = true;
         assert_eq!(timings.header(), "ct_orders;dur=812.4, total;dur=900.0, ct_cache;desc=hit");
+    }
+
+    #[test]
+    fn server_timing_counts_the_cached_blueprint_games() {
+        let mut timings = ZeroTimings::default();
+        timings.add("games", 12.0);
+        timings.games_cached = 137;
+        assert_eq!(timings.header(), "games;dur=12.0, games_cache;desc=137");
     }
 
     fn game_ids(list: &[&str]) -> Vec<String> {
