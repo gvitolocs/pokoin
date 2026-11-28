@@ -50,8 +50,9 @@ D00000F), quantity, seller price, and:
 - `picked` / `issue`: the server-side picked state, and `picks`: the line's live
   Postgres picks `[{id, itemId, listingId, allocatedListingId, kind, quantity,
   locationFrom}]` (the copy to undo can differ from the line's listing after a swap);
-- `quantityAvailable`: the stock of the line's own listing row (null when unlinked), for
-  the "(N available)" location text;
+- `quantityAvailable`: the stock of the line's own listing row (null when unlinked). The tile
+  shows it as "N more in this box" only when N > 0: the sale already took that copy, so 0 is
+  the normal count of a line's own box and naming it reads as "this box is empty";
 - `candidates`, on every line: the identical copies in other boxes
   `[{listingId, location, quantityAvailable}]` (the other members of the item's CardTrader
   product: members fallback, or a grouped product), the listing the item names first, then
