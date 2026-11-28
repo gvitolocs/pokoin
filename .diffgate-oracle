@@ -1,0 +1,3 @@
+# Changes to the secret scanner's allowlist are a lead's decision: diffgate refuses them
+# unless the lead waives `oracle-changed`.
+.gitleaks.toml

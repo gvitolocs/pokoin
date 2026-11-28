@@ -32,6 +32,8 @@ Run it before you commit a `pokoin-rust/` change. The change is everything from 
 - `cargo test -p <crate>` on each touched crate. The `*_flow` tests skip themselves without `POKOIN_TEST_DATABASE_URL`; `--db` starts `postgres:17-alpine` as `pokoin-check-pg-<pid>` on a free port, as in the header of `crates/commerce/tests/zero_picks_flow.rs`, and removes that container on exit
 - `shellcheck` on changed shell scripts, `actionlint` on changed workflows, `gitleaks` on the changed files
 
+The `gitleaks` step scans with `.gitleaks.toml` as it is on the base commit, not the branch's copy, so a branch cannot allowlist its own leak, and it passes `--ignore-gitleaks-allow`, so an inline `gitleaks:allow` marker on an added line does not hide a finding; `.diffgate-oracle` makes diffgate refuse a change to that file unless the lead waives `oracle-changed`. CI's secret scan (`scripts/ci-secret-scan.sh`) also refuses an added marker or a `.gitleaksignore`.
+
 A step whose tool is missing, or that has nothing to look at, is printed as `SKIPPED` with its reason. It is never counted as passed. The run ends with one table (step, result, seconds) and exits 1 if any step failed, 2 if it refused to start.
 
 A change to `pokoin-rust/Cargo.toml`, `Cargo.lock`, the toolchain file or `.cargo/` has a workspace-wide effect. The check says so and leaves it to the GitHub `test` job.
@@ -45,7 +47,7 @@ A change to `pokoin-rust/Cargo.toml`, `Cargo.lock`, the toolchain file or `.carg
 - **shellcheck:** the same line rule as rustfmt.
 - **actionlint, gitleaks, diffgate:** the whole changed file (or, for diffgate, the whole diff).
 
-`scripts/check-fast.test.sh` proves these rules on a throwaway repo and needs no network.
+`scripts/check-fast.test.sh` proves these rules on a throwaway repo and needs no network. `scripts/check-fast-gitleaks.test.sh` proves the gitleaks step on throwaway repos with real gitleaks: it takes the policy from the base commit, so a branch that allowlists its own key still fails, and it ignores inline `gitleaks:allow` markers.
 
 ### Disk
 
