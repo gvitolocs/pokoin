@@ -595,13 +595,21 @@ async fn one_line_picks_one_box_and_refuses_another() {
         "This line was already picked from another box; undo it first"
     );
     assert_eq!(live_picks(&pool).await, before);
-    assert_eq!(last_outbox(&pool).await, mark, "a refused pick writes nothing");
+    assert_eq!(
+        last_outbox(&pool).await,
+        mark,
+        "a refused pick writes nothing"
+    );
     assert_eq!(
         row(&pool, &second).await,
         (1, "active".into(), "box·B".into()),
         "the untouched box keeps its copy and its place"
     );
-    assert_eq!(row(&pool, &first).await.0, 0, "the picked box holds line 91's copy");
+    assert_eq!(
+        row(&pool, &first).await.0,
+        0,
+        "the picked box holds line 91's copy"
+    );
 
     // The request that succeeded is a replay of its own copy, not a second pick.
     let (status, replay) = post(pick("91", &first, &sold, 1, "pick")).await;
@@ -633,19 +641,29 @@ async fn a_pick_must_be_a_copy_of_the_lines_own_finish() {
     let stamp = insert_finish(&pool, 1, "active", "box·T", "ct:911", "standard", "stamp").await;
     let graded = {
         let id = insert_finish(&pool, 1, "active", "box·G", "ct:911", "standard", "").await;
-        sqlx::query("update public.marketplace_user_listings set graded = true where id = $1::uuid")
-            .bind(&id)
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "update public.marketplace_user_listings set graded = true where id = $1::uuid",
+        )
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .unwrap();
         id
     };
     for other in [&reverse, &stamp, &graded] {
         let (status, body) = post(pick("95", other, &sold, 1, "pick")).await;
-        assert_eq!(status, StatusCode::CONFLICT, "{other} is another card: {body}");
+        assert_eq!(
+            status,
+            StatusCode::CONFLICT,
+            "{other} is another card: {body}"
+        );
         assert_eq!(body["code"], "not_identical");
     }
-    assert_eq!(live_picks(&pool).await, 0, "a refused finish writes nothing");
+    assert_eq!(
+        live_picks(&pool).await,
+        0,
+        "a refused finish writes nothing"
+    );
     for other in [&reverse, &stamp, &graded] {
         let (quantity, status, _) = row(&pool, other).await;
         assert_eq!(

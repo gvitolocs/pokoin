@@ -491,8 +491,11 @@ async fn run_inventory_pick(
             let line_rows = read_line_picks(&mut tx, seller, request)
                 .await
                 .map_err(|e| *e)?;
-            let line_picked =
-                claims::line_picked_elsewhere(&line_rows, &request.line_key, &request.listing_id.to_string());
+            let line_picked = claims::line_picked_elsewhere(
+                &line_rows,
+                &request.line_key,
+                &request.listing_id.to_string(),
+            );
             let plan = plan_claimed_pick(
                 request,
                 &picked,
@@ -837,10 +840,25 @@ mod tests {
         let mut both_picked = picked.clone();
         both_picked["foil_state"] = json!("standard");
         assert_eq!(
-            plan_pick(&request("pick", Some(B), 1), &both_picked, Some(&both), None).unwrap(),
-            Plan::Swap { quantity: 1, clear_location: false }
+            plan_pick(
+                &request("pick", Some(B), 1),
+                &both_picked,
+                Some(&both),
+                None
+            )
+            .unwrap(),
+            Plan::Swap {
+                quantity: 1,
+                clear_location: false
+            }
         );
-        assert!(plan_pick(&request("pick", Some(B), 1), &picked, Some(&allocated), None).is_ok());
+        assert!(plan_pick(
+            &request("pick", Some(B), 1),
+            &picked,
+            Some(&allocated),
+            None
+        )
+        .is_ok());
     }
 
     #[test]
@@ -932,8 +950,15 @@ mod tests {
         );
         assert_eq!(error.status, StatusCode::CONFLICT);
         // No other line on X: the first finalize is the sold copy.
-        let plan = plan_claimed_pick(&request("pick", Some(A), 1), &x, None, None, claims_of(&[]), 0)
-            .unwrap();
+        let plan = plan_claimed_pick(
+            &request("pick", Some(A), 1),
+            &x,
+            None,
+            None,
+            claims_of(&[]),
+            0,
+        )
+        .unwrap();
         assert_eq!(
             plan,
             Plan::Finalize {
@@ -1089,7 +1114,10 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.code.as_deref(), Some("line_already_picked"));
-        assert_eq!(error.message, "This line was already picked from another box; undo it first");
+        assert_eq!(
+            error.message,
+            "This line was already picked from another box; undo it first"
+        );
         assert_eq!(error.status, StatusCode::CONFLICT);
         // The line's own box answers the same way once it picked elsewhere, and
         // the other lines' claims are not what stopped it.
@@ -1196,7 +1224,12 @@ mod tests {
         let isolation = body
             .find("sqlx::query(ISOLATION_SQL)")
             .expect("isolation set");
-        for read in ["read_live(", "lock_pair(", "read_claims(", "read_line_picks("] {
+        for read in [
+            "read_live(",
+            "lock_pair(",
+            "read_claims(",
+            "read_line_picks(",
+        ] {
             assert!(
                 isolation < body.find(read).unwrap(),
                 "{read} after the isolation level"

@@ -548,7 +548,13 @@ fn identity_facet(value: &Value, key: &str) -> String {
 /// from rows without the columns still matches itself.
 pub fn listing_identity(row: &Value) -> [String; 9] {
     let facet = |key: &str| identity_facet(row, key);
-    let flag = |key: &str| (row.get(key) == Some(&Value::Bool(true))).then(|| '1').unwrap_or('0');
+    let flag = |key: &str| {
+        if row.get(key) == Some(&Value::Bool(true)) {
+            '1'
+        } else {
+            '0'
+        }
+    };
     [
         text(row.get("card_id"), 80),
         facet("condition"),
@@ -797,7 +803,10 @@ fn default_members(
         .collect();
     eligible.sort_by(|a, b| id_cmp(&a.0, &b.0));
     let mut load: HashMap<String, i64> = HashMap::new();
-    for charged in items.iter().filter_map(|item| allocations.get(&text(item.get("itemId"), 40))) {
+    for charged in items
+        .iter()
+        .filter_map(|item| allocations.get(&text(item.get("itemId"), 40)))
+    {
         for allocation in charged {
             *load.entry(allocation.listing_id.clone()).or_default() += allocation.quantity.max(0);
         }
@@ -866,7 +875,11 @@ fn split_item_lines(
             named.as_str()
         };
         let filtered = same_identity(group, index.by_id.get(baseline).copied(), item);
-        let members: &[&Value] = if filtered.is_empty() { group } else { &filtered };
+        let members: &[&Value] = if filtered.is_empty() {
+            group
+        } else {
+            &filtered
+        };
         if members.len() == 1 {
             let row = members[0];
             return vec![make_line(item, Some(row), &text(row.get("id"), 80), quantity, "listing", Vec::new())];
@@ -2894,15 +2907,24 @@ pub async fn zero_list(
         if source_ids.is_empty() && listing_ids.is_empty() {
             Some(Vec::new())
         } else {
-            db.query("pokemon", LISTINGS_SQL, &[json!(uid), json!(source_ids), json!(listing_ids)])
-                .await
-                .ok()
+            db.query(
+                "pokemon",
+                LISTINGS_SQL,
+                &[json!(uid), json!(source_ids), json!(listing_ids)],
+            )
+            .await
+            .ok()
         }
     })
     .await;
     let listings_unavailable = rows.is_none();
     timings.add("listings", listings_ms);
-    split_lines(&mut list, rows.as_deref().unwrap_or_default(), &allocations, &games);
+    split_lines(
+        &mut list,
+        rows.as_deref().unwrap_or_default(),
+        &allocations,
+        &games,
+    );
 
     // Power Tools overlay; never fails the CardTrader list.
     let mut power_tools = json!({ "connected": false });
@@ -4445,7 +4467,10 @@ mod tests {
         let mut rows = three_boxes();
         // N3 is the reverse-holo printing of the same product; N1 and N2 are plain.
         rows[2]["foil_state"] = json!("reverse");
-        let out = split_one(vec![item("11", "101", 1, 10), item("12", "101", 1, 10)], &rows);
+        let out = split_one(
+            vec![item("11", "101", 1, 10), item("12", "101", 1, 10)],
+            &rows,
+        );
         // The two plain lines spread over the two plain boxes.
         assert_eq!(listing_ids(&out), vec![N1, N2]);
         for line in &out {
@@ -4470,15 +4495,25 @@ mod tests {
         // A condition or language of its own is the same refusal.
         let mut rows = three_boxes();
         rows[1]["language"] = json!("JP");
-        let out = split_one(vec![item("11", "101", 1, 10), item("12", "101", 1, 10)], &rows);
+        let out = split_one(
+            vec![item("11", "101", 1, 10), item("12", "101", 1, 10)],
+            &rows,
+        );
         assert_eq!(listing_ids(&out), vec![N1, N3]);
         // Case and blanks are no difference: two rows of one identity.
         let mut rows = three_boxes();
         rows[0]["language"] = json!(" en ");
         rows[1]["language"] = json!("EN");
-        let out = split_one(vec![item("11", "101", 1, 10), item("12", "101", 1, 10)], &rows);
+        let out = split_one(
+            vec![item("11", "101", 1, 10), item("12", "101", 1, 10)],
+            &rows,
+        );
         assert_eq!(listing_ids(&out), vec![N1, N2]);
-        assert!(offers(&out[0], N2), "case and blanks are not another copy: {}", out[0]);
+        assert!(
+            offers(&out[0], N2),
+            "case and blanks are not another copy: {}",
+            out[0]
+        );
     }
 
     #[test]
@@ -4897,7 +4932,8 @@ mod tests {
         assert_eq!(out[0]["picked"], 1);
         assert!(
             !offers(&out[0], N3),
-            "the emptied copy is not offered again: {}", out[0]
+            "the emptied copy is not offered again: {}",
+            out[0]
         );
         assert_eq!(candidate(&out[0], N2)["taken"], true);
         // A line with no pick of its own keeps its choices: 12 still has N1.
@@ -5117,7 +5153,10 @@ mod tests {
             (b["listingId"].clone(), b["lineKey"].clone()),
             (json!(N2), json!(format!("12@{N2}")))
         );
-        assert_eq!(b["homeLocation"], "box2·1", "B still names the box of its copy");
+        assert_eq!(
+            b["homeLocation"], "box2·1",
+            "B still names the box of its copy"
+        );
         assert_eq!(b["ownTaken"], true);
         for key in ["location", "sortLocation", "slot", "locationSource"] {
             assert_eq!(b[key], plain["12"][key], "B keeps its un-annotated {key}");

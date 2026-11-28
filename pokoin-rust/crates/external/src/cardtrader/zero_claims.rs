@@ -130,7 +130,11 @@ pub fn taken(kind: ClaimKind, stock: i64, claims: BoxClaims, quantity: i64) -> b
 /// copy would move two boxes for one sale. `rows` are the item's live picks on
 /// every copy (`(line_key, listing_id, quantity)`); the same copy is not
 /// counted — it is the idempotent replay.
-pub fn line_picked_elsewhere(rows: &[(String, String, i64)], line_key: &str, listing_id: &str) -> i64 {
+pub fn line_picked_elsewhere(
+    rows: &[(String, String, i64)],
+    line_key: &str,
+    listing_id: &str,
+) -> i64 {
     rows.iter()
         .filter(|(key, copy, _)| key == line_key && copy != listing_id)
         .map(|(_, _, quantity)| *quantity)
