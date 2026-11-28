@@ -457,7 +457,15 @@ step_gitleaks() {
     local scan=$tmp/scan
     mkdir -p "$scan"
     printf '%s\0' "${live[@]}" | tar --null -T - -cf - | tar -xf - -C "$scan"
-    gitleaks detect --no-git --no-banner --redact -s "$scan"
+    # gitleaks looks for its config inside the scanned directory, so the copy would never find the
+    # repository's allowlists and reports its test fixtures as leaks. Name the config explicitly.
+    local -a cfg=()
+    if [ -f "$root/.gitleaks.toml" ]; then
+        cfg=(-c "$root/.gitleaks.toml")
+    else
+        REASON="no .gitleaks.toml here, the gitleaks default rules were used"
+    fi
+    gitleaks detect --no-git --no-banner --redact "${cfg[@]}" -s "$scan"
 }
 
 # ---- run -----------------------------------------------------------------------------------------
