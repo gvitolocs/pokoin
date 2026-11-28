@@ -15,6 +15,7 @@ use axum::extract::State;
 use axum::http::{StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use pokoin_external::cardtrader::zero as ct_zero;
+use pokoin_external::cardtrader::zero_claims::{self as claims, BoxClaims, ClaimKind, Refusal};
 use pokoin_external::powertools::id_text;
 use serde_json::{json, Value};
 
@@ -123,19 +124,15 @@ pub fn parse_pick_body(body: &Value) -> Result<PickBody, ApiError> {
 
 // ------------------------------------------------------------ planning
 
-/// The facets that make two copies the same card for a buyer.
-pub fn identity(row: &Value) -> (String, String, String, bool, bool, bool, bool) {
-    let upper = |key: &str| live::field(row, key, 40).trim().to_uppercase();
-    let flag = |key: &str| row[key] == true;
-    (
-        live::field(row, "card_id", 80),
-        upper("condition"),
-        upper("language"),
-        flag("reverse"),
-        flag("first_edition"),
-        flag("signed"),
-        flag("graded"),
-    )
+/// The facets that make two copies the same card for a buyer: the card, its
+/// condition and language, and the finish facets — reverse holographic, first
+/// edition, signed, graded, `foil_state` and `variant_state`. A plain copy is
+/// not the foil one, so a swap may not stand in for it.
+///
+/// The same comparison the Zero list makes when it offers a box
+/// (`pokoin-external` `zero::listing_identity`), from the same row columns.
+pub fn identity(row: &Value) -> [String; 9] {
+    ct_zero::listing_identity(row)
 }
 
 fn quantity_of(row: &Value) -> i64 {
@@ -187,6 +184,64 @@ pub fn plan_pick(request: &InventoryPick, picked: &Value, allocated: Option<&Val
     Ok(Plan::Swap { quantity: request.quantity, clear_location: available - request.quantity <= 0 })
 }
 
+fn copy_taken() -> ApiError {
+    ApiError::conflict(claims::COPY_ALREADY_PICKED_MESSAGE).with_code(claims::COPY_ALREADY_PICKED)
+}
+
+fn line_taken() -> ApiError {
+    ApiError::conflict(claims::LINE_ALREADY_PICKED_MESSAGE).with_code(claims::LINE_ALREADY_PICKED)
+}
+
+/// The claim helpers' result: the error boxed (the handler unboxes it).
+pub type Claimed<T> = Result<T, Box<ApiError>>;
+
+fn stored(error: sqlx::Error) -> Box<ApiError> {
+    Box::new(ApiError::from(error))
+}
+
+/// [`plan_pick`] with the other lines of the order (one copy, one line; see
+/// `pokoin_external::cardtrader::zero_claims`). `live_pick` is the live row of
+/// this (order, item, copy), read after the listing locks: the same line
+/// replays, another line of the item holding that copy is refused.
+/// `box_claims` are the other lines' live picks on the picked copy, read
+/// after its row lock; `picked` is the locked row, so its stock is already
+/// net of sales and of live swaps. `line_picked` is what this line already
+/// holds on another copy (one line, one box): a further pick of it is refused
+/// before any capacity is weighed, because one sale cannot take two boxes.
+pub fn plan_claimed_pick(
+    request: &InventoryPick,
+    picked: &Value,
+    allocated: Option<&Value>,
+    live_pick: Option<&Value>,
+    box_claims: BoxClaims,
+    line_picked: i64,
+) -> Claimed<Plan> {
+    if let Some(row) = live_pick {
+        return if live::field(row, "line_key", 120) == request.line_key {
+            Ok(Plan::Replay)
+        } else {
+            Err(Box::new(copy_taken()))
+        };
+    }
+    let plan = plan_pick(request, picked, allocated, None).map_err(Box::new);
+    if matches!(&plan, Err(error) if error.code.as_deref() == Some("not_identical")) {
+        return plan;
+    }
+    if line_picked > 0 {
+        return Err(Box::new(line_taken()));
+    }
+    let kind = match plan {
+        Ok(Plan::Swap { .. }) => ClaimKind::Swap,
+        Ok(_) => ClaimKind::Finalize,
+        // Only a swap is ever short of stock.
+        Err(_) => ClaimKind::Swap,
+    };
+    match claims::check_claim(kind, quantity_of(picked), box_claims, request.quantity) {
+        Ok(()) | Err(Refusal::InsufficientQuantity) => plan,
+        Err(Refusal::CopyAlreadyPicked) => Err(Box::new(copy_taken())),
+    }
+}
+
 /// Plan the undo of `row` (the live pick, if any).
 pub fn plan_undo(row: Option<&Value>, picked: &Value, allocated: Option<&Value>) -> Result<Plan, ApiError> {
     let Some(row) = row else { return Ok(Plan::Nothing) };
@@ -219,6 +274,85 @@ fn live_pick_sql() -> String {
          where seller_uid = $1 and order_id = $2 and item_id = $3 and listing_id = $4 and state = 'picked' for update) v"
     )
 }
+
+/// The other lines' live picks on one copy of this order: another line is
+/// another (item, line key). A plain read after that copy's row lock: every
+/// claim on it is written under the same lock, so the ones committed before
+/// are seen and the next waits for this commit. No row lock here: an undo
+/// locks its pick row after the listings, never before.
+const CLAIMS_SQL: &str = "select kind, quantity::bigint from public.cardtrader_zero_picks \
+     where seller_uid = $1 and order_id = $2 and listing_id = $3 and state = 'picked' \
+       and not (item_id = $4 and line_key = $5)";
+
+/// The line's live picks, on every copy of the item (not only the one asked
+/// for, which [`live_pick_sql`] reads): a line takes one box, so a second tab
+/// picking another copy of the same line would move two boxes for one sale.
+/// Plain read like `CLAIMS_SQL`, after the listing locks: both tabs lock the
+/// box the line names, so the pick the first one wrote is seen here.
+const LINE_PICKS_SQL: &str = "select line_key, listing_id::text as listing_id, quantity::bigint \
+     from public.cardtrader_zero_picks \
+     where seller_uid = $1 and order_id = $2 and item_id = $3 and state = 'picked'";
+
+async fn read_line_picks(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    seller: &str,
+    request: &InventoryPick,
+) -> Claimed<Vec<(String, String, i64)>> {
+    let rows: Vec<(String, String, i64)> = sqlx::query_as(LINE_PICKS_SQL)
+        .bind(seller)
+        .bind(&request.order_id)
+        .bind(&request.item_id)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(stored)?;
+    Ok(rows)
+}
+
+async fn read_claims(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    seller: &str,
+    request: &InventoryPick,
+) -> Claimed<BoxClaims> {
+    let rows: Vec<(String, i64)> = sqlx::query_as(CLAIMS_SQL)
+        .bind(seller)
+        .bind(&request.order_id)
+        .bind(request.listing_id)
+        .bind(&request.item_id)
+        .bind(&request.line_key)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(stored)?;
+    let mut out = BoxClaims::default();
+    for (kind, quantity) in rows {
+        out.add(&kind, quantity);
+    }
+    Ok(out)
+}
+
+async fn read_live(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    seller: &str,
+    request: &InventoryPick,
+    lock: bool,
+) -> Claimed<Option<Value>> {
+    let sql = live_pick_sql();
+    let sql = if lock {
+        sql
+    } else {
+        sql.replace(" for update", "")
+    };
+    sqlx::query_scalar(&sql)
+        .bind(seller)
+        .bind(&request.order_id)
+        .bind(&request.item_id)
+        .bind(request.listing_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(stored)
+}
+
+/// The first statement of every pick transaction (see `run_inventory_pick`).
+pub const ISOLATION_SQL: &str = "set transaction isolation level read committed";
 
 fn insert_sql() -> String {
     format!(
@@ -308,26 +442,69 @@ async fn run_inventory_pick(
 ) -> Result<(Value, Vec<(Value, bool)>, &'static str), ApiError> {
     let now = state.now_ms();
     let mut tx = state.write_db().begin().await?;
+    // Said, not assumed from the server default: every statement below sees
+    // what committed before it started, so the reads after the listing locks
+    // see each claim committed under those locks. A REPEATABLE READ or
+    // SERIALIZABLE snapshot would be taken at the first read, before the locks.
+    sqlx::query(ISOLATION_SQL).execute(&mut *tx).await?;
     let mut changed = Changed { rows: Vec::new() };
-    let live_row: Option<Value> = sqlx::query_scalar(&live_pick_sql())
-        .bind(seller)
-        .bind(&request.order_id)
-        .bind(&request.item_id)
-        .bind(request.listing_id)
-        .fetch_optional(&mut *tx)
-        .await?;
+    let stored_allocated = |row: Option<&Value>| {
+        row.and_then(|row| {
+            uuid::Uuid::parse_str(&live::field(row, "allocated_listing_id", 80)).ok()
+        })
+    };
     // An undo reverses the copies the row recorded: the stored allocated
     // copy, never a client-sent one (an empty stored id restores nothing).
+    // Read unlocked to learn which copies to lock; read again after the locks.
     let allocated_id = match request.action {
-        Action::Undo => live_row.as_ref().and_then(|row| uuid::Uuid::parse_str(&live::field(row, "allocated_listing_id", 80)).ok()),
+        Action::Undo => stored_allocated(
+            read_live(&mut tx, seller, request, false)
+                .await
+                .map_err(|e| *e)?
+                .as_ref(),
+        ),
         Action::Pick => request.allocated_listing_id,
     };
     let (picked, allocated) = lock_pair(&mut tx, seller, request.listing_id, allocated_id).await?;
+    // After the listing locks: a pick or undo of this copy that committed
+    // first is seen, the next one waits for this commit.
+    let live_row = read_live(&mut tx, seller, request, request.action == Action::Undo)
+        .await
+        .map_err(|e| *e)?;
+    if request.action == Action::Undo
+        && live_row.is_some()
+        && stored_allocated(live_row.as_ref()) != allocated_id
+    {
+        // Undone and picked again from another sold copy between the reads.
+        return Err(
+            ApiError::conflict("That pick changed meanwhile; reload and try again.")
+                .with_code("pick_changed"),
+        );
+    }
     let inventory;
     let pick_row;
     match request.action {
         Action::Pick => {
-            let plan = plan_pick(request, &picked, allocated.as_ref(), live_row.as_ref())?;
+            let box_claims = read_claims(&mut tx, seller, request)
+                .await
+                .map_err(|e| *e)?;
+            let line_rows = read_line_picks(&mut tx, seller, request)
+                .await
+                .map_err(|e| *e)?;
+            let line_picked = claims::line_picked_elsewhere(
+                &line_rows,
+                &request.line_key,
+                &request.listing_id.to_string(),
+            );
+            let plan = plan_claimed_pick(
+                request,
+                &picked,
+                allocated.as_ref(),
+                live_row.as_ref(),
+                box_claims,
+                line_picked,
+            )
+            .map_err(|e| *e)?;
             let (kind, clear) = match plan {
                 Plan::Replay => {
                     tx.commit().await?;
@@ -358,13 +535,20 @@ async fn run_inventory_pick(
             let Some(row) = inserted else {
                 // A concurrent click recorded it first: answer that row.
                 tx.rollback().await?;
-                let existing: Option<Value> = sqlx::query_scalar(&live_pick_sql().replace(" for update", ""))
-                    .bind(seller)
-                    .bind(&request.order_id)
-                    .bind(&request.item_id)
-                    .bind(request.listing_id)
-                    .fetch_optional(state.write_db())
-                    .await?;
+                let existing: Option<Value> =
+                    sqlx::query_scalar(&live_pick_sql().replace(" for update", ""))
+                        .bind(seller)
+                        .bind(&request.order_id)
+                        .bind(&request.item_id)
+                        .bind(request.listing_id)
+                        .fetch_optional(state.write_db())
+                        .await?;
+                if existing
+                    .as_ref()
+                    .is_some_and(|row| live::field(row, "line_key", 120) != request.line_key)
+                {
+                    return Err(copy_taken());
+                }
                 return Ok((existing.unwrap_or(Value::Null), Vec::new(), "unchanged"));
             };
             if kind == "swap" {
@@ -627,6 +811,57 @@ mod tests {
     }
 
     #[test]
+    fn the_finish_is_part_of_the_identity() {
+        // A plain copy never stands in for the foil one the sale sold.
+        let picked = listing(3, "active", "box·2");
+        let mut allocated = listing(0, "sold_out", "box·1");
+        allocated["id"] = json!(B);
+        for (key, value) in [
+            ("foil_state", json!("reverse")),
+            ("foil_state", json!("holo")),
+            ("variant_state", json!("stamp")),
+            ("graded", json!(true)),
+        ] {
+            let mut foil = allocated.clone();
+            foil[key] = value.clone();
+            assert_eq!(
+                plan_pick(&request("pick", Some(B), 1), &picked, Some(&foil), None)
+                    .unwrap_err()
+                    .code
+                    .as_deref(),
+                Some("not_identical"),
+                "{key}={value}"
+            );
+        }
+        // The same finish on both copies stays a swap, and an absent column on
+        // both is the empty finish, not a difference.
+        let mut both = allocated.clone();
+        both["foil_state"] = json!("standard");
+        let mut both_picked = picked.clone();
+        both_picked["foil_state"] = json!("standard");
+        assert_eq!(
+            plan_pick(
+                &request("pick", Some(B), 1),
+                &both_picked,
+                Some(&both),
+                None
+            )
+            .unwrap(),
+            Plan::Swap {
+                quantity: 1,
+                clear_location: false
+            }
+        );
+        assert!(plan_pick(
+            &request("pick", Some(B), 1),
+            &picked,
+            Some(&allocated),
+            None
+        )
+        .is_ok());
+    }
+
+    #[test]
     fn a_replay_changes_nothing() {
         let picked = listing(3, "active", "box·2");
         let live_pick = json!({ "id": 1, "kind": "swap", "quantity": 1 });
@@ -681,5 +916,325 @@ mod tests {
         let event = stock_delta_event(&empty, &back, "s", 2, false, 0).unwrap();
         assert_eq!(event["payload"]["mutation"], "LISTING_REACTIVATED");
         assert_eq!(event["payload"]["cardtraderEdit"], json!({ "productId": "77", "quantityDelta": 2 }));
+    }
+
+    fn claims_of(rows: &[(&str, i64)]) -> BoxClaims {
+        let mut out = BoxClaims::default();
+        for (kind, quantity) in rows {
+            out.add(kind, *quantity);
+        }
+        out
+    }
+
+    fn code(result: Claimed<Plan>) -> String {
+        result.unwrap_err().code.unwrap_or_default()
+    }
+
+    #[test]
+    fn a_finalize_after_another_lines_swap_took_the_copy_is_refused() {
+        // X held one copy; another line swapped it out (X now 0, its swap live).
+        let x = listing(0, "sold_out", "");
+        let error = plan_claimed_pick(
+            &request("pick", Some(A), 1),
+            &x,
+            None,
+            None,
+            claims_of(&[("swap", 1)]),
+            0,
+        )
+        .unwrap_err();
+        assert_eq!(error.code.as_deref(), Some("copy_already_picked"));
+        assert_eq!(
+            error.message,
+            "That box's copy was already picked for another line; choose another box"
+        );
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        // No other line on X: the first finalize is the sold copy.
+        let plan = plan_claimed_pick(
+            &request("pick", Some(A), 1),
+            &x,
+            None,
+            None,
+            claims_of(&[]),
+            0,
+        )
+        .unwrap();
+        assert_eq!(
+            plan,
+            Plan::Finalize {
+                clear_location: true
+            }
+        );
+        // No allocation at all is the same finalize.
+        assert_eq!(
+            code(plan_claimed_pick(
+                &request("pick", None, 1),
+                &x,
+                None,
+                None,
+                claims_of(&[("finalize", 1)]),
+                0
+            )),
+            "copy_already_picked"
+        );
+    }
+
+    #[test]
+    fn a_swap_names_the_claim_or_the_shortage_that_stops_it() {
+        let mut allocated = listing(0, "sold_out", "box·9");
+        allocated["id"] = json!(B);
+        // Emptied by another line's swap: copy_already_picked.
+        let empty = listing(0, "sold_out", "");
+        assert_eq!(
+            code(plan_claimed_pick(
+                &request("pick", Some(B), 1),
+                &empty,
+                Some(&allocated),
+                None,
+                claims_of(&[("swap", 1)]),
+                0
+            )),
+            "copy_already_picked"
+        );
+        // Emptied with nobody else on it: the plain shortage.
+        assert_eq!(
+            code(plan_claimed_pick(
+                &request("pick", Some(B), 1),
+                &empty,
+                Some(&allocated),
+                None,
+                claims_of(&[]),
+                0
+            )),
+            "insufficient_quantity"
+        );
+        // Two left, five asked, another line's swap live: still the request's shortage.
+        let two = listing(2, "active", "box·2");
+        assert_eq!(
+            code(plan_claimed_pick(
+                &request("pick", Some(B), 5),
+                &two,
+                Some(&allocated),
+                None,
+                claims_of(&[("swap", 1)]),
+                0
+            )),
+            "insufficient_quantity"
+        );
+        // Two left, another line finalized one: a request of 2 is the claim's doing.
+        assert_eq!(
+            code(plan_claimed_pick(
+                &request("pick", Some(B), 2),
+                &two,
+                Some(&allocated),
+                None,
+                claims_of(&[("finalize", 1)]),
+                0
+            )),
+            "copy_already_picked"
+        );
+        // Swaps are already out of stock: 2 left with a live swap of 1 elsewhere covers 2.
+        assert_eq!(
+            plan_claimed_pick(
+                &request("pick", Some(B), 2),
+                &two,
+                Some(&allocated),
+                None,
+                claims_of(&[("swap", 1)]),
+                0
+            )
+            .unwrap(),
+            Plan::Swap {
+                quantity: 2,
+                clear_location: true
+            }
+        );
+        // Not the same card is said first, claims or not.
+        let mut other = listing(3, "active", "box·3");
+        other["condition"] = json!("SP");
+        assert_eq!(
+            code(plan_claimed_pick(
+                &request("pick", Some(B), 1),
+                &other,
+                Some(&allocated),
+                None,
+                claims_of(&[("finalize", 3)]),
+                0
+            )),
+            "not_identical"
+        );
+    }
+
+    #[test]
+    fn only_the_same_line_replays_a_live_pick_of_its_copy() {
+        let sold = listing(0, "sold_out", "box·1");
+        let same = json!({ "id": 1, "kind": "finalize", "quantity": 1, "line_key": "502@a" });
+        // A replay changes nothing, whatever the other lines hold.
+        assert_eq!(
+            plan_claimed_pick(
+                &request("pick", Some(A), 1),
+                &sold,
+                None,
+                Some(&same),
+                claims_of(&[("finalize", 5)]),
+                0
+            )
+            .unwrap(),
+            Plan::Replay
+        );
+        // The same item on another line (a split webhook allocation) holding that copy: refused, never that line's row.
+        let other_line = json!({ "id": 2, "kind": "swap", "quantity": 1, "line_key": "502@b" });
+        assert_eq!(
+            code(plan_claimed_pick(
+                &request("pick", Some(A), 1),
+                &sold,
+                None,
+                Some(&other_line),
+                claims_of(&[]),
+                0
+            )),
+            "copy_already_picked"
+        );
+    }
+
+    #[test]
+    fn a_line_picks_one_box_so_a_second_copy_of_it_is_refused() {
+        // Two tabs of one line whose box is B: the first took copy A, the second
+        // asks another box. One sale cannot empty two boxes.
+        let mut allocated = listing(0, "sold_out", "box·1");
+        allocated["id"] = json!(B);
+        let other_box = listing(1, "active", "box·3");
+        let error = plan_claimed_pick(
+            &request("pick", Some(B), 1),
+            &other_box,
+            Some(&allocated),
+            None,
+            claims_of(&[]),
+            1,
+        )
+        .unwrap_err();
+        assert_eq!(error.code.as_deref(), Some("line_already_picked"));
+        assert_eq!(
+            error.message,
+            "This line was already picked from another box; undo it first"
+        );
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        // The line's own box answers the same way once it picked elsewhere, and
+        // the other lines' claims are not what stopped it.
+        let sold = listing(0, "sold_out", "box·1");
+        assert_eq!(
+            code(plan_claimed_pick(
+                &request("pick", Some(A), 1),
+                &sold,
+                None,
+                None,
+                claims_of(&[("finalize", 1)]),
+                1
+            )),
+            "line_already_picked"
+        );
+        // A copy of another card is still the copy's own problem, said first.
+        let mut wrong = listing(3, "active", "box·4");
+        wrong["condition"] = json!("SP");
+        assert_eq!(
+            code(plan_claimed_pick(
+                &request("pick", Some(B), 1),
+                &wrong,
+                Some(&allocated),
+                None,
+                claims_of(&[]),
+                1
+            )),
+            "not_identical"
+        );
+        // Nothing of this line is live: another line's claims weigh as before,
+        // and a free box plans its swap (`line_picked_elsewhere` counts this
+        // line key only, so a webhook split's second line is untouched).
+        assert_eq!(
+            plan_claimed_pick(
+                &request("pick", Some(B), 1),
+                &other_box,
+                Some(&allocated),
+                None,
+                claims_of(&[]),
+                0
+            )
+            .unwrap(),
+            Plan::Swap {
+                quantity: 1,
+                clear_location: true
+            }
+        );
+    }
+
+    #[test]
+    fn multi_copy_lines_finalize_alone_and_hold_their_quantity() {
+        let sold = listing(0, "sold_out", "box·1");
+        assert_eq!(
+            plan_claimed_pick(
+                &request("pick", Some(A), 3),
+                &sold,
+                None,
+                None,
+                claims_of(&[]),
+                0
+            )
+            .unwrap(),
+            Plan::Finalize {
+                clear_location: true
+            }
+        );
+        // Other lines finalized copies of a box still showing 3: they hold that many of the 3.
+        let three = listing(3, "active", "box·1");
+        assert_eq!(
+            code(plan_claimed_pick(
+                &request("pick", Some(A), 1),
+                &three,
+                None,
+                None,
+                claims_of(&[("finalize", 3)]),
+                0
+            )),
+            "copy_already_picked"
+        );
+        assert_eq!(
+            plan_claimed_pick(
+                &request("pick", Some(A), 1),
+                &three,
+                None,
+                None,
+                claims_of(&[("finalize", 2)]),
+                0
+            )
+            .unwrap(),
+            Plan::Finalize {
+                clear_location: false
+            }
+        );
+    }
+
+    #[test]
+    fn every_pick_transaction_says_read_committed_before_its_first_read() {
+        assert_eq!(
+            ISOLATION_SQL,
+            "set transaction isolation level read committed"
+        );
+        let source = include_str!("zero_picks.rs");
+        let body = &source[source.find("async fn run_inventory_pick(").unwrap()..];
+        let isolation = body
+            .find("sqlx::query(ISOLATION_SQL)")
+            .expect("isolation set");
+        for read in [
+            "read_live(",
+            "lock_pair(",
+            "read_claims(",
+            "read_line_picks(",
+        ] {
+            assert!(
+                isolation < body.find(read).unwrap(),
+                "{read} after the isolation level"
+            );
+        }
+        assert!(body.find("begin()").unwrap() < isolation);
     }
 }

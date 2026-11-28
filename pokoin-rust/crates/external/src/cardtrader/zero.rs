@@ -534,6 +534,70 @@ impl<'a> ListingIndex<'a> {
     }
 }
 
+/// One compared facet of a copy: trimmed, upper case, blank folded to empty.
+fn identity_facet(value: &Value, key: &str) -> String {
+    text(value.get(key), 40).trim().to_uppercase()
+}
+
+/// What makes two of the seller's rows the same copy for a Zero picking line:
+/// the card plus its finish and condition facets, compared exactly as the pick
+/// handler does (`pokoin-commerce` `zero_picks::identity`, which calls this).
+///
+/// Condition and language ignore case and blanks; the flags read a JSON `true`.
+/// A row that carries no value for a facet has the empty one, so a list built
+/// from rows without the columns still matches itself.
+pub fn listing_identity(row: &Value) -> [String; 9] {
+    let facet = |key: &str| identity_facet(row, key);
+    let flag = |key: &str| {
+        if row.get(key) == Some(&Value::Bool(true)) {
+            '1'
+        } else {
+            '0'
+        }
+    };
+    [
+        text(row.get("card_id"), 80),
+        facet("condition"),
+        facet("language"),
+        flag("reverse").to_string(),
+        flag("first_edition").to_string(),
+        flag("signed").to_string(),
+        flag("graded").to_string(),
+        facet("foil_state"),
+        facet("variant_state"),
+    ]
+}
+
+/// The members of one product that are the same copy as `base` (the line's own
+/// row, unknown when the index does not hold it): a line is never defaulted
+/// onto, nor offered, a copy of another finish or condition than its own.
+///
+/// With no own row the line's identity is what the CardTrader item states:
+/// `item`, its picking line or the item it came from, is compared on its
+/// condition and language, which [`zero_item_row`] already maps to the row's
+/// own values. Only a facet the item states and the row both carry is a
+/// difference — a row that records nothing for a facet stays a match, so an
+/// unnamed item still spreads over rows read without those columns.
+fn same_identity<'a>(members: &[&'a Value], base: Option<&Value>, item: &Value) -> Vec<&'a Value> {
+    let Some(base) = base else {
+        let keeps = |row: &Value, key: &str| {
+            let (want, have) = (identity_facet(item, key), identity_facet(row, key));
+            want.is_empty() || have.is_empty() || have == want
+        };
+        return members
+            .iter()
+            .copied()
+            .filter(|row| keeps(row, "condition") && keeps(row, "language"))
+            .collect();
+    };
+    let want = listing_identity(base);
+    members
+        .iter()
+        .copied()
+        .filter(|row| listing_identity(row) == want)
+        .collect()
+}
+
 fn slot_json(slot: &Slot) -> Value {
     json!({ "box": slot.box_name, "stack": slot.stack, "position": slot.position })
 }
@@ -626,14 +690,10 @@ fn reconcile_allocations(allocations: &[Allocation], quantity: i64) -> Vec<(Stri
     merged
 }
 
-/// One CardTrader item → its picking lines (one per box it is taken from).
-/// Identical copies a line could also be picked from: the other members of
-/// its CardTrader product (members fallback, or a grouped product), the
-/// listing the item names first, then oldest; the line's own listing excluded;
-/// only rows still holding copies (`quantity_available > 0`, active or paused).
-fn line_candidates(line: &Value, index: &ListingIndex) -> Vec<Value> {
+/// The members of a line's CardTrader product: its item's product, else the
+/// product of its own listing.
+fn line_members<'i, 'a>(line: &Value, index: &'i ListingIndex<'a>) -> Option<&'i Vec<&'a Value>> {
     let own = text(line.get("listingId"), 80);
-    let named = text(line.get("namedListingId"), 80);
     let mut product = text(line.get("productId"), 80);
     if !index.members.contains_key(&product) {
         product = index
@@ -642,10 +702,23 @@ fn line_candidates(line: &Value, index: &ListingIndex) -> Vec<Value> {
             .map(|row| parse_ct_product_id(&text(row.get("source_listing_id"), 160)))
             .unwrap_or_default();
     }
-    let Some(members) = index.members.get(&product) else { return Vec::new() };
-    let mut rows: Vec<&Value> = members
-        .iter()
-        .copied()
+    index.members.get(&product)
+}
+
+/// One CardTrader item → its picking lines (one per box it is taken from).
+/// Identical copies a line could also be picked from: the other members of
+/// its CardTrader product (members fallback, or a grouped product), the
+/// listing the item names first, then oldest; the line's own listing excluded;
+/// only rows still holding copies (`quantity_available > 0`, active or paused)
+/// and only copies of the line's own identity ([`listing_identity`]).
+fn line_candidates(line: &Value, index: &ListingIndex) -> Vec<Value> {
+    let own = text(line.get("listingId"), 80);
+    let named = text(line.get("namedListingId"), 80);
+    let Some(members) = line_members(line, index) else {
+        return Vec::new();
+    };
+    let mut rows: Vec<&Value> = same_identity(members, index.by_id.get(&own).copied(), line)
+        .into_iter()
         .filter(|row| text(row.get("id"), 80) != own)
         .filter(|row| i64_field(row, &["quantity_available"]).unwrap_or(0) > 0)
         .filter(|row| matches!(text(row.get("status"), 20).as_str(), "active" | "paused"))
@@ -663,9 +736,14 @@ fn line_candidates(line: &Value, index: &ListingIndex) -> Vec<Value> {
         .collect()
 }
 
-fn split_item(item: &Value, index: &ListingIndex, allocations: Option<&Vec<Allocation>>) -> Vec<Value> {
+fn split_item(
+    item: &Value,
+    index: &ListingIndex,
+    allocations: Option<&Vec<Allocation>>,
+    default: Option<&String>,
+) -> Vec<Value> {
     let named = text(item.get("listingId"), 80);
-    split_item_lines(item, index, allocations)
+    split_item_lines(item, index, allocations, default)
         .into_iter()
         .map(|mut line| {
             line["namedListingId"] = json!(named);
@@ -678,7 +756,103 @@ fn split_item(item: &Value, index: &ListingIndex, allocations: Option<&Vec<Alloc
         .collect()
 }
 
-fn split_item_lines(item: &Value, index: &ListingIndex, allocations: Option<&Vec<Allocation>>) -> Vec<Value> {
+/// The box each members-fallback item of one scope (one shipment, or the
+/// pending list) defaults to, by item id: one copy per box per pass, so
+/// identical items of a product spread over its boxes instead of all naming
+/// the oldest one.
+///
+/// An allocated item is not spread itself, but the copies its allocation names
+/// are charged into those boxes' load before anything spreads: a members line
+/// does not land on a box whose only copy the sale already took. Products with a
+/// single member are not counted. The rest are taken in natural `itemId` order,
+/// in two stages:
+/// 1. an item that names a member gets it only while that member's load is
+///    the lowest of the product (the current pass still has its copy);
+/// 2. every other item gets the member with the lowest load, oldest first on
+///    ties (`created_at`, then id).
+///
+/// An item of quantity q stays one line and adds q to its box's load. Only
+/// the member set, the names, the item ids and quantities count: stock,
+/// status, locations, picks and the response order never move a default. The
+/// member set is the copies of the named listing's own identity
+/// ([`listing_identity`]) — of what the item states when it names no listing
+/// it owns — so a default never lands on another finish.
+fn default_members(
+    items: &[Value],
+    index: &ListingIndex,
+    allocations: &HashMap<String, Vec<Allocation>>,
+) -> HashMap<String, String> {
+    let mut eligible: Vec<(String, Vec<&Value>, String, i64)> = items
+        .iter()
+        .filter_map(|item| {
+            let item_id = text(item.get("itemId"), 40);
+            if allocations
+                .get(&item_id)
+                .is_some_and(|rows| !rows.is_empty())
+            {
+                return None;
+            }
+            let named = text(item.get("listingId"), 80);
+            let members = index
+                .members
+                .get(&text(item.get("productId"), 80))
+                .map(|rows| same_identity(rows, index.by_id.get(&named).copied(), item))
+                .filter(|rows| rows.len() > 1)?;
+            Some((item_id, members, named, quantity_of(item).max(0)))
+        })
+        .collect();
+    eligible.sort_by(|a, b| id_cmp(&a.0, &b.0));
+    let mut load: HashMap<String, i64> = HashMap::new();
+    for charged in items
+        .iter()
+        .filter_map(|item| allocations.get(&text(item.get("itemId"), 40)))
+    {
+        for allocation in charged {
+            *load.entry(allocation.listing_id.clone()).or_default() += allocation.quantity.max(0);
+        }
+    }
+    let mut out: HashMap<String, String> = HashMap::new();
+    let lowest = |members: &[&Value], load: &HashMap<String, i64>| {
+        members
+            .iter()
+            .map(|row| load.get(&text(row.get("id"), 80)).copied().unwrap_or(0))
+            .min()
+            .unwrap_or(0)
+    };
+    for (item_id, members, named, quantity) in &eligible {
+        if named.is_empty() || !members.iter().any(|row| text(row.get("id"), 80) == *named) {
+            continue;
+        }
+        if load.get(named).copied().unwrap_or(0) == lowest(members, &load) {
+            *load.entry(named.clone()).or_default() += quantity;
+            out.insert(item_id.clone(), named.clone());
+        }
+    }
+    for (item_id, members, _, quantity) in &eligible {
+        if out.contains_key(item_id) {
+            continue;
+        }
+        let min = lowest(members, &load);
+        // Members are oldest first: the first at the lowest load.
+        let Some(row) = members
+            .iter()
+            .find(|row| load.get(&text(row.get("id"), 80)).copied().unwrap_or(0) == min)
+        else {
+            continue;
+        };
+        let id = text(row.get("id"), 80);
+        *load.entry(id.clone()).or_default() += quantity;
+        out.insert(item_id.clone(), id);
+    }
+    out
+}
+
+fn split_item_lines(
+    item: &Value,
+    index: &ListingIndex,
+    allocations: Option<&Vec<Allocation>>,
+    default: Option<&String>,
+) -> Vec<Value> {
     let quantity = quantity_of(item);
     let named = text(item.get("listingId"), 80);
     if let Some(allocations) = allocations.filter(|rows| !rows.is_empty()) {
@@ -691,7 +865,21 @@ fn split_item_lines(item: &Value, index: &ListingIndex, allocations: Option<&Vec
         }
     }
     let product = text(item.get("productId"), 80);
-    if let Some(members) = index.members.get(&product).filter(|rows| !rows.is_empty()) {
+    if let Some(group) = index.members.get(&product).filter(|rows| !rows.is_empty()) {
+        // Only the copies of the line's own listing can carry this line; a
+        // different printing is neither its default nor an "also in" box. The
+        // default is its own listing when the item named none.
+        let baseline = if named.is_empty() {
+            default.map(|id| id.as_str()).unwrap_or("")
+        } else {
+            named.as_str()
+        };
+        let filtered = same_identity(group, index.by_id.get(baseline).copied(), item);
+        let members: &[&Value] = if filtered.is_empty() {
+            group
+        } else {
+            &filtered
+        };
         if members.len() == 1 {
             let row = members[0];
             return vec![make_line(item, Some(row), &text(row.get("id"), 80), quantity, "listing", Vec::new())];
@@ -699,7 +887,13 @@ fn split_item_lines(item: &Value, index: &ListingIndex, allocations: Option<&Vec
         let primary = members
             .iter()
             .copied()
-            .find(|row| !named.is_empty() && text(row.get("id"), 80) == named)
+            .find(|row| default.is_some_and(|id| text(row.get("id"), 80) == *id))
+            .or_else(|| {
+                members
+                    .iter()
+                    .copied()
+                    .find(|row| !named.is_empty() && text(row.get("id"), 80) == named)
+            })
             .unwrap_or(members[0]);
         let primary_id = text(primary.get("id"), 80);
         let primary_location = text(primary.get("location"), 120);
@@ -732,6 +926,8 @@ pub fn split_lines(
     let index = ListingIndex::new(rows);
     let expand = |items: &mut Value| {
         let Some(rows) = items.as_array() else { return };
+        // One scope per call: each shipment and the pending list count apart.
+        let defaults = default_members(rows, &index, allocations);
         let lines: Vec<Value> = rows
             .iter()
             .flat_map(|item| {
@@ -739,7 +935,13 @@ pub fn split_lines(
                 if let Some(game) = blueprint_games.get(&text(item.get("blueprintId"), 80)) {
                     offer_game(&mut item, game, "blueprint");
                 }
-                split_item(&item, &index, allocations.get(&text(item.get("itemId"), 40)))
+                let item_id = text(item.get("itemId"), 40);
+                split_item(
+                    &item,
+                    &index,
+                    allocations.get(&item_id),
+                    defaults.get(&item_id),
+                )
             })
             .collect();
         *items = Value::Array(lines);
@@ -1816,23 +2018,45 @@ pub fn apply_picks(list: &mut Value, picks: &HashMap<String, Value>) {
 pub type PgPicks = HashMap<String, HashMap<String, Vec<Value>>>;
 
 const PICKS_SQL: &str = "select id, order_id, item_id, line_key, listing_id::text as listing_id, \
-       coalesce(allocated_listing_id::text, '') as allocated_listing_id, kind, quantity \
+       coalesce(allocated_listing_id::text, '') as allocated_listing_id, kind, quantity, location_from \
      from public.cardtrader_zero_picks \
      where seller_uid = $1 and order_id = any($2::text[]) and state = 'picked' order by id";
 
-/// Picked rows of the weekly orders. A missing table (migration not applied
-/// yet) or a failed read is no rows: the Firestore picks answer instead.
-pub async fn read_pg_picks(db: &crate::db::DbPools, uid: &str, list: &Value) -> PgPicks {
+/// Picked rows of the weekly orders, `None` when the read failed: the list then
+/// says `picksUnavailable` instead of showing every box as free. A missing table
+/// (migration not applied yet) is an empty answer, not a failure. Display only;
+/// the pick handler checks the claims on the writer.
+pub async fn read_pg_picks_checked(
+    db: &crate::db::DbPools,
+    uid: &str,
+    list: &Value,
+) -> Option<PgPicks> {
     let order_ids: Vec<String> = list
         .get("weekly")
         .and_then(Value::as_array)
         .map(|orders| orders.iter().map(|o| text(o.get("orderId"), 40)).filter(|id| !id.is_empty()).collect())
         .unwrap_or_default();
     if order_ids.is_empty() {
-        return HashMap::new();
+        return Some(HashMap::new());
     }
-    let rows = db.query("pokemon", PICKS_SQL, &[json!(uid), json!(order_ids)]).await.unwrap_or_default();
-    group_pg_picks(&rows)
+    let rows = db
+        .query("pokemon", PICKS_SQL, &[json!(uid), json!(order_ids)])
+        .await
+        .ok()?;
+    Some(group_pg_picks(&rows))
+}
+
+/// Copies the live picks hold: every picked listing id, for the listings
+/// read (a box physically picked that is not a member of the line's product).
+pub fn picked_listing_ids(pg: &PgPicks) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for pick in pg.values().flat_map(|lines| lines.values()).flatten() {
+        let id = text(pick.get("listingId"), 80);
+        if !id.is_empty() && !out.contains(&id) {
+            out.push(id);
+        }
+    }
+    out
 }
 
 pub fn group_pg_picks(rows: &[Value]) -> PgPicks {
@@ -1847,6 +2071,7 @@ pub fn group_pg_picks(rows: &[Value]) -> PgPicks {
             "allocatedListingId": text(row.get("allocated_listing_id"), 80),
             "kind": text(row.get("kind"), 20),
             "quantity": i64_field(row, &["quantity"]).unwrap_or(0).max(0),
+            "locationFrom": text(row.get("location_from"), 120),
         });
         out.entry(order_id).or_default().entry(line_key).or_default().push(pick);
     }
@@ -1888,6 +2113,184 @@ pub fn apply_picks_with(list: &mut Value, picks: &HashMap<String, Value>, pg: &P
         }
         order["pickedLines"] = json!(picked_lines);
         order["issueCount"] = json!(issue_count);
+    }
+}
+
+/// One copy, one line, on the list: every weekly line says which of its boxes
+/// it can no longer have because other lines of the same order picked their
+/// copies (`ownTaken`, `candidates[].taken`), through the same
+/// [`zero_claims::check_claim`](crate::cardtrader::zero_claims::check_claim)
+/// the pick handler refuses with. Members other lines claimed that hold no
+/// copy any more stay offered as taken (instead of dropping out with their
+/// stock), their location recovered from the pick that cleared it. A line that
+/// has a live pick of its own takes one box, so every other box of it is taken
+/// as well ([`zero_claims::line_picked_elsewhere`], the handler's
+/// `line_already_picked`). A line
+/// picked from another box than its own gets `pickedFrom`
+/// (`[{listingId, location, quantity}]`). A line whose own box a live pick
+/// emptied and cleared keeps naming its own box for the sort and the CSV, and
+/// gets that box's location back as `homeLocation` for the label the chooser
+/// shows. Runs after [`apply_picks_with`] and before the sort; the pending list
+/// has no picks and is left as it is.
+///
+/// `rows` is the seller's listing read: `None` when it failed. Then nothing is
+/// annotated at all — no `ownTaken`, no `candidates[].taken`, no recovered
+/// location — because a list that cannot see the stock must not call a box with
+/// copies taken. The response says `listingsUnavailable` and the pick handler
+/// stays the guard.
+pub fn annotate_claims(list: &mut Value, rows: Option<&[Value]>, pg: &PgPicks) {
+    use crate::cardtrader::zero_claims::{line_picked_elsewhere, taken, BoxClaims, ClaimKind};
+    let Some(rows) = rows else {
+        return;
+    };
+    let index = ListingIndex::new(rows);
+    let mut cleared: HashMap<String, String> = HashMap::new();
+    for pick in pg.values().flat_map(|lines| lines.values()).flatten() {
+        let from = text(pick.get("locationFrom"), 120);
+        if !from.is_empty() {
+            cleared
+                .entry(text(pick.get("listingId"), 80))
+                .or_insert(from);
+        }
+    }
+    let location_of = |id: &str| {
+        let location = index
+            .by_id
+            .get(id)
+            .map(|row| text(row.get("location"), 120))
+            .unwrap_or_default();
+        if location.is_empty() {
+            cleared.get(id).cloned().unwrap_or_default()
+        } else {
+            location
+        }
+    };
+    let stock_of = |id: &str| {
+        index
+            .by_id
+            .get(id)
+            .and_then(|row| i64_field(row, &["quantity_available"]))
+            .unwrap_or(0)
+    };
+    let Some(orders) = list.get_mut("weekly").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for order in orders.iter_mut() {
+        let order_picks: Vec<(String, &Value)> = pg
+            .get(&text(order.get("orderId"), 40))
+            .map(|lines| {
+                lines
+                    .iter()
+                    .flat_map(|(key, picks)| picks.iter().map(move |pick| (key.clone(), pick)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for line in order
+            .get_mut("items")
+            .and_then(Value::as_array_mut)
+            .into_iter()
+            .flatten()
+        {
+            let line_key = text(line.get("lineKey"), 200);
+            let item_id = text(line.get("itemId"), 40);
+            let own = text(line.get("listingId"), 80);
+            let quantity = line.get("quantity").and_then(Value::as_i64).unwrap_or(0);
+            // One line, one box: a line that already picked a box has no other
+            // box to pick, and the handler refuses it with `line_already_picked`.
+            let line_picked: Vec<(String, String, i64)> = order_picks
+                .iter()
+                .filter(|(key, pick)| *key == line_key && text(pick.get("itemId"), 40) == item_id)
+                .map(|(key, pick)| {
+                    let quantity = pick.get("quantity").and_then(Value::as_i64).unwrap_or(0);
+                    (key.clone(), text(pick.get("listingId"), 80), quantity)
+                })
+                .collect();
+            let settled_elsewhere =
+                |listing: &str| line_picked_elsewhere(&line_picked, &line_key, listing) > 0;
+            // As the handler: other lines' live picks on the box; the same item
+            // on another line holding it is refused outright (one live pick per
+            // item and copy).
+            let box_taken = |listing: &str, kind: ClaimKind| {
+                let mut claims = BoxClaims::default();
+                let mut same_item = false;
+                for (key, pick) in &order_picks {
+                    if text(pick.get("listingId"), 80) != listing
+                        || (*key == line_key && text(pick.get("itemId"), 40) == item_id)
+                    {
+                        continue;
+                    }
+                    same_item |= text(pick.get("itemId"), 40) == item_id;
+                    claims.add(
+                        &text(pick.get("kind"), 20),
+                        pick.get("quantity").and_then(Value::as_i64).unwrap_or(0),
+                    );
+                }
+                same_item || taken(kind, stock_of(listing), claims, quantity)
+            };
+            let own_taken = !own.is_empty() && box_taken(&own, ClaimKind::Finalize);
+            let mut candidates: Vec<Value> = line
+                .get("candidates")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            for candidate in candidates.iter_mut() {
+                let id = text(candidate.get("listingId"), 80);
+                let is_taken = box_taken(&id, ClaimKind::Swap) || settled_elsewhere(&id);
+                if is_taken && text(candidate.get("location"), 120).is_empty() {
+                    candidate["location"] = json!(location_of(&id));
+                }
+                candidate["taken"] = json!(is_taken);
+            }
+            let offered: HashSet<String> = candidates
+                .iter()
+                .map(|c| text(c.get("listingId"), 80))
+                .collect();
+            for row in line_members(line, &index).into_iter().flatten() {
+                let id = text(row.get("id"), 80);
+                if id == own
+                    || offered.contains(&id)
+                    || !order_picks
+                        .iter()
+                        .any(|(_, pick)| text(pick.get("listingId"), 80) == id)
+                {
+                    continue;
+                }
+                if box_taken(&id, ClaimKind::Swap) || settled_elsewhere(&id) {
+                    candidates.push(json!({
+                        "listingId": id,
+                        "location": location_of(&id),
+                        "quantityAvailable": i64_field(row, &["quantity_available"]).unwrap_or(0),
+                        "taken": true,
+                    }));
+                }
+            }
+            let picked_from: Vec<Value> = line
+                .get("picks")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|pick| text(pick.get("listingId"), 80) != own)
+                .map(|pick| {
+                    let id = text(pick.get("listingId"), 80);
+                    json!({ "listingId": id, "location": location_of(&id), "quantity": pick.get("quantity").cloned().unwrap_or(json!(0)) })
+                })
+                .collect();
+            // A live pick (another line's, or this line's own finalize) emptied
+            // this line's box and cleared its location. The line still names
+            // that box: `location`, the slot and the CSV stay the listing's own,
+            // as before any pick was recorded, and `homeLocation` carries the
+            // location the pick stored for the label of the line's own copy.
+            let mut home_location = text(line.get("location"), 120);
+            if !own.is_empty() && home_location.is_empty() {
+                if let Some(from) = cleared.get(&own) {
+                    home_location = from.clone();
+                }
+            }
+            line["ownTaken"] = json!(own_taken);
+            line["homeLocation"] = json!(home_location);
+            line["candidates"] = json!(candidates);
+            line["pickedFrom"] = json!(picked_from);
+        }
     }
 }
 
@@ -2160,8 +2563,14 @@ pub async fn blueprint_games(db: &crate::db::DbPools, list: &Value) -> HashMap<S
         .collect()
 }
 
+/// The listing columns the Zero list reads. The identity facets are here so a
+/// copy of another finish, condition, language, reverse, first edition, signed
+/// or graded state is never offered or defaulted onto a line (see
+/// `listing_identity` and `pokoin-commerce` `zero_picks::identity`, which compares
+/// the same columns).
 const LISTINGS_SQL: &str = "select id::text as id, card_id, source_listing_id, location, collector_number, card_image_url, \
-       marketplace_game, status, quantity_available, card_name, \
+       marketplace_game, status, quantity_available, card_name, condition, language, reverse, first_edition, signed, \
+       graded, foil_state, variant_state, \
        to_char(created_at at time zone 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') as created_at \
      from public.marketplace_user_listings \
      where seller_uid = $1 and (source_listing_id = any($2::text[]) or id::text = any($3::text[]))";
@@ -2457,7 +2866,11 @@ pub async fn zero_list(
         timed(read_allocations(firestore, uid, &list)),
         timed(blueprint_games(db, &list)),
         timed(async {
-            tokio::join!(read_picks(firestore, uid, &list), read_pg_picks(db, uid, &list), read_settings(firestore, uid))
+            tokio::join!(
+                read_picks(firestore, uid, &list),
+                read_pg_picks_checked(db, uid, &list),
+                read_settings(firestore, uid)
+            )
         }),
         timed(articles_read),
     );
@@ -2476,21 +2889,42 @@ pub async fn zero_list(
     }
     drop(guard);
 
+    let picks_unavailable = pg_picks.is_none();
+    let pg_picks = pg_picks.unwrap_or_default();
     let source_ids = linked_source_ids(&list);
-    let listing_ids = linked_listing_ids(&list, &allocations);
-    // No status filter: a sold_out row still says which box the copy left.
+    let mut listing_ids = linked_listing_ids(&list, &allocations);
+    // A box physically picked from may belong to no line's product.
+    for id in picked_listing_ids(&pg_picks) {
+        if !listing_ids.contains(&id) {
+            listing_ids.push(id);
+        }
+    }
+    // No status filter: a sold_out row still says which box the copy left. A
+    // failed read stays missing (`None`) rather than becoming an empty list: the
+    // taken flags and the picked-box locations are then skipped, and the page
+    // says so (`listingsUnavailable`).
     let (rows, listings_ms) = timed(async {
         if source_ids.is_empty() && listing_ids.is_empty() {
-            Vec::new()
+            Some(Vec::new())
         } else {
-            db.query("pokemon", LISTINGS_SQL, &[json!(uid), json!(source_ids), json!(listing_ids)])
-                .await
-                .unwrap_or_default()
+            db.query(
+                "pokemon",
+                LISTINGS_SQL,
+                &[json!(uid), json!(source_ids), json!(listing_ids)],
+            )
+            .await
+            .ok()
         }
     })
     .await;
+    let listings_unavailable = rows.is_none();
     timings.add("listings", listings_ms);
-    split_lines(&mut list, &rows, &allocations, &games);
+    split_lines(
+        &mut list,
+        rows.as_deref().unwrap_or_default(),
+        &allocations,
+        &games,
+    );
 
     // Power Tools overlay; never fails the CardTrader list.
     let mut power_tools = json!({ "connected": false });
@@ -2544,6 +2978,7 @@ pub async fn zero_list(
     }
     power_tools["picking"] = picking;
     apply_picks_with(&mut list, &picks, &pg_picks);
+    annotate_claims(&mut list, rows.as_deref(), &pg_picks);
     sort_for_picking_with(&mut list, &settings.sorting_fields);
     mark_pt_mismatches(&mut list);
     let ct_user = ct_doc.data.pointer("/metadata/user").cloned().unwrap_or(json!({}));
@@ -2563,6 +2998,8 @@ pub async fn zero_list(
             "totals": list["totals"].clone(),
             "powerTools": power_tools,
             "sorting": settings.sorting_json(),
+            "picksUnavailable": picks_unavailable,
+            "listingsUnavailable": listings_unavailable,
         }),
         timings,
     ))
@@ -3961,5 +4398,853 @@ mod tests {
         );
         assert_eq!(a.unwrap().0["weekly"], b.unwrap().0["weekly"]);
         assert_eq!(remotes.ct_calls.lock().unwrap().len(), 2, "one paid + one hub_pending fetch for both requests");
+    }
+
+    // ------------------------------------------------------------ one box per line (capacity rule)
+
+    const N1: &str = "00000000-0000-4000-8000-000000000001";
+    const N2: &str = "00000000-0000-4000-8000-000000000002";
+    const N3: &str = "00000000-0000-4000-8000-000000000003";
+
+    fn three_boxes() -> Vec<Value> {
+        vec![
+            row(N1, "101", "box1·1", "2026-09-01T00:00:00.000Z"),
+            row(N2, "101", "box2·1", "2026-09-02T00:00:00.000Z"),
+            row(N3, "101", "box3·1", "2026-09-03T00:00:00.000Z"),
+        ]
+    }
+
+    fn named_item(id: &str, qty: i64, listing: &str) -> Value {
+        let mut named = item(id, "101", qty, 10);
+        named["user_data_field"] = json!(format!("pokoin:{listing}"));
+        named
+    }
+
+    fn listing_ids(lines: &[Value]) -> Vec<String> {
+        field(lines, "listingId")
+    }
+
+    fn split_one(items: Vec<Value>, rows: &[Value]) -> Vec<Value> {
+        let mut list = build_zero_list(&[zero_order("1", "paid", items)]);
+        split_lines(&mut list, rows, &HashMap::new(), &HashMap::new());
+        lines(&list)
+    }
+
+    #[test]
+    fn three_same_product_items_take_three_distinct_boxes() {
+        let rows = three_boxes();
+        // The response array order does not matter: ids 11 < 12 < 13.
+        let out = split_one(
+            vec![
+                item("13", "101", 1, 10),
+                item("11", "101", 1, 10),
+                item("12", "101", 1, 10),
+            ],
+            &rows,
+        );
+        assert_eq!(listing_ids(&out), vec![N3, N1, N2]);
+        assert_eq!(field(&out, "location"), vec!["box3·1", "box1·1", "box2·1"]);
+        assert_eq!(
+            field(&out, "lineKey"),
+            vec![format!("13@{N3}"), format!("11@{N1}"), format!("12@{N2}")]
+        );
+        // Each line offers the other boxes, never its own.
+        for line in &out {
+            let own = line["listingId"].as_str().unwrap();
+            let offered: Vec<&str> = line["candidates"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| c["listingId"].as_str().unwrap())
+                .collect();
+            assert_eq!(offered.len(), 2, "{line}");
+            assert!(!offered.contains(&own));
+        }
+    }
+
+    #[test]
+    fn a_copy_of_another_finish_is_neither_a_default_nor_a_choice() {
+        let mut rows = three_boxes();
+        // N3 is the reverse-holo printing of the same product; N1 and N2 are plain.
+        rows[2]["foil_state"] = json!("reverse");
+        let out = split_one(
+            vec![item("11", "101", 1, 10), item("12", "101", 1, 10)],
+            &rows,
+        );
+        // The two plain lines spread over the two plain boxes.
+        assert_eq!(listing_ids(&out), vec![N1, N2]);
+        for line in &out {
+            let offered: Vec<&str> = line["candidates"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| c["listingId"].as_str().unwrap())
+                .collect();
+            assert!(!offered.contains(&N3), "the foil copy is a choice: {line}");
+            assert_eq!(
+                line["alsoIn"].as_array().unwrap().len(),
+                1,
+                "the foil copy is an also-in box: {line}"
+            );
+        }
+        // A line whose own copy is the foil one has no plain choice either.
+        let out = split_one(vec![named_item("13", 1, N3)], &rows);
+        assert_eq!(listing_ids(&out), vec![N3]);
+        assert_eq!(out[0]["candidates"], json!([]));
+        assert_eq!(out[0]["alsoIn"], json!([]));
+        // A condition or language of its own is the same refusal.
+        let mut rows = three_boxes();
+        rows[1]["language"] = json!("JP");
+        let out = split_one(
+            vec![item("11", "101", 1, 10), item("12", "101", 1, 10)],
+            &rows,
+        );
+        assert_eq!(listing_ids(&out), vec![N1, N3]);
+        // Case and blanks are no difference: two rows of one identity.
+        let mut rows = three_boxes();
+        rows[0]["language"] = json!(" en ");
+        rows[1]["language"] = json!("EN");
+        let out = split_one(
+            vec![item("11", "101", 1, 10), item("12", "101", 1, 10)],
+            &rows,
+        );
+        assert_eq!(listing_ids(&out), vec![N1, N2]);
+        assert!(
+            offers(&out[0], N2),
+            "case and blanks are not another copy: {}",
+            out[0]
+        );
+    }
+
+    #[test]
+    fn a_named_box_is_taken_first_and_repeated_names_spread() {
+        let rows = three_boxes();
+        let out = split_one(
+            vec![
+                named_item("11", 1, N3),
+                named_item("12", 1, N3),
+                named_item("13", 1, N3),
+                item("14", "101", 1, 10),
+            ],
+            &rows,
+        );
+        // 11 keeps the box it names; 12 and 13 name the same box again and fall
+        // through the lowest load, oldest first; 14 then reuses the lowest load.
+        assert_eq!(listing_ids(&out), vec![N3, N1, N2, N1]);
+        // A named listing that is not a member is no name at all.
+        let out = split_one(
+            vec![named_item("11", 1, "00000000-0000-4000-8000-0000000000ff")],
+            &rows,
+        );
+        assert_eq!(listing_ids(&out), vec![N1]);
+    }
+
+    #[test]
+    fn named_boxes_beat_unnamed_items_of_lower_ids() {
+        let rows = three_boxes();
+        let out = split_one(
+            vec![item("11", "101", 1, 10), named_item("12", 1, N1)],
+            &rows,
+        );
+        assert_eq!(listing_ids(&out), vec![N2, N1]);
+    }
+
+    #[test]
+    fn a_quantity_weighs_the_box_but_stays_one_line() {
+        let rows = three_boxes();
+        let out = split_one(
+            vec![
+                item("11", "101", 5, 10),
+                item("12", "101", 1, 10),
+                item("13", "101", 1, 10),
+                item("14", "101", 1, 10),
+            ],
+            &rows,
+        );
+        assert_eq!(out.len(), 4);
+        assert_eq!(out[0]["quantity"], 5);
+        // Loads after 11, 12, 13 are 5, 1, 1: 14 takes the oldest of the lowest.
+        assert_eq!(listing_ids(&out), vec![N1, N2, N3, N2]);
+    }
+
+    #[test]
+    fn more_items_than_boxes_reuse_the_lowest_load() {
+        let rows = three_boxes();
+        let items: Vec<Value> = (11..=17)
+            .map(|n| item(&n.to_string(), "101", 1, 10))
+            .collect();
+        let out = split_one(items, &rows);
+        assert_eq!(listing_ids(&out), vec![N1, N2, N3, N1, N2, N3, N1]);
+        assert!(out.iter().all(|l| l["allocation"] == "members"));
+    }
+
+    #[test]
+    fn event_allocations_count_in_the_load_the_members_spread_around() {
+        let rows = three_boxes();
+        let mut list = build_zero_list(&[zero_order(
+            "1",
+            "paid",
+            vec![
+                item("11", "101", 2, 10),
+                item("12", "101", 1, 10),
+                item("13", "101", 1, 10),
+            ],
+        )]);
+        let allocations = HashMap::from([(
+            "11".to_string(),
+            vec![
+                Allocation {
+                    listing_id: N1.into(),
+                    quantity: 1,
+                },
+                Allocation {
+                    listing_id: N1.into(),
+                    quantity: 1,
+                },
+            ],
+        )]);
+        split_lines(&mut list, &rows, &allocations, &HashMap::new());
+        let out = lines(&list);
+        assert_eq!(listing_ids(&out), vec![N1, N2, N3]);
+        assert_eq!(
+            field(&out, "allocation"),
+            vec!["event", "members", "members"]
+        );
+        assert_eq!(out[0]["quantity"], 2);
+    }
+
+    #[test]
+    fn the_members_defaults_of_a_finalized_event_line_stay_where_the_charge_put_them() {
+        let before = three_boxes();
+        // The event line's finalize left box1·1 empty: the pick cleared it.
+        let after = vec![
+            stocked(N1, 0, "sold_out", "", "2026-09-01T00:00:00.000Z"),
+            before[1].clone(),
+            before[2].clone(),
+        ];
+        let allocations = HashMap::from([(
+            "11".to_string(),
+            vec![
+                Allocation {
+                    listing_id: N1.into(),
+                    quantity: 1,
+                },
+                Allocation {
+                    listing_id: N1.into(),
+                    quantity: 1,
+                },
+            ],
+        )]);
+        let picks = [live_pick(
+            "11",
+            &format!("11@{N1}"),
+            N1,
+            N1,
+            "finalize",
+            2,
+            "box1·1",
+        )];
+        let out = annotated(
+            vec![
+                item("11", "101", 2, 10),
+                item("12", "101", 1, 10),
+                item("13", "101", 1, 10),
+            ],
+            &before,
+            &after,
+            &picks,
+            &allocations,
+        );
+        // The members lines avoid the box the allocation charged, before the
+        // finalize and after it: `annotated` already proved the pick itself
+        // moved no default.
+        assert_eq!(listing_ids(&out), vec![N1, N2, N3]);
+        assert_eq!(
+            field(&out, "allocation"),
+            vec!["event", "members", "members"]
+        );
+        assert_eq!(out[0]["ownTaken"], false, "its own pick is not a claim");
+        assert_eq!(candidate(&out[0], N2)["taken"], true, "line 11 has its box");
+        assert_eq!(out[1]["ownTaken"], false, "N2 still holds line 12's copy");
+    }
+
+    #[test]
+    fn shipments_and_pending_are_independent_scopes() {
+        let rows = three_boxes();
+        let mut list = build_zero_list(&[
+            zero_order(
+                "1",
+                "paid",
+                vec![item("11", "101", 1, 10), item("12", "101", 1, 10)],
+            ),
+            zero_order("2", "paid", vec![item("21", "101", 1, 10)]),
+            zero_order("3", "hub_pending", vec![item("31", "101", 1, 10)]),
+        ]);
+        split_lines(&mut list, &rows, &HashMap::new(), &HashMap::new());
+        let weekly: Vec<Vec<String>> = list["weekly"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|order| listing_ids(order["items"].as_array().unwrap()))
+            .collect();
+        assert_eq!(
+            weekly,
+            vec![vec![N1.to_string(), N2.to_string()], vec![N1.to_string()]]
+        );
+        let pending = listing_ids(list["pending"]["items"].as_array().unwrap());
+        assert_eq!(pending, vec![N1.to_string()]);
+    }
+
+    #[test]
+    fn defaults_do_not_move_with_stock_location_or_row_order() {
+        let rows = three_boxes();
+        let items = || {
+            vec![
+                item("11", "101", 1, 10),
+                item("12", "101", 1, 10),
+                item("13", "101", 1, 10),
+            ]
+        };
+        let before = split_one(items(), &rows);
+        // A swap and a finalize: stock moves, a location is cleared, the
+        // response lists the rows in another order.
+        let mut after = rows.clone();
+        after[0]["quantity_available"] = json!(0);
+        after[0]["status"] = json!("sold_out");
+        after[0]["location"] = json!("");
+        after[1]["quantity_available"] = json!(3);
+        after.reverse();
+        let reloaded = split_one(items(), &after);
+        assert_eq!(field(&before, "lineKey"), field(&reloaded, "lineKey"));
+        assert_eq!(listing_ids(&before), listing_ids(&reloaded));
+        assert_eq!(field(&before, "allocation"), field(&reloaded, "allocation"));
+    }
+
+    #[test]
+    fn pending_items_spread_over_the_boxes_as_their_own_scope() {
+        let rows = three_boxes();
+        let mut list = build_zero_list(&[
+            zero_order("1", "paid", vec![item("11", "101", 1, 10)]),
+            zero_order(
+                "3",
+                "hub_pending",
+                vec![
+                    item("33", "101", 1, 10),
+                    item("31", "101", 2, 10),
+                    item("32", "101", 1, 10),
+                ],
+            ),
+            zero_order("4", "hub_pending", vec![item("41", "101", 1, 10)]),
+        ]);
+        split_lines(&mut list, &rows, &HashMap::new(), &HashMap::new());
+        assert_eq!(listing_ids(&lines(&list)), vec![N1.to_string()]);
+        // The pending list is one scope, whatever order it came in: 31 (q 2), 32,
+        // 33 spread, then 41 takes the lowest load (N2 and N3 hold 1, N1 holds 2).
+        let pending = list["pending"]["items"].as_array().unwrap();
+        let by_item: HashMap<String, String> = pending
+            .iter()
+            .map(|line| {
+                (
+                    text(line.get("itemId"), 40),
+                    text(line.get("listingId"), 80),
+                )
+            })
+            .collect();
+        assert_eq!(by_item["31"], N1);
+        assert_eq!(by_item["32"], N2);
+        assert_eq!(by_item["33"], N3);
+        assert_eq!(by_item["41"], N2);
+        assert!(pending.iter().all(|line| line["allocation"] == "members"));
+    }
+
+    #[test]
+    fn a_named_box_is_honoured_again_on_a_later_pass() {
+        let two = vec![
+            row(N1, "101", "box1·1", "2026-09-01T00:00:00.000Z"),
+            row(N2, "101", "box2·1", "2026-09-02T00:00:00.000Z"),
+        ];
+        // 11 and 12 take their named boxes on the first pass; 13 names N1 again on
+        // the second pass, when N1 is back at the lowest load: honoured.
+        let out = split_one(
+            vec![
+                named_item("11", 1, N1),
+                named_item("12", 1, N2),
+                named_item("13", 1, N1),
+                item("14", "101", 1, 10),
+            ],
+            &two,
+        );
+        assert_eq!(listing_ids(&out), vec![N1, N2, N1, N2]);
+        // A named box a quantity already filled past the pass is not honoured.
+        let out = split_one(vec![named_item("11", 3, N1), named_item("12", 1, N1)], &two);
+        assert_eq!(listing_ids(&out), vec![N1, N2]);
+    }
+
+    fn stocked(id: &str, stock: i64, status: &str, location: &str, created: &str) -> Value {
+        let mut out = row(id, "101", location, created);
+        out["quantity_available"] = json!(stock);
+        out["status"] = json!(status);
+        out
+    }
+
+    fn live_pick(
+        item: &str,
+        line_key: &str,
+        listing: &str,
+        allocated: &str,
+        kind: &str,
+        quantity: i64,
+        from: &str,
+    ) -> Value {
+        json!({ "id": 1, "order_id": "1", "item_id": item, "line_key": line_key, "listing_id": listing,
+                "allocated_listing_id": allocated, "kind": kind, "quantity": quantity, "location_from": from })
+    }
+
+    fn annotated(
+        items: Vec<Value>,
+        before: &[Value],
+        after: &[Value],
+        picks: &[Value],
+        allocations: &HashMap<String, Vec<Allocation>>,
+    ) -> Vec<Value> {
+        // Defaults never read stock: split on the rows before the picks, check on the rows after.
+        let mut list = build_zero_list(&[zero_order("1", "paid", items.clone())]);
+        split_lines(&mut list, before, allocations, &HashMap::new());
+        let defaults = listing_ids(&lines(&list));
+        let mut list = build_zero_list(&[zero_order("1", "paid", items)]);
+        split_lines(&mut list, after, allocations, &HashMap::new());
+        assert_eq!(
+            listing_ids(&lines(&list)),
+            defaults,
+            "picks never move a default"
+        );
+        let pg = group_pg_picks(picks);
+        apply_picks_with(&mut list, &HashMap::new(), &pg);
+        annotate_claims(&mut list, Some(after), &pg);
+        lines(&list)
+    }
+
+    fn candidate<'a>(line: &'a Value, id: &str) -> &'a Value {
+        line["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["listingId"] == id)
+            .unwrap_or_else(|| panic!("{id} not offered: {line}"))
+    }
+
+    fn offers(line: &Value, id: &str) -> bool {
+        line["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["listingId"] == id)
+    }
+
+    #[test]
+    fn a_box_another_line_swapped_out_is_taken_for_its_default_line_and_stays_offered() {
+        let before = vec![
+            stocked(N1, 1, "active", "box1·1", "2026-09-01T00:00:00.000Z"),
+            stocked(N2, 1, "active", "box2·1", "2026-09-02T00:00:00.000Z"),
+            stocked(N3, 1, "active", "box3·1", "2026-09-03T00:00:00.000Z"),
+        ];
+        // Line 11 (default N1) took N2's only copy: N2 empty with its location
+        // cleared, N1 credited.
+        let mut after = before.clone();
+        after[0]["quantity_available"] = json!(2);
+        after[1] = stocked(N2, 0, "sold_out", "", "2026-09-02T00:00:00.000Z");
+        let picks = [live_pick(
+            "11",
+            &format!("11@{N1}"),
+            N2,
+            N1,
+            "swap",
+            1,
+            "box2·1",
+        )];
+        let out = annotated(
+            vec![
+                item("11", "101", 1, 10),
+                item("12", "101", 1, 10),
+                item("13", "101", 1, 10),
+            ],
+            &before,
+            &after,
+            &picks,
+            &HashMap::new(),
+        );
+        // Line 12's own box N2 is taken: Pick is off (the handler refuses its finalize).
+        assert_eq!(out[1]["listingId"], N2);
+        assert_eq!(out[1]["ownTaken"], true);
+        // Line 13 still sees N2, taken, at the location it had; N1 is free.
+        let n2 = candidate(&out[2], N2);
+        assert_eq!(n2["taken"], true);
+        assert_eq!(n2["location"], "box2·1");
+        assert_eq!(n2["quantityAvailable"], 0);
+        assert_eq!(candidate(&out[2], N1)["taken"], false);
+        assert_eq!(out[2]["ownTaken"], false);
+        // Line 11 is picked from N2 and says so; its own pick never takes its own boxes.
+        assert_eq!(out[0]["picked"], 1);
+        assert_eq!(out[0]["ownTaken"], false);
+        assert_eq!(
+            out[0]["pickedFrom"],
+            json!([{ "listingId": N2, "location": "box2·1", "quantity": 1 }])
+        );
+        assert_eq!(out[1]["pickedFrom"], json!([]));
+    }
+
+    #[test]
+    fn a_line_that_picked_a_box_is_offered_no_other_box() {
+        let before = vec![
+            stocked(N1, 1, "active", "box1·1", "2026-09-01T00:00:00.000Z"),
+            stocked(N2, 1, "active", "box2·1", "2026-09-02T00:00:00.000Z"),
+            stocked(N3, 1, "active", "box3·1", "2026-09-03T00:00:00.000Z"),
+        ];
+        let items = || {
+            vec![
+                item("11", "101", 1, 10),
+                item("12", "101", 1, 10),
+                item("13", "101", 1, 10),
+            ]
+        };
+        // Nothing picked: every line is offered the other two boxes.
+        let free = annotated(items(), &before, &before, &[], &HashMap::new());
+        assert_eq!(listing_ids(&free), vec![N1, N2, N3]);
+        assert_eq!(candidate(&free[0], N2)["taken"], false);
+        assert_eq!(candidate(&free[0], N3)["taken"], false);
+        // Line 11 (its box N1) took N3: N3 is empty and N1 credited its copy.
+        let mut after = before.clone();
+        after[0]["quantity_available"] = json!(2);
+        after[2] = stocked(N3, 0, "sold_out", "", "2026-09-03T00:00:00.000Z");
+        let picks = [live_pick(
+            "11",
+            &format!("11@{N1}"),
+            N3,
+            N1,
+            "swap",
+            1,
+            "box3·1",
+        )];
+        let out = annotated(items(), &before, &after, &picks, &HashMap::new());
+        // The line is settled: the box it took is gone from the offer, and the box
+        // it could still try is marked taken, as the handler answers
+        // `line_already_picked` for either.
+        assert_eq!(out[0]["picked"], 1);
+        assert!(
+            !offers(&out[0], N3),
+            "the emptied copy is not offered again: {}",
+            out[0]
+        );
+        assert_eq!(candidate(&out[0], N2)["taken"], true);
+        // A line with no pick of its own keeps its choices: 12 still has N1.
+        assert_eq!(out[1]["picked"], 0);
+        assert_eq!(candidate(&out[1], N1)["taken"], false);
+        // Undone: 11 is offered its boxes again.
+        let back = annotated(items(), &before, &before, &[], &HashMap::new());
+        assert_eq!(candidate(&back[0], N2)["taken"], false);
+        assert_eq!(candidate(&back[0], N3)["taken"], false);
+    }
+
+    #[test]
+    fn the_first_finalize_of_a_sold_out_box_takes_it_from_the_other_lines() {
+        let before = vec![
+            stocked(N1, 0, "sold_out", "box1·1", "2026-09-01T00:00:00.000Z"),
+            stocked(N2, 0, "sold_out", "box2·1", "2026-09-02T00:00:00.000Z"),
+        ];
+        let mut after = before.clone();
+        after[0]["location"] = json!("");
+        let picks = [live_pick(
+            "11",
+            &format!("11@{N1}"),
+            N1,
+            N1,
+            "finalize",
+            1,
+            "box1·1",
+        )];
+        let out = annotated(
+            vec![
+                item("11", "101", 1, 10),
+                item("12", "101", 1, 10),
+                item("13", "101", 1, 10),
+            ],
+            &before,
+            &after,
+            &picks,
+            &HashMap::new(),
+        );
+        assert_eq!(listing_ids(&out), vec![N1, N2, N1]);
+        assert_eq!(out[0]["ownTaken"], false, "its own pick");
+        assert_eq!(
+            out[2]["ownTaken"], true,
+            "13 shares N1 with 11, whose finalize has the one copy"
+        );
+        assert_eq!(out[1]["ownTaken"], false, "N2's copy is still 12's");
+        let n1 = candidate(&out[1], N1);
+        assert_eq!(
+            (n1["taken"].clone(), n1["location"].clone()),
+            (json!(true), json!("box1·1"))
+        );
+        // Nothing claimed N2: an empty box nobody picked is not offered, as before.
+        assert!(out[2]["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["listingId"] != N2));
+        assert_eq!(out[0]["pickedFrom"], json!([]));
+    }
+
+    #[test]
+    fn the_other_line_of_a_split_item_holding_a_box_takes_it() {
+        let rows = vec![
+            stocked(N1, 0, "sold_out", "box1·1", "2026-09-01T00:00:00.000Z"),
+            stocked(N2, 3, "active", "box2·1", "2026-09-02T00:00:00.000Z"),
+        ];
+        let allocations = HashMap::from([(
+            "11".to_string(),
+            vec![
+                Allocation {
+                    listing_id: N1.into(),
+                    quantity: 1,
+                },
+                Allocation {
+                    listing_id: N2.into(),
+                    quantity: 1,
+                },
+            ],
+        )]);
+        let picks = [live_pick(
+            "11",
+            &format!("11@{N2}"),
+            N2,
+            N2,
+            "finalize",
+            1,
+            "",
+        )];
+        let out = annotated(
+            vec![item("11", "101", 2, 10)],
+            &rows,
+            &rows,
+            &picks,
+            &allocations,
+        );
+        assert_eq!(
+            field(&out, "lineKey"),
+            vec![format!("11@{N1}"), format!("11@{N2}")]
+        );
+        // N2 has stock to spare, but one item keeps one live pick per box.
+        assert_eq!(candidate(&out[0], N2)["taken"], true);
+        assert_eq!(out[1]["ownTaken"], false);
+    }
+
+    #[test]
+    fn multi_copy_finalize_holds_its_quantity_on_the_list() {
+        let rows = vec![
+            stocked(N1, 3, "active", "box1·1", "2026-09-01T00:00:00.000Z"),
+            stocked(N2, 0, "sold_out", "box2·1", "2026-09-02T00:00:00.000Z"),
+        ];
+        // 11 (q 3) finalized all of N1's copies; 12 (default N2) could only swap from N1.
+        let picks = [live_pick(
+            "11",
+            &format!("11@{N1}"),
+            N1,
+            N1,
+            "finalize",
+            3,
+            "",
+        )];
+        let out = annotated(
+            vec![item("11", "101", 3, 10), item("12", "101", 1, 10)],
+            &rows,
+            &rows,
+            &picks,
+            &HashMap::new(),
+        );
+        assert_eq!(listing_ids(&out), vec![N1, N2]);
+        assert_eq!(candidate(&out[1], N1)["taken"], true);
+        // Undone: no live pick, N1 is free again.
+        let out = annotated(
+            vec![item("11", "101", 3, 10), item("12", "101", 1, 10)],
+            &rows,
+            &rows,
+            &[],
+            &HashMap::new(),
+        );
+        assert_eq!(candidate(&out[1], N1)["taken"], false);
+        assert_eq!(out[1]["ownTaken"], false);
+    }
+
+    #[test]
+    fn picked_listing_ids_cover_every_live_pick() {
+        let pg = group_pg_picks(&[
+            live_pick("11", "11@a", "x1", "a", "swap", 1, ""),
+            live_pick("12", "12@b", "x1", "b", "swap", 1, ""),
+            live_pick("13", "13@c", "c", "c", "finalize", 1, ""),
+        ]);
+        let mut ids = picked_listing_ids(&pg);
+        ids.sort();
+        assert_eq!(ids, vec!["c", "x1"]);
+        assert_eq!(pg["1"]["13@c"][0]["locationFrom"], "");
+    }
+
+    #[test]
+    fn a_default_box_another_line_emptied_keeps_its_location_and_sort_place() {
+        let before = vec![
+            stocked(N1, 1, "active", "box1·1", "2026-09-01T00:00:00.000Z"),
+            stocked(N2, 1, "active", "box2·1", "2026-09-02T00:00:00.000Z"),
+            stocked(N3, 1, "active", "box3·1", "2026-09-03T00:00:00.000Z"),
+        ];
+        let items = || {
+            vec![
+                item("11", "101", 1, 10),
+                item("12", "101", 1, 10),
+                item("13", "101", 1, 10),
+            ]
+        };
+        let fields = default_sorting_fields();
+        let by_item = |list: &Value| -> HashMap<String, Value> {
+            lines(list)
+                .into_iter()
+                .map(|line| (text(line.get("itemId"), 40), line))
+                .collect()
+        };
+        let mut unpicked = build_zero_list(&[zero_order("1", "paid", items())]);
+        split_lines(&mut unpicked, &before, &HashMap::new(), &HashMap::new());
+        sort_for_picking_with(&mut unpicked, &fields);
+        let unpicked = by_item(&unpicked);
+        // A (11, default N1) took N2's only copy: N2 is empty and its location
+        // was cleared (kept on A's pick row). B (12) defaults to N2.
+        let mut after = before.clone();
+        after[0]["quantity_available"] = json!(2);
+        after[1] = stocked(N2, 0, "sold_out", "", "2026-09-02T00:00:00.000Z");
+        let pg = group_pg_picks(&[live_pick(
+            "11",
+            &format!("11@{N1}"),
+            N2,
+            N1,
+            "swap",
+            1,
+            "box2·1",
+        )]);
+        let mut list = build_zero_list(&[zero_order("1", "paid", items())]);
+        split_lines(&mut list, &after, &HashMap::new(), &HashMap::new());
+        apply_picks_with(&mut list, &HashMap::new(), &pg);
+        annotate_claims(&mut list, Some(&after), &pg);
+        sort_for_picking_with(&mut list, &fields);
+        let picked = by_item(&list);
+        // The recovered box is a label for the line's own copy, never the line's
+        // location: `location`, the slot and the sort stay what the same rows
+        // give without the annotation (the state at the base of this change).
+        let mut plain = build_zero_list(&[zero_order("1", "paid", items())]);
+        split_lines(&mut plain, &after, &HashMap::new(), &HashMap::new());
+        sort_for_picking_with(&mut plain, &fields);
+        let plain = by_item(&plain);
+        let walk = |lines: HashMap<String, Value>| -> Vec<String> {
+            let mut seq: Vec<String> = lines
+                .values()
+                .map(|line| format!("{}|{}", line["itemId"], line["location"]))
+                .collect();
+            seq.sort();
+            seq
+        };
+        let b = &picked["12"];
+        assert_eq!(
+            (b["listingId"].clone(), b["lineKey"].clone()),
+            (json!(N2), json!(format!("12@{N2}")))
+        );
+        assert_eq!(
+            b["homeLocation"], "box2·1",
+            "B still names the box of its copy"
+        );
+        assert_eq!(b["ownTaken"], true);
+        for key in ["location", "sortLocation", "slot", "locationSource"] {
+            assert_eq!(b[key], plain["12"][key], "B keeps its un-annotated {key}");
+        }
+        assert_eq!(
+            walk(picked.clone()),
+            walk(plain.clone()),
+            "the order and the box column of the list do not move"
+        );
+        // The other defaults keep their boxes; A says where it was picked from.
+        for id in ["11", "13"] {
+            assert_eq!(picked[id]["listingId"], unpicked[id]["listingId"]);
+            assert_eq!(picked[id]["location"], unpicked[id]["location"]);
+            assert_eq!(picked[id]["sortLocation"], unpicked[id]["sortLocation"]);
+        }
+        assert_eq!(
+            picked["11"]["pickedFrom"],
+            json!([{ "listingId": N2, "location": "box2·1", "quantity": 1 }])
+        );
+        // A box with no location and no pick that cleared one stays without.
+        let mut bare = before.clone();
+        bare[2]["location"] = json!("");
+        let mut list = build_zero_list(&[zero_order("1", "paid", items())]);
+        split_lines(&mut list, &bare, &HashMap::new(), &HashMap::new());
+        apply_picks_with(&mut list, &HashMap::new(), &pg);
+        annotate_claims(&mut list, Some(&bare), &pg);
+        let bare = &by_item(&list)["13"];
+        assert_eq!(bare["location"], "");
+        assert_eq!(bare["homeLocation"], "", "a box nobody picked has no home");
+    }
+
+    #[test]
+    fn a_missing_listing_read_invents_no_box_state() {
+        // The listing read failed: the lines stay as the split built them. No
+        // copy is called taken, no box location is recovered, and the pick
+        // handler is left as the only guard.
+        let rows = three_boxes();
+        let items = || {
+            vec![
+                item("11", "101", 1, 10),
+                item("12", "101", 1, 10),
+                item("13", "101", 1, 10),
+            ]
+        };
+        let pg = group_pg_picks(&[live_pick(
+            "11",
+            &format!("11@{N1}"),
+            N2,
+            N1,
+            "swap",
+            1,
+            "box2·1",
+        )]);
+        let mut list = build_zero_list(&[zero_order("1", "paid", items())]);
+        split_lines(&mut list, &rows, &HashMap::new(), &HashMap::new());
+        apply_picks_with(&mut list, &HashMap::new(), &pg);
+        let mut before = build_zero_list(&[zero_order("1", "paid", items())]);
+        split_lines(&mut before, &rows, &HashMap::new(), &HashMap::new());
+        apply_picks_with(&mut before, &HashMap::new(), &pg);
+        annotate_claims(&mut list, None, &pg);
+        for line in lines(&list) {
+            let item_id = text(line.get("itemId"), 40);
+            assert!(
+                line.get("ownTaken").is_none(),
+                "{item_id} claims nothing about its box: {line}"
+            );
+            assert!(
+                line.get("pickedFrom").is_none(),
+                "{item_id} names no picked box: {line}"
+            );
+            assert!(
+                line.get("homeLocation").is_none(),
+                "{item_id} recovers no location: {line}"
+            );
+            for candidate in line["candidates"].as_array().unwrap() {
+                assert!(
+                    candidate.get("taken").is_none(),
+                    "{item_id} calls {candidate} neither taken nor free"
+                );
+            }
+            // The split's own fields are untouched: the boxes it offered stand.
+            let untouched = lines(&before)
+                .into_iter()
+                .find(|l| text(l.get("itemId"), 40) == item_id)
+                .unwrap();
+            for key in ["listingId", "location", "candidates", "picked", "quantity"] {
+                assert_eq!(line[key], untouched[key], "{item_id} keeps {key}");
+            }
+        }
     }
 }

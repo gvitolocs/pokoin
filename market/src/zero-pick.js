@@ -265,7 +265,8 @@ export function pickActionBody(order, line, action = 'pick', listingId = '') {
 
 /**
  * Identical copies of this line in other boxes, `[{ listingId, location,
- * quantityAvailable }]`: the server's `candidates` (smart locations off), or
+ * quantityAvailable }]`: the server's `candidates` (sent whatever the Smart
+ * locations setting; `taken` ones included), or
  * `alsoIn` entries that carry a listing id. Never the line's own listing.
  */
 export function lineCopies(line) {
@@ -286,6 +287,136 @@ export function lineCopies(line) {
     });
   }
   return out;
+}
+
+/**
+ * Every box a line can be picked from, the line's own box first, each with its
+ * location and available count: `[{ listingId, location, quantityAvailable,
+ * own, taken }]`. `taken` = every copy of that box is already picked for
+ * another line (the server refuses it). Empty when the line has one box only.
+ */
+export function lineChoices(line) {
+  const copies = lineCopies(line);
+  if (!copies.length) return [];
+  const flags = new Map((Array.isArray(line?.candidates) ? line.candidates : []).map((entry) => [String(entry?.listingId || ''), Boolean(entry?.taken)]));
+  const own = Number(line?.quantityAvailable);
+  return [
+    {
+      listingId: String(line?.listingId || ''),
+      location: String(line?.location || ''),
+      quantityAvailable: line?.quantityAvailable != null && Number.isFinite(own) ? own : null,
+      own: true,
+      taken: Boolean(line?.ownTaken),
+    },
+    ...copies.map((copy) => ({ ...copy, own: false, taken: flags.get(copy.listingId) === true })),
+  ];
+}
+
+/**
+ * "picked from <location>" when the copy came from another box than the one
+ * the line names: the stored picks (`pickedFrom`, location recovered by the
+ * server when the pick cleared it) or `local`, the click just made.
+ */
+export function pickedFromText(line, local = null) {
+  const own = String(line?.listingId || '');
+  const entries = local
+    ? local.listingId && local.listingId !== own ? [local] : []
+    : (Array.isArray(line?.pickedFrom) ? line.pickedFrom : []).filter((entry) => entry && entry.listingId !== own);
+  if (!entries.length) return '';
+  const places = [...new Set(entries.map((entry) => String(entry.location || '').trim()))];
+  return places.every(Boolean) ? `picked from ${places.join(', ')}` : 'picked from another box';
+}
+
+/** The copies an undo reverses: the stored picks' listings (then `fallback`, then the line's own). */
+export function undoListingIds(line, fallback = []) {
+  const ids = [];
+  for (const id of [...(Array.isArray(line?.picks) ? line.picks : []).map((pick) => pick?.listingId), ...fallback]) {
+    const text = String(id || '');
+    if (text && !ids.includes(text)) ids.push(text);
+  }
+  if (!ids.length && line?.listingId) ids.push(String(line.listingId));
+  return ids;
+}
+
+/**
+ * The server marked the box this pick would take from as taken: the line's own
+ * box (`ownTaken`) when `listingId` is empty or the own one, else that
+ * candidate's `taken`. Only the server's flags count; the client never works
+ * out a box's capacity itself. A line whose list carried no `candidates` array
+ * named no other box, so an other box asked for here is unknown and is not
+ * reported free.
+ */
+export function pickTaken(line, listingId = '') {
+  const own = String(line?.listingId || '');
+  const id = String(listingId || own);
+  if (id === own) return Boolean(line?.ownTaken);
+  if (!Array.isArray(line?.candidates)) return true;
+  return line.candidates.some((entry) => String(entry?.listingId || '') === id && entry?.taken === true);
+}
+
+/**
+ * The chooser's own decision table: what the "other copies" of a line offers,
+ * and what happens when one is clicked. Pure, so the enable/disable/label rules
+ * are testable without a DOM.
+ *
+ * - `choices`: the line's other boxes in the order they are shown, one entry
+ *   each `{ listingId, label, quantityAvailable, taken, isOwn }`. Read-only,
+ *   undone or a line the list gave no `candidates` array for has nothing to
+ *   choose between — the server named no other box, and offering one would offer
+ *   a box the pick handler refuses. The line's own box is never a choice: its
+ *   main button, label and undo already are it.
+ * - `label` is the copy's location, `No location` when it has none. Copies that
+ *   would read alike — two identical listings in one box — are numbered (`· copy 2`,
+ *   `· copy 3`) so no two buttons of one line say the same thing. Their finish is
+ *   never the disambiguator: the list offers only copies of the line's own finish.
+ * - `taken` is the server's flag for that box; the own box is off for
+ *   the whole line through `pickLine`.
+ * - `pickLine` is whether the line's own button is off, `ownBox` the label the
+ *   tile shows for the box this line was allocated.
+ */
+export function pickChoices(line, options = {}) {
+  const enabled = options.enabled !== false;
+  const own = String(line?.listingId || '');
+  const ownTaken = pickTaken(line);
+  // The line's own box is never a choice, but its label is what the tile shows in
+  // the chooser and the picked-from line: `homeLocation` when a pick emptied the
+  // default box, its own location otherwise.
+  const ownLabel = (line?.homeLocation || line?.location || '').trim();
+  const ownBox = { listingId: own, label: ownLabel, disabled: ownTaken, isOwn: true };
+  if (!enabled || !Array.isArray(line?.candidates) || line.candidates.length === 0) {
+    return { choices: [], disabled: true, pickLine: ownTaken, ownBox };
+  }
+  const named = lineChoices(line).filter((copy) => String(copy.listingId || '') !== own);
+  const labelText = (copy) => (copy.location || '').trim() || 'No location';
+  const times = new Map();
+  for (const copy of named) {
+    const label = labelText(copy);
+    times.set(label, (times.get(label) ?? 0) + 1);
+  }
+  const shown = new Map();
+  const choices = [];
+  for (const copy of named) {
+    const label = labelText(copy);
+    let text = label;
+    if ((times.get(label) ?? 0) > 1) {
+      const nth = (shown.get(label) ?? 0) + 1;
+      shown.set(label, nth);
+      if (nth > 1) text = `${label} · copy ${nth}`;
+    }
+    choices.push({
+      listingId: String(copy.listingId || ''),
+      label: text,
+      quantityAvailable: copy.quantityAvailable,
+      taken: Boolean(copy.taken),
+      isOwn: false,
+    });
+  }
+  return {
+    choices,
+    disabled: choices.every((entry) => entry.taken),
+    pickLine: ownTaken,
+    ownBox,
+  };
 }
 
 /** `alsoIn` as display text (strings, or `{location}` objects). */

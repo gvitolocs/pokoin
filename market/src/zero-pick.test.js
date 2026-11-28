@@ -5,7 +5,11 @@ import {
   confirmPickEntry,
   dropUnsentPicks,
   inventoryNote,
+  lineChoices,
   lineCopies,
+  pickedFromText,
+  undoListingIds,
+  pickTaken,
   lineFacets,
   lineFinishLabel,
   lineIsFoil,
@@ -15,6 +19,7 @@ import {
   locationTakeText,
   normalizeView,
   pickActionBody,
+  pickChoices,
   rarityBadge,
   readLastPack,
   writeLastPack,
@@ -359,4 +364,139 @@ test('foil lines get the rainbow mark; lineFacets still names the finish for tex
   ] };
   const finishes = zeroPickCsv(order).trim().split('\r\n').slice(1).map((row) => row.split(',')[14]);
   assert.deepEqual(finishes, ['Foil', 'Cold Foil', 'Reverse', '']);
+});
+
+test('box choices: own box first, every other box, location and available count on each', () => {
+  const line = {
+    listingId: 'L1',
+    location: 'box·1',
+    quantityAvailable: 0,
+    candidates: [
+      { listingId: 'L2', location: 'box·2', quantityAvailable: 2 },
+      { listingId: 'L3', location: 'box·3', quantityAvailable: 0, taken: true },
+    ],
+  };
+  assert.deepEqual(lineChoices(line), [
+    { listingId: 'L1', location: 'box·1', quantityAvailable: 0, own: true, taken: false },
+    { listingId: 'L2', location: 'box·2', quantityAvailable: 2, own: false, taken: false },
+    { listingId: 'L3', location: 'box·3', quantityAvailable: 0, own: false, taken: true },
+  ]);
+  // The default box can itself be taken: its Pick is off too.
+  assert.equal(lineChoices({ ...line, ownTaken: true })[0].taken, true);
+  // One box only: nothing to choose between.
+  assert.deepEqual(lineChoices({ listingId: 'L1', location: 'box·1', candidates: [] }), []);
+  // lineCopies keeps listing the other boxes only.
+  assert.deepEqual(lineCopies(line).map((copy) => copy.listingId), ['L2', 'L3']);
+});
+
+test('picked from: the box a line was taken from, from the stored pick or the click just made', () => {
+  const line = { listingId: 'L1', location: '', picks: [{ listingId: 'L2' }], pickedFrom: [{ listingId: 'L2', location: 'box·2', quantity: 1 }] };
+  assert.equal(pickedFromText(line), 'picked from box·2');
+  assert.equal(pickedFromText({ ...line, pickedFrom: [{ listingId: 'L2', location: '', quantity: 1 }] }), 'picked from another box');
+  assert.equal(pickedFromText({ listingId: 'L1', pickedFrom: [] }), '');
+  assert.equal(pickedFromText({ listingId: 'L1' }), '');
+  // The click just made, before any reload.
+  assert.equal(pickedFromText({ listingId: 'L1' }, { listingId: 'L3', location: 'box·3' }), 'picked from box·3');
+  assert.equal(pickedFromText({ listingId: 'L1' }, { listingId: 'L1', location: 'box·1' }), '');
+});
+
+test('undo reverses the copies physically picked, not the default box', () => {
+  assert.deepEqual(undoListingIds({ listingId: 'L1' }), ['L1']);
+  assert.deepEqual(undoListingIds({ listingId: 'L1', picks: [{ listingId: 'L2' }, { listingId: 'L2' }, { listingId: 'L1' }] }), ['L2', 'L1']);
+  assert.deepEqual(undoListingIds({ listingId: 'L1', picks: [] }, ['L3']), ['L3']);
+  const line = { itemId: 7, lineKey: '7@L1', listingId: 'L1', quantity: 1 };
+  const body = pickActionBody({ orderId: 9 }, line, 'undo', undoListingIds({ ...line, picks: [{ listingId: 'L2' }] })[0]);
+  assert.equal(body.listingId, 'L2');
+  assert.equal(body.allocatedListingId, 'L1');
+  assert.equal(body.action, 'undo');
+});
+
+test('pickTaken reads only the server flags of the box the pick would take from', () => {
+  const line = {
+    listingId: 'L1',
+    candidates: [
+      { listingId: 'L2', quantityAvailable: 0, taken: true },
+      { listingId: 'L3', quantityAvailable: 2 },
+    ],
+  };
+  assert.equal(pickTaken(line), false);
+  assert.equal(pickTaken(line, 'L1'), false);
+  assert.equal(pickTaken(line, 'L2'), true);
+  assert.equal(pickTaken(line, 'L3'), false);
+  // The default box taken: plain Pick, drag and keyboard all name it.
+  assert.equal(pickTaken({ ...line, ownTaken: true }), true);
+  assert.equal(pickTaken({ ...line, ownTaken: true }, 'L3'), false);
+  // No flag is no capacity guess: a box with no stock but no flag is the server's to answer.
+  assert.equal(pickTaken({ listingId: 'L1', quantityAvailable: 0 }), false);
+  assert.equal(pickTaken({ listingId: 'L1', candidates: [{ listingId: 'L2', quantityAvailable: 0 }] }, 'L2'), false);
+});
+
+test('chooser: smart locations off, read-only or no candidates list offers no box', () => {
+  const line = {
+    listingId: 'L1',
+    location: 'box·1',
+    candidates: [{ listingId: 'L2', location: 'box·2', quantityAvailable: 3 }],
+  };
+  // On: the one other copy, named by its location.
+  assert.deepEqual(pickChoices(line), {
+    choices: [{ listingId: 'L2', label: 'box·2', quantityAvailable: 3, taken: false, isOwn: false }],
+    disabled: false,
+    pickLine: false,
+    ownBox: { listingId: 'L1', label: 'box·1', disabled: false, isOwn: true },
+  });
+  // Off: no chooser at all, the line's own Pick still works.
+  assert.equal(pickChoices(line, { enabled: false }).choices.length, 0);
+  assert.equal(pickChoices(line, { enabled: false }).disabled, true);
+  assert.equal(pickChoices(line, { enabled: false }).pickLine, false);
+  // One box only: nothing to choose between.
+  assert.equal(pickChoices({ listingId: 'L1', location: 'box·1', candidates: [] }).choices.length, 0);
+  // No `candidates` array (a list that named no other copy) offers no box either.
+  assert.equal(pickChoices({ listingId: 'L1', location: 'box·1' }).choices.length, 0);
+  // An unknown box is not reported free when the list named no copies.
+  assert.equal(pickTaken({ listingId: 'L1', quantityAvailable: 0 }, 'L9'), true);
+});
+
+test('chooser: a taken box is disabled, an already picked line keeps its own box off', () => {
+  const line = {
+    listingId: 'L1',
+    location: 'box·1',
+    ownTaken: true,
+    candidates: [
+      { listingId: 'L2', location: 'box·2', taken: true },
+      { listingId: 'L3', location: 'box·3' },
+    ],
+  };
+  const state = pickChoices(line);
+  assert.deepEqual(pickChoices(line).choices.map((entry) => [entry.listingId, entry.taken]), [['L2', true], ['L3', false]]);
+  assert.equal(state.disabled, false);
+  assert.equal(state.pickLine, true);
+  assert.equal(state.ownBox.disabled, true);
+  // Every copy taken: the chooser has nothing left to offer.
+  assert.equal(pickChoices({ ...line, candidates: [{ listingId: 'L2', location: 'box·2', taken: true }] }).disabled, true);
+  // The own box is labelled by its own location; a pick that emptied it and
+  // cleared that location leaves `homeLocation`, which is what the label reads.
+  assert.equal(state.ownBox.label, 'box·1');
+  assert.equal(pickChoices({ ...line, location: '', homeLocation: 'box·1' }).ownBox.label, 'box·1');
+});
+
+test('chooser: copies that would read alike are numbered, not left identical', () => {
+  const line = {
+    listingId: 'L1',
+    location: 'box·1',
+    candidates: [
+      { listingId: 'L2', location: '' },
+      { listingId: 'L3', location: '' },
+      { listingId: 'L4', location: 'box·9' },
+      { listingId: 'L5', location: 'box·9' },
+    ],
+  };
+  assert.deepEqual(pickChoices(line).choices.map((entry) => entry.label), [
+    'No location',
+    'No location · copy 2',
+    'box·9',
+    'box·9 · copy 2',
+  ]);
+  // The line's own box is not repeated as a choice of itself.
+  assert.equal(pickChoices(line).choices.some((entry) => entry.isOwn), false);
+  assert.equal(pickChoices(line).choices.some((entry) => entry.listingId === 'L1'), false);
 });

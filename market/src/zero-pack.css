@@ -687,6 +687,8 @@ html.is-pointer-dragging .zero-card:hover { transform: none; }
 .zero-report { width: 100%; justify-content: center; }
 .zero-box-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; }
 .zero-box-choice .btn { padding: 0.25rem 0.5rem; font-size: 0.72rem; }
+.zero-box-choice .btn:disabled { opacity: 0.55; text-decoration: line-through; }
+.zero-picked-from { font-size: 0.72rem; font-weight: 600; opacity: 0.85; }
 .zero-swap-list { display: grid; gap: 0.35rem; }
 .zero-swap-list .btn { justify-content: flex-start; }
 

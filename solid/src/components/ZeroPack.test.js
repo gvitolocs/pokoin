@@ -125,8 +125,15 @@ test('Apply sort: local, save on Pokoin, PT dry run then confirmed write with ex
   assert.match(page, /saveCardTraderZeroSort\(token, \{ fields: sortFields\(\), smartLocations: on \}\)/);
 });
 
-test('smart locations off: every candidate box is a choice; choosing one is the swap pick', () => {
-  assert.match(tile, /props\.smartLocations === false && copies\(\)\.length > 0/);
+test('box choice does not depend on smart locations: interactive, not done, another box exists; choosing one is the swap pick', () => {
+  // The chooser's options come from pickChoices, enabled only for an interactive
+  // line that is not done; no smart-locations term reaches the tile.
+  const chooser = tile.match(/const chooser = [^\n]*/)?.[0] || '';
+  const choose = tile.match(/const choose = [^\n]*/)?.[0] || '';
+  assert.match(choose, /const choose = \(\) => chooser\(\)\.choices\.length > 0;/);
+  assert.match(chooser, /pickChoices\(item\(\), \{ enabled: interactive\(\) && !done\(\) \}\)/);
+  assert.doesNotMatch(choose, /smartLocations/);
+  assert.doesNotMatch(chooser, /smartLocations/);
   assert.match(tile, /props\.onPick\(item\(\), copy\.listingId\)/);
   assert.match(list, /props\.onPick\(line\(\), copy\.listingId\)/);
   assert.match(dialogs, /props\.onChoose\(copy\.listingId\)/);
@@ -194,4 +201,111 @@ test('foil is a rainbow mark, not a Foil text pill, on tiles and facet badges', 
   assert.match(css, /\.zero-foil-text \{[^}]*font-weight: 800/);
   assert.match(css, /\.zero-foil-text \{ color: #000 !important; font-size: 9pt; \}/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.zero-foil \{ animation: none; \}/);
+});
+
+test('the chooser shows in every interactive view and never gates on smart locations', () => {
+  assert.doesNotMatch(tile, /smartLocations/);
+  assert.doesNotMatch(list, /smartLocations/);
+  assert.doesNotMatch(picking, /smartLocations/);
+  // Images (both layouts) and the list ask the one chooser for the other
+  // copies; the own box the Pick button already is never repeats in the group.
+  assert.match(tile, /pickChoices\(item\(\), \{ enabled: interactive\(\) && !done\(\) \}\)/);
+  assert.match(tile, /<For each=\{chooser\(\)\.choices\}>/);
+  assert.doesNotMatch(tile, /lineChoices/);
+  assert.match(list, /pickChoices\(line\(\), \{ enabled: true \}\)\.choices/);
+  assert.match(list, /!props\.printOnly && !props\.readOnly && !done\(\) && pickChoices\(line\(\), \{ enabled: true \}\)\.choices\.length/);
+  // Single image: the same buttons, wired to the same pick-from-a-box call.
+  assert.match(picking, /pickChoices\(line\(\), \{ enabled: true \}\)\.choices/);
+  assert.match(picking, /props\.onPick\(line\(\), copy\.listingId\)/);
+  assert.match(pack, /<PickingMode\s+inline[\s\S]*?onPick=\{onPick\}/);
+});
+
+test('the suggested Pick stays one tap next to the chooser; the swap link stays too', () => {
+  assert.match(tile, /: props\.onPick\(item\(\)\)\)/);
+  assert.match(tile, /'zero-pick-main'/);
+  assert.doesNotMatch(tile, /<Show when=\{!choose\(\)\}>\s*<button\s+class=\{\['btn', 'zero-pick-main'/);
+  assert.match(tile, /Picked from another box…/);
+  assert.match(tile, /!done\(\) && choose\(\)\}/);
+  assert.match(list, /Other box…/);
+  assert.match(pack, /onChoose=\{\(listingId\) => \{ setSwapKey\(''\); onPick\(line\(\), listingId\); \}\}/);
+});
+
+test('every option shows its location and available count, own box included', () => {
+  assert.match(tile, /\{choice\.quantityAvailable\} available|\(\{[a-z().]*quantityAvailable[a-z().]*\} available\)/);
+  assert.match(tile, /item\(\)\.quantityAvailable/);
+  assert.match(list, /available\)/);
+  assert.match(picking, /available\)/);
+  assert.match(dialogs, /available/);
+});
+
+test('a taken box stays visible but disabled, and a taken default disables Pick too', () => {
+  assert.match(tile, /disabled=\{props\.busy \|\| copy\.taken\}/);
+  assert.match(tile, /· taken/);
+  assert.match(tile, /const ownTaken = \(\) => Boolean\(item\(\)\.ownTaken\);/);
+  assert.match(tile, /disabled=\{props\.busy \|\| \(ownTaken\(\) && !done\(\)\)\}/);
+  assert.match(list, /copy\.taken/);
+  assert.match(list, /ownTaken/);
+  assert.match(picking, /copy\.taken/);
+  assert.match(picking, /ownTaken/);
+  assert.match(dialogs, /disabled=\{props\.busy \|\| copy\.taken\}/);
+  assert.match(pack, /copy_already_picked: /);
+  assert.match(pack, /That box's copy was already picked for another line; choose another box/);
+});
+
+test('read-only tiles and single boxes have no chooser', () => {
+  assert.match(tile, /const interactive = \(\) => Boolean\(props\.onPick\);/);
+  // A read-only or already picked line enables nothing, and a line the list
+  // named no other box for has no options at all (pickChoices, tested in
+  // market/src/zero-pick.test.js).
+  assert.match(tile, /const chooser = \(\) => pickChoices\(item\(\), \{ enabled: interactive\(\) && !done\(\) \}\);/);
+  assert.match(tile, /const choose = \(\) => chooser\(\)\.choices\.length > 0;/);
+  assert.match(pack, /return <ZeroTile item=\{props\.item\} horizontal=\{props\.horizontal\} \/>;/);
+  assert.match(list, /readOnly/);
+});
+
+test('picked from another box is named on tiles, list rows and the single image, at once and after reload', () => {
+  assert.match(pack, /pickedFromText\(line, boxes\(\)\[lineKeyOf\(line\)\] \|\| null\)/);
+  assert.match(pack, /pickedFromOf/);
+  assert.match(tile, /props\.pickedFrom/);
+  assert.match(list, /props\.pickedFromOf/);
+  assert.match(picking, /props\.pickedFromOf/);
+});
+
+test('undo reverses the copies physically picked (stored picks), also after a reload', () => {
+  assert.match(pack, /undoListingIds\(line, /);
+  assert.match(pack, /pickActionBody\(untrack\(order\), line, 'undo', id\)/);
+});
+
+test('a taken box is refused before sending, whatever started the pick (button, drag, keyboard)', () => {
+  const run = pack.slice(pack.indexOf('async function runPick('), pack.indexOf('const onPick = '));
+  assert.match(run, /if \(action === 'pick' && pickTaken\(line, listingId\)\) \{\s*setError\(key, `Not saved: \$\{PICK_ERRORS\.copy_already_picked\}`\);\s*return;\s*\}/);
+  assert.ok(run.indexOf('pickTaken(line, listingId)') < run.indexOf('saveCardTraderZeroPick('), 'guard before the request');
+  // Drag and the single image go through setPicked -> onPick -> runPick.
+  assert.match(pack, /const setPicked = \(line, picked\) => \{\s*if \(picked > 0 && !isDone\(line\)\) onPick\(line\);/);
+  assert.match(pack, /if \(line\) setPicked\(line, action\.to === 'picked' \? lineQuantity\(line\) : 0\);/);
+});
+
+test('after a pick, an undo, a taken refusal or a partial undo the server list is read again', () => {
+  const run = pack.slice(pack.indexOf('async function runPick('), pack.indexOf('const onPick = '));
+  assert.match(run, /confirm\(data\?\.inventory[^\n]*\n(\s*\/\/[^\n]*\n)?\s*props\.onChanged\?\.\(\);/);
+  assert.match(run, /if \(err\?\.body\?\.code === 'copy_already_picked' \|\| sent > 0\) props\.onChanged\?\.\(\);/);
+  assert.match(page, /onChanged=\{refreshLines\}/);
+  const refresh = page.slice(page.indexOf('function refreshLines('), page.indexOf('createEffect(signedIn'));
+  assert.match(refresh, /if \(props\.preview\) return null;/);
+  assert.match(refresh, /fetchCardTraderZero\(token, overlay \? \{\} : \{ powerTools: false \}\)/);
+  assert.doesNotMatch(refresh, /refresh: true/);
+  assert.match(refresh, /while \(again\)/);
+});
+
+test('"picked from" is gone as soon as the line is no longer picked', () => {
+  assert.match(pack, /pickedFromOf: \(line\) => \(pickOf\(line\)\.picked > 0 \? pickedFromText\(line, boxes\(\)\[lineKeyOf\(line\)\] \|\| null\) : ''\)/);
+});
+
+test('a failed picked-boxes read is said on the page, and the server stays the guard', () => {
+  assert.match(page, /<Show when=\{data\(\)\?\.picksUnavailable === true\}>/);
+  assert.match(page, /Picked boxes could not be read, so boxes other lines took are not marked taken\. A pick from one is still refused when you save it\./);
+  // A failed listing read says so too: the taken flags and the picked-box
+  // location are then absent, never invented.
+  assert.match(page, /<Show when=\{data\(\)\?\.listingsUnavailable === true\}>/);
+  assert.match(page, /Your inventory could not be read, so no box is marked taken and a picked box shows no location\./);
 });

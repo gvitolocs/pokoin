@@ -1,5 +1,5 @@
-import { createMemo, createSignal, onSettled, Show, untrack } from 'solid-js';
-import { lineKeyOf, lineLocation, lineLocationFromPt, lineQuantity } from '@market/zero-pick.js';
+import { createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
+import { lineKeyOf, lineLocation, lineLocationFromPt, lineQuantity, pickChoices } from '@market/zero-pick.js';
 import ScanImage from '../ScanImage.jsx';
 import { FacetBadges, IssueBadge, lineImage, linePrice, lineWhere, PtPlace, TakeBits } from './zero-bits.jsx';
 
@@ -36,6 +36,7 @@ export default function PickingMode(props) {
     const current = untrack(index);
     const entry = props.lines[current];
     if (!entry || props.isBusy?.(entry)) return;
+    if (entry.ownTaken && !props.isDone(entry)) return; // that box's copy is taken: choose another box
     if (!props.isDone(entry)) props.onSetPicked(entry, lineQuantity(entry));
     setIndex(nextOpen(current));
   }
@@ -121,6 +122,21 @@ export default function PickingMode(props) {
               </div>
               <Show when={linePrice(line())}><p class="zero-card-price">{linePrice(line())}</p></Show>
               <Show when={line().powerTools?.bin}><p class="thread-meta">PT bin {line().powerTools.bin}</p></Show>
+              <Show when={props.pickedFromOf?.(line())}><p class="zero-picked-from">{props.pickedFromOf(line())}</p></Show>
+              <Show when={props.onPick && !props.isDone(line()) && pickChoices(line(), { enabled: true }).choices.length}>
+                <div class="zero-box-choice" role="group" aria-label="Pick from another box">
+                  <span class="thread-meta">Other copies:</span>
+                  <For each={pickChoices(line(), { enabled: true }).choices}>
+                    {(copy) => (
+                      <button class="btn ghost" type="button" disabled={props.isBusy?.(line()) || copy.taken} onClick={() => props.onPick(line(), copy.listingId)}>
+                        {copy.label}
+                        <Show when={copy.quantityAvailable != null}> ({copy.quantityAvailable} available)</Show>
+                        <Show when={copy.taken}> · taken</Show>
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </Show>
               <Show when={props.noteOf?.(line())}><p class="zero-inventory-note" role="status">{props.noteOf(line())}</p></Show>
               <Show when={props.errorOf?.(line())}><p class="zero-save-error" role="alert">{props.errorOf(line())}</p></Show>
             </div>
@@ -129,7 +145,7 @@ export default function PickingMode(props) {
         <div class="zero-picking-actions">
           <button class="btn ghost" type="button" onClick={() => go(-1)} disabled={index() <= 0}>Previous</button>
           <button class="btn ghost" type="button" onClick={unpick} disabled={!line() || props.isBusy?.(line()) || !pick().picked}>Unpick</button>
-          <button class="btn" type="button" onClick={pickAndNext} disabled={!line() || props.isBusy?.(line())}>
+          <button class="btn" type="button" onClick={pickAndNext} disabled={!line() || props.isBusy?.(line()) || Boolean(line().ownTaken && !props.isDone(line()))}>
             {line() && props.isBusy?.(line()) ? 'Saving…' : 'Picked, next'}
           </button>
           <button class="btn ghost" type="button" onClick={() => go(1)} disabled={index() >= props.lines.length - 1}>Next</button>

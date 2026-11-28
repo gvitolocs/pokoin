@@ -58,6 +58,7 @@ pub mod cardtrader {
     pub mod sync_core;
     pub mod webhook;
     pub mod zero;
+    pub mod zero_claims;
 }
 
 pub use error::{ApiError, ApiResult};

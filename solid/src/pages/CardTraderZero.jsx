@@ -310,6 +310,41 @@ function ZeroDesk(props) {
     return inflight;
   }
 
+  /**
+   * After a pick, an undo or a refused pick: the lines again, so every other
+   * line's boxes say what is taken now. The server reuses its cached
+   * CardTrader orders (no `refresh`); Power Tools is asked only when the
+   * overlay is already on screen, so it does not drop out. Writes made while
+   * one is in flight get one more.
+   */
+  let refreshing = null;
+  let again = false;
+  function refreshLines() {
+    if (props.preview) return null;
+    if (refreshing) {
+      again = true;
+      return refreshing;
+    }
+    refreshing = (async () => {
+      do {
+        again = false;
+        if (inflight) await inflight.catch(() => {});
+        try {
+          const token = await getBearer();
+          const overlay = data()?.powerTools?.connected === true && data()?.powerTools?.deferred !== true;
+          const next = await fetchCardTraderZero(token, overlay ? {} : { powerTools: false });
+          setData(() => next);
+          remember(next);
+        } catch {
+          // The pick itself was answered; the next load repaints.
+        }
+      } while (again);
+    })().finally(() => {
+      refreshing = null;
+    });
+    return refreshing;
+  }
+
   createEffect(signedIn, (on) => {
     if (props.preview || !on) return undefined;
     // Last pack of this seller paints at once; the fresh one replaces it.
@@ -478,7 +513,7 @@ function ZeroDesk(props) {
       const token = await getBearer();
       const saved = await saveCardTraderZeroSort(token, { fields: sortFields(), smartLocations: on });
       takeSorting(saved?.sorting);
-      await load(); // the server adds or drops each line's candidate boxes
+      await load(); // the sort preference reloads the list; the box chooser never depends on it
     } catch (err) {
       setSortNote({ tone: 'warn', text: err.message || 'Could not save Smart locations.' });
     } finally {
@@ -543,6 +578,16 @@ function ZeroDesk(props) {
       <Alert>{error()}</Alert>
       <Show when={ptError()}>
         <p class="ct-token-hint is-warn" role="status">Power Tools overlay not loaded: {ptError()}</p>
+      </Show>
+      <Show when={data()?.picksUnavailable === true}>
+        <p class="ct-token-hint is-warn zero-picks-unavailable" role="status">
+          Picked boxes could not be read, so boxes other lines took are not marked taken. A pick from one is still refused when you save it.
+        </p>
+      </Show>
+      <Show when={data()?.listingsUnavailable === true}>
+        <p class="ct-token-hint is-warn zero-picks-unavailable" role="status">
+          Your inventory could not be read, so no box is marked taken and a picked box shows no location. A pick from a box that has no copy left is still refused when you save it.
+        </p>
       </Show>
 
       <Show when={notConnected()}>
@@ -621,7 +666,7 @@ function ZeroDesk(props) {
               preview={props.preview}
               view={view()}
               sortFields={sortFields()}
-              smartLocations={smartLocations()}
+              onChanged={refreshLines}
             />
           )}
         </For>
