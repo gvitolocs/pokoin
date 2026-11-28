@@ -820,7 +820,7 @@ mod tests {
             ("graded", json!(true)),
         ] {
             let mut foil = allocated.clone();
-            foil[key] = value;
+            foil[key] = value.clone();
             assert_eq!(
                 plan_pick(&request("pick", Some(B), 1), &picked, Some(&foil), None)
                     .unwrap_err()

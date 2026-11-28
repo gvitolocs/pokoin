@@ -5102,8 +5102,8 @@ mod tests {
             assert_eq!(b[key], plain["12"][key], "B keeps its un-annotated {key}");
         }
         assert_eq!(
-            walk(by_item(&list)),
-            walk(by_item(&plain)),
+            walk(picked.clone()),
+            walk(plain.clone()),
             "the order and the box column of the list do not move"
         );
         // The other defaults keep their boxes; A says where it was picked from.
