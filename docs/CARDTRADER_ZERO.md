@@ -199,9 +199,13 @@ language ignore case and blanks; the flags read a JSON `true`.
 `LISTINGS_SQL` therefore selects `condition, language, reverse, first_edition, signed,
 graded, foil_state, variant_state` beside the columns the list already showed. Rows that
 carry none of them compare equal to each other, so a list built from a narrower read keeps
-its behaviour instead of offering nothing. Known limit: a line whose item names no listing
-and whose default is not settled keeps the whole product as its member set — the list has
-no copy to compare finish against.
+its behaviour instead of offering nothing. A line whose item names no listing of its own has
+no row to compare against, so the item states it instead: `zero_item_row` maps the CardTrader
+`condition` and `pokemon_language` properties onto the line's own `condition` / `language`, and
+a member is refused only when the row records a different value for a facet the item states —
+an unrecorded row facet stays a match. The finish facets stay outside that comparison: a
+CardTrader item names a foil `Foil` while a row stores `foil_state` (`reverse` / `holo` /
+`standard`), and nothing maps one onto the other.
 
 ### Picking order
 
