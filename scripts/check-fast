@@ -458,12 +458,17 @@ step_gitleaks() {
     mkdir -p "$scan"
     printf '%s\0' "${live[@]}" | tar --null -T - -cf - | tar -xf - -C "$scan"
     # gitleaks looks for its config inside the scanned directory, so the copy would never find the
-    # repository's allowlists and reports its test fixtures as leaks. Name the config explicitly.
+    # repository's allowlists and reports its test fixtures as leaks. Name the config explicitly, and take it
+    # from the base commit: a branch that plants a key and allowlists it in its own .gitleaks.toml must not pass.
+    # The copy goes outside $scan so the scanned files never hold a configuration.
     local -a cfg=()
-    if [ -f "$root/.gitleaks.toml" ]; then
-        cfg=(-c "$root/.gitleaks.toml")
+    if git show "$base:.gitleaks.toml" >"$tmp/gitleaks-base.toml" 2>/dev/null; then
+        cfg=(-c "$tmp/gitleaks-base.toml")
     else
-        REASON="no .gitleaks.toml here, the gitleaks default rules were used"
+        # Named explicitly too: gitleaks would otherwise find the branch's own .gitleaks.toml in the working directory.
+        printf '[extend]\nuseDefault = true\n' >"$tmp/gitleaks-base.toml"
+        cfg=(-c "$tmp/gitleaks-base.toml")
+        REASON="the base commit has no .gitleaks.toml, the gitleaks default rules were used"
     fi
     gitleaks detect --no-git --no-banner --redact "${cfg[@]}" -s "$scan"
 }
