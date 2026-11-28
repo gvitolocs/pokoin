@@ -293,7 +293,9 @@ test('inventory notes', () => {
 test('tile text: set line, location with take and availability, rarity badge', () => {
   assert.equal(lineSetText({ collectorNumber: '208', expansionCode: '4ED', expansion: 'Fourth Edition' }), '# 208 - 4ED - Fourth Edition');
   assert.equal(lineSetText({ collectorNumber: '41', expansion: 'Origins' }), '# 41 - Origins');
-  assert.equal(locationTakeText({ location: 'box·2', quantity: 2, quantityAvailable: 3 }), 'box·2: take 2 (3 available)');
+  assert.equal(locationTakeText({ location: 'box·2', quantity: 2, quantityAvailable: 3 }), 'box·2: take 2 · 3 more in this box');
+  assert.equal(locationTakeText({ location: 'box·2', quantity: 1, quantityAvailable: 0 }), 'box·2: take 1');
+  assert.equal(locationTakeText({ location: 'box·2', quantity: 1, quantityAvailable: null }), 'box·2: take 1');
   assert.equal(locationTakeText({ location: 'box·2', quantity: 1 }), 'box·2: take 1');
   assert.deepEqual(rarityBadge('Uncommon'), { short: 'U', long: 'Uncommon' });
   assert.deepEqual(rarityBadge('Special Illustration Rare'), { short: 'SIR', long: 'Special Illustration Rare' });
