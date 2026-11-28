@@ -490,8 +490,8 @@ page waited for it with nothing on screen. Now:
   query failed, since that catalog could have answered either way.
 - **Timings.** The response carries `Server-Timing` (`docs`, `ct_orders`,
   `pt_orders`, `allocations`, `games`, `picks`, `pt_articles`, `listings`, `total`,
-  plus `ct_cache`/`pt_cache` on a hit and `games_cache;<count>`, the blueprint ids
-  the games cache answered). The API logs `zero_list_timing` with the same steps
+  plus `ct_cache`/`pt_cache` on a hit and `games_cache;desc=<count>`, the blueprint
+  ids the games cache answered). The API logs `zero_list_timing` with the same steps
   (`ct_cached`, `pt_cached`, `games_cache`).
 - **Rendering.** Tiles and rows use `content-visibility: auto`. The print-only list
   is rendered only while printing. Picking mode and the dialogs load on first use,
