@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The fixture test of ct-ask-unpad against a throwaway Postgres 17: start a
+# The fixture test of ct-ask-unpad against a throwaway Postgres 19.0: start a
 # container, run `cargo test --test fixture` against it, remove the container
 # again — including when the test fails or is interrupted.
 #
@@ -17,7 +17,7 @@ set -euo pipefail
 
 crate_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 rust_dir="$(cd "$crate_dir/../.." && pwd)"
-image="${POSTGRES_IMAGE:-postgres:17-alpine}"
+image="${POSTGRES_IMAGE:-postgres:19.0-alpine}"
 
 command -v docker >/dev/null 2>&1 || {
     echo "docker is not installed: the fixture test cannot run" >&2
@@ -34,7 +34,7 @@ trap 'docker rm -f "$pg_name" >/dev/null 2>&1 || true' EXIT INT TERM
 # Let the daemon pick a free loopback port and read it back: the test must never
 # collide with a dev server of another workspace.
 docker run -d --rm --name "$pg_name" -e POSTGRES_PASSWORD=test -p "127.0.0.1::5432" \
-    --tmpfs /var/lib/postgresql/data "$image" >/dev/null
+    --tmpfs /var/lib/postgresql "$image" >/dev/null
 port=$(docker port "$pg_name" 5432/tcp | head -n 1)
 port="${port##*:}"
 if [ -z "$port" ]; then

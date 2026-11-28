@@ -6,8 +6,8 @@
 //!
 //! ```text
 //! docker run -d --rm --name pokoin-ph06-test-pg -e POSTGRES_PASSWORD=test \
-//!   -p 127.0.0.1:55493:5432 --tmpfs /var/lib/postgresql/data \
-//!   postgres:17-alpine -c log_min_error_statement=error
+//!   -p 127.0.0.1:55493:5432 --tmpfs /var/lib/postgresql \
+//!   postgres:19.0-alpine -c log_min_error_statement=error
 //! POKOIN_TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55493/postgres \
 //!   cargo test -p pokoin-catalog-api --locked --test price_history_pokoin_flow -- --nocapture
 //! ```

@@ -3,7 +3,7 @@
 //! shaped like the real `cardtrader_blueprint_daily_analytics`.
 //!
 //! It runs only when `CT_ASK_UNPAD_TEST_DATABASE_URL` names a database the test
-//! owns; `tests/container.sh` starts `postgres:17` on a loopback port, hands the
+//! owns; `tests/container.sh` starts `postgres:19.0-alpine` on a loopback port, hands the
 //! URL over and removes the container again. Every blueprint id is far above the
 //! real CardTrader ones, so a scratch database is the only place they can land.
 //!

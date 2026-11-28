@@ -156,7 +156,7 @@ jobs:
         working-directory: pokoin-rust
     services:
       postgres:
-        image: postgres:17
+        image: postgres:19.0
         env:
           POSTGRES_PASSWORD: test
         ports:
@@ -195,7 +195,7 @@ jobs:
             rustup toolchain install stable --profile minimal --no-self-update
             rustup default stable
           fi
-      - name: flow tests against Postgres 17, one database per binary
+      - name: flow tests against Postgres 19.0, one database per binary
         working-directory: .
         run: bash scripts/run-flow-tests.sh
 

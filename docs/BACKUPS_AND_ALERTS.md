@@ -102,7 +102,7 @@ host changes happen by merging these files.
 
 - `cargo test` passes 75 unit tests: alert state machine, thresholds, retention,
   COPY row counter, WAL ordering, slug coverage, age + zstd round trip.
-- `tools/pokoin-ops/tests/e2e-backup.sh` runs against a throwaway Postgres 17.11-alpine.
+- `tools/pokoin-ops/tests/e2e-backup.sh` runs against a throwaway Postgres 19.0-alpine.
   It shows that the dump refuses a primary, that the files are encrypted, that the restore
   passes with exact row counts (including quoted identifiers, newlines in values and empty
   tables), that a tampered file fails the checksum, and that no container is left behind.

@@ -13,7 +13,7 @@
 //!
 //! ```text
 //! docker run -d --rm --name pokoin-stock-csv-test-pg -e POSTGRES_PASSWORD=test \
-//!   -p 127.0.0.1:55498:5432 --tmpfs /var/lib/postgresql/data postgres:17-alpine
+//!   -p 127.0.0.1:55498:5432 --tmpfs /var/lib/postgresql postgres:19.0-alpine
 //! POKOIN_TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55498/postgres \
 //!   cargo test -p pokoin-commerce --test stock_csv_location_flow
 //! ```

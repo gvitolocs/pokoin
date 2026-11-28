@@ -288,7 +288,7 @@ scripts/deploy-web.sh                    # pokoin-web from origin/main (docs/DEP
 ```bash
 # nezopt: throwaway Postgres
 docker run -d --name pokoin-scan-test-pg --rm -e POSTGRES_PASSWORD=scantest -e POSTGRES_DB=scantest \
-  -p 127.0.0.1:55432:5432 --tmpfs /var/lib/postgresql/data postgres:17-alpine -c fsync=off
+  -p 127.0.0.1:55432:5432 --tmpfs /var/lib/postgresql postgres:19.0-alpine -c fsync=off
 export SCAN_TEST_DATABASE_URL=postgres://postgres:scantest@127.0.0.1:55432/scantest
 # CardVault
 node --test api/_scan_connect.test.js

@@ -115,12 +115,13 @@ fn fetch_and_replay(cfg: &Cfg, bin: &str, envs: &[(String, String)], work: &Path
     std::fs::write(pgdata.join("postgresql.auto.conf"), auto)?;
     std::fs::write(pgdata.join("recovery.signal"), "")?;
 
-    let data = format!("{}:/var/lib/postgresql/data/pgdata", pgdata.display());
+    // 19 rejects a mount at /var/lib/postgresql/data and moved its own PGDATA, so pin the path.
+    let data = format!("{}:/var/lib/postgresql/pgdata", pgdata.display());
     let walm = format!("{}:/wal:ro", wal.display());
     sys::output("docker", &[
         "run", "-d", "--name", &c.name, "--label", "pokoin-restore-test=1", "--network", "none",
         "--shm-size", "1g", "--memory", &env::get_or("POKOIN_RESTORE_MEMORY", "6g"),
-        "-e", "PGDATA=/var/lib/postgresql/data/pgdata", "-v", &data, "-v", &walm, &cfg.pg_image,
+        "-e", "PGDATA=/var/lib/postgresql/pgdata", "-v", &data, "-v", &walm, &cfg.pg_image,
         "-c", "max_connections=200", "-c", "fsync=off", "-c", "ssl=off",
     ])?;
 

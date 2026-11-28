@@ -71,7 +71,7 @@ impl Cfg {
             rclone_remote: env::get("POKOIN_BACKUP_RCLONE_REMOTE"),
             keep_daily: env::get_num("POKOIN_BACKUP_KEEP_DAILY", 14),
             keep_weekly: env::get_num("POKOIN_BACKUP_KEEP_WEEKLY", 8),
-            pg_image: env::get_or("POKOIN_RESTORE_IMAGE", "postgres:17.11-alpine"),
+            pg_image: env::get_or("POKOIN_RESTORE_IMAGE", "postgres:19.0-alpine"),
         })
     }
 
@@ -612,7 +612,7 @@ mod tests {
             rclone_remote: None,
             keep_daily: 14,
             keep_weekly: 8,
-            pg_image: "postgres:17.11-alpine".into(),
+            pg_image: "postgres:19.0-alpine".into(),
         }
     }
 }

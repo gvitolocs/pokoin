@@ -4,7 +4,7 @@
 #   bash tools/pokoin-ops/tests/e2e-backup.sh [path/to/pokoin-ops]
 set -euo pipefail
 bin="${1:-$HOME/pokoin-deploy/target-ops/release/pokoin-ops}"
-image="${POKOIN_RESTORE_IMAGE:-postgres:17.11-alpine}"
+image="${POKOIN_RESTORE_IMAGE:-postgres:19.0-alpine}"
 src=pokoin-ops-e2e-src
 tmp="$(mktemp -d)"
 cleanup() {

@@ -4,12 +4,13 @@
 # so Oracle :15543, Pi replica LAN, and listing writes stay on the same hop.
 # One-shot move: never rerun it to change the image. It rsyncs the stale HDD
 # PGDATA over the live NVMe copy. Image updates: docs/POSTGRES_VERSION.md.
+# Its /var/lib/postgresql/data mount below is the layout the 19 image rejects.
 set -euo pipefail
 
 SRC="${POKOIN_PG_HDD:-/home/nez/mnt/mybook/pokoin-marketplace-postgres}"
 DST="${POKOIN_PG_NVME:-/home/nez/data/pokoin-marketplace-postgres}"
 NAME="${POKOIN_MARKETPLACE_POSTGRES:-pokoin-marketplace-postgres-15t}"
-IMAGE="${POKOIN_POSTGRES_IMAGE:-postgres:17.11-alpine}"
+IMAGE="${POKOIN_POSTGRES_IMAGE:-postgres:19.0-alpine}"
 
 if [[ ! -d "$SRC/data" ]]; then
   echo "missing HDD PGDATA $SRC/data" >&2
