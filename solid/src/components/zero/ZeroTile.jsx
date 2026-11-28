@@ -164,7 +164,6 @@ export default function ZeroTile(props) {
             onClick={() => (done() ? props.onUndo(item()) : props.onPick(item()))}
           >
             {props.busy ? 'Saving…' : done() ? 'Undo' : 'Pick'}
-            <Show when={!done() && item().quantityAvailable != null}> ({item().quantityAvailable} available)</Show>
             <Show when={ownTaken() && !done()}> · taken</Show>
           </button>
           <Show when={choose()}>

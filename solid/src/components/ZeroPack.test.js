@@ -230,9 +230,9 @@ test('the suggested Pick stays one tap next to the chooser; the swap link stays 
   assert.match(pack, /onChoose=\{\(listingId\) => \{ setSwapKey\(''\); onPick\(line\(\), listingId\); \}\}/);
 });
 
-test('every option shows its location and available count, own box included', () => {
+test('another box shows its available count; the own box Pick button does not', () => {
   assert.match(tile, /\{choice\.quantityAvailable\} available|\(\{[a-z().]*quantityAvailable[a-z().]*\} available\)/);
-  assert.match(tile, /item\(\)\.quantityAvailable/);
+  assert.doesNotMatch(tile, /item\(\)\.quantityAvailable/);
   assert.match(list, /available\)/);
   assert.match(picking, /available\)/);
   assert.match(dialogs, /available/);

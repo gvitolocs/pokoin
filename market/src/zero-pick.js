@@ -440,11 +440,15 @@ export function inventoryNote(result, copies = []) {
   return '';
 }
 
-/** "<location>: take N (M available)", the available part only when known. */
+/**
+ * "<location>: take N", plus " · M more in this box" only while the own box holds
+ * more copies. Zero has already taken the sold one, so 0 is the normal count of
+ * a line's own box and saying it reads as "this box is empty".
+ */
 export function locationTakeText(line) {
   const location = lineLocation(line) || 'No location';
-  const available = Number(line?.quantityAvailable ?? line?.available);
-  const tail = Number.isFinite(available) && (line?.quantityAvailable ?? line?.available) != null ? ` (${available} available)` : '';
+  const more = Number(line?.quantityAvailable ?? line?.available);
+  const tail = Number.isFinite(more) && more > 0 ? ` · ${more} more in this box` : '';
   return `${location}: take ${lineQuantity(line)}${tail}`;
 }
 
